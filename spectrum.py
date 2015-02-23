@@ -15,7 +15,7 @@ import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 
-class Spectrum(object):
+class Base_spectrum(object):
     '''
     This class will be for loading hsg spectra.  Currently, this will only load
     data output from the EMCCD.  I think future verions should be able to 
@@ -39,12 +39,11 @@ class Spectrum(object):
         self.description = f.readline()
         self.description = self.description[1:-3]
         parameters_str = f.readline()
-        self.parameters = json.loads(self.parameters_str[1:])
+        self.parameters = json.loads(parameters_str[1:])
 
         f.close()
-
         
-        self.raw_data = np.genfromtxt(fname, comments='#', delimiter=',')
+        self.spectrum = np.genfromtxt(fname, comments='#', delimiter=',')
         
         # These will keep track of what operations have been performed
         self.shot_normalized = False
@@ -71,7 +70,7 @@ class Spectrum(object):
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
             else:
-                raise Exception('These are not from the same grating settings')
+                raise Exception('Source: Spectrum.__add__\nThese are not from the same grating settings')
         return ret
         
     def __sub__(self, other):
