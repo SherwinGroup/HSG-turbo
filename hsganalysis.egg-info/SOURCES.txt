@@ -1,0 +1,6 @@
+setup.py
+hsganalysis.egg-info/PKG-INFO
+hsganalysis.egg-info/SOURCES.txt
+hsganalysis.egg-info/dependency_links.txt
+hsganalysis.egg-info/not-zip-safe
+hsganalysis.egg-info/top_level.txt
