@@ -8,7 +8,8 @@ Created on Sun Feb 15 15:22:30 2015
 """
 
 from __future__ import division
-import os, errno
+import os
+import errno
 import copy
 import json
 import numpy as np
@@ -16,12 +17,12 @@ from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 
 class Spectrum(object):
-    '''
+    """
     This class will be for loading hsg spectra.  Currently, this will only load
-    data output from the EMCCD.  I think future verions should be able to 
+    data output from the EMCCD.  I think future versions should be able to
     combine PMT and EMCCD data, as well as stitching scans.  It will contain 
     all the methods useful for loading this kind of data.
-    '''
+    """
     
     def __init__(self, fname):
         '''
@@ -35,29 +36,38 @@ class Spectrum(object):
         self.fname = fname
         
         f = open(fname,'rU')
-            
-        self.description = f.readline()
-        self.description = self.description[1:-3]
+
         parameters_str = f.readline()
-        self.parameters = json.loads(self.parameters_str[1:])
+        self.parameters = json.loads(parameters_str[1:])
+        self.description = ''
+        read_description = True
+        while read_description:
+            line = f.readline()
+            if line[0] == '#':
+                self.description += line[1:]
+            else:
+                read_description = False
 
         f.close()
 
         
         self.raw_data = np.genfromtxt(fname, comments='#', delimiter=',')
+        self.hsg_data = None
         
         # These will keep track of what operations have been performed
-        self.shot_normalized = False
+        self.initial_processing = False
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
     
     def __add__(self, other):
-        '''
+        """
         Add together the image data from self.hsg_data, or add a constant to 
         that np.array.  
-        '''
+        """
+        if self.initial_processing == False:
+            raise Exception('Source: Spectrum.__add__: Spectrum has not been processed sufficiently')
         ret = copy.deepcopy(self)
-        
+
         # Add a constant offset to the data
         if type(other) in (int, float):
             ret.hsg_data[:,1] = self.hsg_data[:,1] + other # What shall the name be?
@@ -71,7 +81,7 @@ class Spectrum(object):
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
             else:
-                raise Exception('These are not from the same grating settings')
+                raise Exception('Source: Spectrum.__add__: These are not from the same grating settings')
         return ret
         
     def __sub__(self, other):
@@ -80,6 +90,8 @@ class Spectrum(object):
         think it even keeps track of what data sets are in the file and how 
         they got there
         '''
+        if self.initial_processing == False:
+            raise Exception('Source: Spectrum.__sub__: Spectrum has not been processed sufficiently')
         ret = copy.deepcopy(self)
         if type(other) in (int, float):
             ret.hsg_data[:,1] = self.hsg_data[:,1] - other # Need to choose a name
@@ -90,24 +102,27 @@ class Spectrum(object):
                 ret.subtrahenda.extend(other.addenda[1:])
                 ret.addenda.extend(other.subtrahenda)
             else:
-                raise Exception('These are not from the same grating settings')
+                raise Exception('Source: Spectrum.__sub__: These are not from the same grating settings')
         return ret
-    
-#    def inspect_dark_regions(self):
-#        '''
-#        The idea behind this method is to look at a region where there is no
-#        input light and measure the mean and the statistical details of the 
-#        noise there.  The mean will then be subtracted off so that there are 
-#        minimal errors 
-#        '''
-#        raise NotImplementedError
-    
-    def guess_sidebands(self, mycutoff=4):
+
+    def shot_normalize(self):
+        """
+        This method will divide everything by the number of FEL shots that contributed
+        :return:
+        """
+        self.hsg_data = np.array(self.raw_data)
+        self.hsg_data[:, 1] = self.raw_data[:, 1]/self.parameters['FEL_pulses']
+        self.initial_processing = True
+        self.parameters['shot_normalized'] = True
+
+    def guess_sidebands(self, mycutoff=2):
         '''
         This just implements the peak_detect function defined below.
         '''
         self.sb_index, sb_loc, sb_amp = peak_detect(self.hsg_data, cut_off=mycutoff)
         self.sb_guess = np.array([np.asarray(sb_loc), np.asarray(sb_amp)]).T
+        print self.sb_index
+        print len(self.sb_guess[:, 0])
     
     def fit_sidebands(self, plot=False):
         '''
@@ -125,7 +140,42 @@ class Spectrum(object):
                 plt.plot(data_temp[:, 0], gauss(data_temp[:, 0], *coeff))
         
         self.sb_fits = np.asarray(self.sb_fits)
-        
+
+    def save_processing(self, file_prefix, folder_str):
+        """
+        This will save all of the results from data processing
+        :param file_prefix:
+        :return:
+        """
+        try:
+            os.mkdir(folder_str)
+        except OSError, e:
+            if e.errno == errno.EEXIST:
+                pass
+            else:
+                raise
+
+        spectra_fname = self.fname[:4] + '_' + file_prefix + '.txt'
+        fit_fname = self.fname[:4] + '_' + file_prefix + '_fits.txt'
+        self.parameters['addenda'] = self.addenda
+        self.parameters['subtrahenda'] = self.subtrahenda
+        try:
+            parameter_str = json.dumps(self.parameters, sort_keys=True)
+        except:
+            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print self.parameters
+            return
+
+        origin_import = '\nWavelength,Signal\nnm,arb. u.'
+        my_header = '#' + parameter_str + '\n' + '#' + self.description + origin_import
+
+        np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
+                   header=my_header, comments = '', fmt='%f')
+        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_fits, delimiter=',',
+                   header=my_header, comments = '', fmt='%f')
+
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, self.fname[:4]))
+
     def stitch_spectra(self):
         '''
         I really hope this is important later!

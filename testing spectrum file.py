@@ -7,16 +7,18 @@ Created on Fri Feb 20 13:46:10 2015
 
 import numpy as np
 import matplotlib.pyplot as plt
-import spectrum as spec
+from hsganalysis import hsganalysis as hsg
 
-test1 = spec.Base_spectrum('checkingPolarization33_spectrum.txt')
-test2 = spec.Base_spectrum('checkingPolarization34_spectrum.txt')
-test3 = spec.Base_spectrum('checkingPolarization35_spectrum.txt')
-test4 = spec.Base_spectrum('checkingPolarization36_spectrum.txt')
-plt.close()
+test1 = hsg.Spectrum('FEL_power_sweep87_spectrum.txt')
 
-#plt.plot(test1.spectrum[:, 0], test1.spectrum[:, 1])
-#plt.plot(test2.spectrum[:, 0], test2.spectrum[:, 1])
-#plt.plot(test3.spectrum[:, 0], test3.spectrum[:, 1])
-plt.plot(test4.spectrum[:, 0], test4.spectrum[:, 1])
+print test1.parameters['FEL_pulses']
+test1.shot_normalize()
+test1.guess_sidebands()
+
+plt.plot(test1.hsg_data[:, 0], test1.hsg_data[:, 1])
+
+test1.fit_sidebands(plot=True)
+print "I'll try to save now"
+test1.save_processing('test', 'Processed spectra')
+print "I got past the saving method"
 plt.show()
