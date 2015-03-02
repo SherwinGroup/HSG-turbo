@@ -119,11 +119,14 @@ class Spectrum(object):
         """
         self.hsg_data = np.array(self.raw_data)
         self.hsg_data[:, 0] = 1239.84 / self.raw_data[:, 0]
-        self.hsg_data[:, 1] = self.raw_data[:, 1] / self.parameters['FEL_pulses']
+        if self.parameters['FEL_pulses'] > 0:
+            self.hsg_data[:, 1] = self.raw_data[:, 1] / self.parameters['FEL_pulses']
+        else:
+            self.parameters['FELP'] = "0"
         self.initial_processing = True
         self.parameters['shot_normalized'] = True
 
-    def guess_sidebands(self, mycutoff=2):
+    def guess_sidebands(self, mycutoff=4):
         '''
         This just implements the peak_detect function defined below.
         '''
@@ -140,14 +143,19 @@ class Spectrum(object):
         self.sb_fits = []
         
         for elem in xrange(len(self.sb_index)):
-            data_temp = self.hsg_data[self.sb_index[elem] - 30:self.sb_index[elem] + 30, :]
-            p0 = [self.sb_guess[elem, 1], self.sb_guess[elem, 0], 0.0001, 1.0, 1.0]
-            #print p0
-            print "Let's fit this shit!"
-            coeff, var_list = curve_fit(lingauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+            data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
+            #print "This is the p0:", p0
+            #print "Let's fit this shit!"
+            try:
+                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+            except:
+                coeff = np.array(p0)
+                var_list = np.array([p0, p0, p0, p0])
+                print "Had to make coeff equal to p0"
             coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
             #print coeff
-            coeff = coeff[:4]
+            #coeff = coeff[:4]
             if coeff[0] > 0.:
                 self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
                 if plot:
@@ -156,9 +164,13 @@ class Spectrum(object):
         
         sb_fits_temp = np.asarray(self.sb_fits)
         reorder = [0, 4, 1, 5, 2, 6, 3, 7]
-        self.sb_fits = sb_fits_temp[:, reorder]
+        #print "The temp fits list", sb_fits_temp
+        try:
+            self.sb_fits = sb_fits_temp[:, reorder]
+        except:
+            self.sb_fits = list(sb_fits_temp)
 
-    def save_processing(self, file_prefix, folder_str):
+    def save_processing(self, file_name, folder_str, marker, index):
         """
         This will save all of the results from data processing
         :param file_prefix:
@@ -172,8 +184,8 @@ class Spectrum(object):
             else:
                 raise
 
-        spectra_fname = self.fname[:-4] + '_' + file_prefix + '.txt'
-        fit_fname = self.fname[:-4] + '_' + file_prefix + '_fits.txt'
+        spectra_fname = file_name + str(index) + '.txt'
+        fit_fname = file_name + str(index) + '_fits.txt'
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
@@ -183,18 +195,18 @@ class Spectrum(object):
             print self.parameters
             return
 
-        origin_import_spec = '\nWavelength,Signal\nnm,arb. u.'
-        spec_header = '#' + parameter_str + '\n' + '#' + self.description + origin_import_spec
-        print "Spec header: ", spec_header
-        origin_import_fits = '\nAmplitude,error,Center energy,error,Linewidth,error,Constant offseterror,\narb. u,,eV,,eV,,arb. u.,'
-        fits_header = '#' + parameter_str + '\n' + '#' + self.description + origin_import_fits
-        print "Fits header: ", fits_header
+        origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
+        spec_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_spec
+        #print "Spec header: ", spec_header
+        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,' + marker
+        fits_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_fits
+        #print "Fits header: ", fits_header
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_fits, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
 
-        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, self.fname[:-4]))
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
     def stitch_spectra(self):
         '''
@@ -252,15 +264,15 @@ def peak_detect(data, window=20, cut_off=4):
 
 
 def gauss(x, *p):
-    A, mu, sigma, y0 = p
+    mu, A, sigma, y0 = p
     return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
 
 def lingauss(x, *p):
-    A, mu, sigma, y0, m = p
+    mu, A, sigma, y0, m = p
     return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + m*x
 
 def lorentzian(x, *p):
-    A, mu, gamma, y0 = p
+    mu, A, gamma, y0 = p
     return (A * gamma**2) / ((x - mu)**2 + gamma**2) + y0
 
 def sum_spectra(object_list):
@@ -278,9 +290,12 @@ def sum_spectra(object_list):
         except:
             break
         for spec in object_list:
+            #print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
             if temp.parameters['series'] == spec.parameters['series']:
-                temp += spec
-                object_list.remove(spec)
+                if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
+                    temp += spec
+                    #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
+                    object_list.remove(spec)
         good_list.append(temp)
     return good_list
 
