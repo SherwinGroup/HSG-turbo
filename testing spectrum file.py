@@ -4,21 +4,29 @@ Created on Fri Feb 20 13:46:10 2015
 
 @author: hbanks
 """
-
+import os
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from hsganalysis import hsganalysis as hsg
 
-test1 = hsg.Spectrum('FEL_power_sweep87_spectrum.txt')
+my_path = '/Users/dreadnought/Dropbox/OTST stuff/300 GHz low NIR THz sweep'
+file_list = glob.glob(os.path.join(my_path, '*'))
+print file_list
 
-print test1.parameters['FEL_pulses']
-test1.shot_normalize()
-test1.guess_sidebands()
+object_list = []
+for fname in file_list:
+    object_list.append(hsg.Spectrum(fname))
 
-plt.plot(test1.hsg_data[:, 0], test1.hsg_data[:, 1])
+print object_list
 
-test1.fit_sidebands(plot=True)
-print "I'll try to save now"
-test1.save_processing('test', 'Processed spectra')
-print "I got past the saving method"
+plt.close()
+spectra_list = hsg.sum_spectra(object_list)
+for spectrum in spectra_list[:2]:
+    spectrum.initial_process()
+    spectrum.guess_sidebands()
+    spectrum.fit_sidebands()
+    spectrum.save_processing('300GHz', './Processed spectra2')
+    plt.plot(spectrum.hsg_data[:, 0], spectrum.hsg_data[:, 1])
+
 plt.show()

@@ -64,34 +64,37 @@ class Spectrum(object):
         Add together the image data from self.hsg_data, or add a constant to 
         that np.array.  
         """
-        if self.initial_processing == False:
-            raise Exception('Source: Spectrum.__add__: Spectrum has not been processed sufficiently')
+        if self.initial_processing == True:
+            raise Exception('Source: Spectrum.__add__:\nToo much processing already!')
         ret = copy.deepcopy(self)
 
         # Add a constant offset to the data
         if type(other) in (int, float):
-            ret.hsg_data[:,1] = self.hsg_data[:,1] + other # What shall the name be?
+            ret.raw_data[:, 1] = self.raw_data[:, 1] + other # What shall the name be?
             ret.addenda[0] = ret.addenda[0] + other
         
         # or add the data of two hsg_spectra together
         else:
-            if np.isclose(ret.hsg_data[0,0], other.hsg_data[0,0]):
-                ret.hsg_data[:,1] = self.hsg_data[:,1] + other.hsg_data[:,1] # Again, need to choose a name
+            if np.isclose(ret.parameters['center_lambda'], other.parameters['center_lambda']):
+                ret.raw_data[:, 1] = self.raw_data[:, 1] + other.raw_data[:, 1] # Again, need to choose a name
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
+                ret.parameters['FEL_pulses'] += other.parameters['FEL_pulses']
             else:
-                raise Exception('Source: Spectrum.__add__: These are not from the same grating settings')
+                raise Exception('Source: Spectrum.__add__:\nThese are not from the same grating settings')
         return ret
         
     def __sub__(self, other):
         '''
         This subtracts constants or other data sets between self.hsg_data.  I 
         think it even keeps track of what data sets are in the file and how 
-        they got there
+        they got there.
+
+        I have no idea if this is something that will be useful?
         '''
-        if self.initial_processing == False:
-            raise Exception('Source: Spectrum.__sub__: Spectrum has not been processed sufficiently')
+        if self.initial_processing == True:
+            raise Exception('Source: Spectrum.__sub__:\nToo much processing already!')
         ret = copy.deepcopy(self)
         if type(other) in (int, float):
             ret.hsg_data[:,1] = self.hsg_data[:,1] - other # Need to choose a name
@@ -102,16 +105,21 @@ class Spectrum(object):
                 ret.subtrahenda.extend(other.addenda[1:])
                 ret.addenda.extend(other.subtrahenda)
             else:
-                raise Exception('Source: Spectrum.__sub__: These are not from the same grating settings')
+                raise Exception('Source: Spectrum.__sub__:\nThese are not from the same grating settings')
         return ret
 
-    def shot_normalize(self):
+    def __str__(self):
+        return self.description
+
+    def initial_process(self):
         """
-        This method will divide everything by the number of FEL shots that contributed
+        This method will divide everything by the number of FEL shots that contributed, as well as change wavelength
+        into energy, nm to eV
         :return:
         """
         self.hsg_data = np.array(self.raw_data)
-        self.hsg_data[:, 1] = self.raw_data[:, 1]/self.parameters['FEL_pulses']
+        self.hsg_data[:, 0] = 1239.84 / self.raw_data[:, 0]
+        self.hsg_data[:, 1] = self.raw_data[:, 1] / self.parameters['FEL_pulses']
         self.initial_processing = True
         self.parameters['shot_normalized'] = True
 
@@ -131,15 +139,24 @@ class Spectrum(object):
         '''
         self.sb_fits = []
         
-        for index in self.sb_index:
-            data_temp = self.hsg_data[index - 25:index + 25, :]
-            p0 = [data_temp[25, 1], data_temp[25, 0], 0.1, 0.0]
-            coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
-            self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
-            if plot:
-                plt.plot(data_temp[:, 0], gauss(data_temp[:, 0], *coeff))
+        for elem in xrange(len(self.sb_index)):
+            data_temp = self.hsg_data[self.sb_index[elem] - 30:self.sb_index[elem] + 30, :]
+            p0 = [self.sb_guess[elem, 1], self.sb_guess[elem, 0], 0.0001, 1.0, 1.0]
+            #print p0
+            print "Let's fit this shit!"
+            coeff, var_list = curve_fit(lingauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+            coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
+            #print coeff
+            coeff = coeff[:4]
+            if coeff[0] > 0.:
+                self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
+                if plot:
+                    x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
+                    plt.plot(x_vals, gauss(x_vals, *coeff))
         
-        self.sb_fits = np.asarray(self.sb_fits)
+        sb_fits_temp = np.asarray(self.sb_fits)
+        reorder = [0, 4, 1, 5, 2, 6, 3, 7]
+        self.sb_fits = sb_fits_temp[:, reorder]
 
     def save_processing(self, file_prefix, folder_str):
         """
@@ -155,8 +172,8 @@ class Spectrum(object):
             else:
                 raise
 
-        spectra_fname = self.fname[:4] + '_' + file_prefix + '.txt'
-        fit_fname = self.fname[:4] + '_' + file_prefix + '_fits.txt'
+        spectra_fname = self.fname[:-4] + '_' + file_prefix + '.txt'
+        fit_fname = self.fname[:-4] + '_' + file_prefix + '_fits.txt'
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
@@ -166,15 +183,18 @@ class Spectrum(object):
             print self.parameters
             return
 
-        origin_import = '\nWavelength,Signal\nnm,arb. u.'
-        my_header = '#' + parameter_str + '\n' + '#' + self.description + origin_import
-
+        origin_import_spec = '\nWavelength,Signal\nnm,arb. u.'
+        spec_header = '#' + parameter_str + '\n' + '#' + self.description + origin_import_spec
+        print "Spec header: ", spec_header
+        origin_import_fits = '\nAmplitude,error,Center energy,error,Linewidth,error,Constant offseterror,\narb. u,,eV,,eV,,arb. u.,'
+        fits_header = '#' + parameter_str + '\n' + '#' + self.description + origin_import_fits
+        print "Fits header: ", fits_header
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
-                   header=my_header, comments = '', fmt='%f')
+                   header=spec_header, comments='', fmt='%f')
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_fits, delimiter=',',
-                   header=my_header, comments = '', fmt='%f')
+                   header=fits_header, comments='', fmt='%f')
 
-        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, self.fname[:4]))
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, self.fname[:-4]))
 
     def stitch_spectra(self):
         '''
@@ -233,4 +253,36 @@ def peak_detect(data, window=20, cut_off=4):
 
 def gauss(x, *p):
     A, mu, sigma, y0 = p
-    return A*np.exp(-(x-mu)**2/(2.*sigma**2)) + y0
+    return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
+
+def lingauss(x, *p):
+    A, mu, sigma, y0, m = p
+    return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + m*x
+
+def lorentzian(x, *p):
+    A, mu, gamma, y0 = p
+    return (A * gamma**2) / ((x - mu)**2 + gamma**2) + y0
+
+def sum_spectra(object_list):
+    """
+    This function will add all the things that should be added.  Obvs.
+
+    object_list: A list of spectrum objects
+    :param object_list:
+    :return:
+    """
+    good_list = []
+    for index in xrange(len(object_list)):
+        try:
+            temp = object_list.pop(0)
+        except:
+            break
+        for spec in object_list:
+            if temp.parameters['series'] == spec.parameters['series']:
+                temp += spec
+                object_list.remove(spec)
+        good_list.append(temp)
+    return good_list
+
+
+
