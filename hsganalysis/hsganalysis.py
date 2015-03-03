@@ -289,11 +289,14 @@ def sum_spectra(object_list):
             temp = object_list.pop(0)
         except:
             break
-        for spec in object_list:
-            #print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
+#        print "temp has series: {}.\ttemp has cl: {}.\ttemp has fn: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.fname[-16:-13])
+        for spec in list(object_list):
+#            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
+#            print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
             if temp.parameters['series'] == spec.parameters['series']:
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
+#                    print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
         good_list.append(temp)
