@@ -135,33 +135,75 @@ class Spectrum(object):
         print self.sb_index
         print len(self.sb_guess[:, 0])
     
-    def fit_sidebands(self, plot=False):
+    def fit_sidebands(self, sensitivity=2.5, plot=False):
         '''
         This takes self.sb_guess and fits to each maxima to get the details of
         each sideband.
+        
+        sensitivity - the multiplier of the noise stdev required to save a peak
+        plot - if you want to plot the fits on the same plot as before
         '''
         self.sb_fits = []
         
         for elem in xrange(len(self.sb_index)):
-            data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
+            data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
             #print "This is the p0:", p0
             #print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+                coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
+                #print coeff
+                #coeff = coeff[:4]
+                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
+                print coeff[1], " vs. ", noise_stdev
+                if 1e-4 > coeff[2] > 20e-6 and coeff[1] > sensitivity * noise_stdev:
+                    self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
+                    if plot:
+                        x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
+                        plt.plot(x_vals, gauss(x_vals, *coeff))
             except:
-                coeff = np.array(p0)
-                var_list = np.array([p0, p0, p0, p0])
-                print "Had to make coeff equal to p0"
-            coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-            #print coeff
-            #coeff = coeff[:4]
-            if coeff[0] > 0.:
-                self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
-                if plot:
-                    x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
-                    plt.plot(x_vals, gauss(x_vals, *coeff))
+                print "I couldn't fit that"        
+        sb_fits_temp = np.asarray(self.sb_fits)
+        reorder = [0, 4, 1, 5, 2, 6, 3, 7]
+        #print "The temp fits list", sb_fits_temp
+        try:
+            self.sb_fits = sb_fits_temp[:, reorder]
+        except:
+            self.sb_fits = list(sb_fits_temp)
+    
+    def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
+        '''
+        This takes self.sb_guess and fits to each maxima to get the details of
+        each sideband.
         
+        sensitivity - the multiplier of the noise stdev required to save a peak
+        plot - if you want to plot the fits on the same plot as before
+        '''
+        self.sb_fits = []
+        
+        for elem in xrange(len(self.sb_index)):
+            data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
+            #print "This is the p0:", p0
+            #print "Let's fit this shit!"
+            try:
+                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+                coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
+                #print coeff
+                #coeff = coeff[:4]
+                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
+                #print coeff[1], " vs. ", noise_stdev
+                if 1e-4 > coeff[2] > 20e-6 and coeff[1] > sensitivity * noise_stdev:
+                    #print "Going to redefine stuff", coeff[0], 1239.84 / float(self.parameters["NIR_lambda"])
+                    coeff[0] = round((coeff[0] - (1239.84 / float(self.parameters["NIR_lambda"]))) / .002515, 1)
+                    print "New coeff[0] ", coeff[0]
+                    self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
+                    if plot:
+                        x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
+                        plt.plot(x_vals, gauss(x_vals, *coeff))
+            except:
+                print "I couldn't fit that"        
         sb_fits_temp = np.asarray(self.sb_fits)
         reorder = [0, 4, 1, 5, 2, 6, 3, 7]
         #print "The temp fits list", sb_fits_temp
@@ -170,6 +212,7 @@ class Spectrum(object):
         except:
             self.sb_fits = list(sb_fits_temp)
 
+    
     def save_processing(self, file_name, folder_str, marker, index):
         """
         This will save all of the results from data processing
@@ -184,8 +227,8 @@ class Spectrum(object):
             else:
                 raise
 
-        spectra_fname = file_name + str(index) + '.txt'
-        fit_fname = file_name + str(index) + '_fits.txt'
+        spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
@@ -214,7 +257,7 @@ class Spectrum(object):
         '''        
         raise NotImplementedError
 
-def peak_detect(data, window=20, cut_off=4):
+def peak_detect(data, window=30, cut_off=5.5):
     '''
     This function finds local maxima by comparing a point to the maximum and
     average of the absolute value of a neighborhood the size of 2*window.  I'm 
@@ -242,14 +285,15 @@ def peak_detect(data, window=20, cut_off=4):
     max_y = []
     index = 0
     while index < len(x_axis):
-        test_value = index + window
+        test_value = index + window # The value at test_value will be checked to see if it is the max
         
-        check_y = y_axis_temp[test_value - window:test_value + window]
+        check_y = y_axis_temp[test_value - window:test_value + window] # This is the region to test over
         check_max = check_y.max()
+
         check_ave = np.mean(abs(check_y[np.isfinite(check_y)])) # The inf's will dominate the mean
         check_value = y_axis_temp[test_value]
-        
-        if check_value == check_max and check_value > cut_off * check_ave:
+        check_value_neighborhood = sum(y_axis_temp[test_value - 2:test_value + 2]) # Since peaks are broader than one pixel
+        if check_value == check_max and check_value_neighborhood > cut_off * check_ave:
             max_index.append(index)
             max_x.append(x_axis[index])
             max_y.append(y_axis[index])
