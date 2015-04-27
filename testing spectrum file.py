@@ -26,7 +26,7 @@ for spectrum in spectra_list[:2]:
     spectrum.initial_process()
     spectrum.guess_sidebands()
     spectrum.fit_sidebands()
-    spectrum.save_processing('300GHz', './Processed spectra2')
+    #spectrum.save_processing('300GHz', './Processed spectra2')
     plt.plot(spectrum.hsg_data[:, 0], spectrum.hsg_data[:, 1])
 
 plt.show()

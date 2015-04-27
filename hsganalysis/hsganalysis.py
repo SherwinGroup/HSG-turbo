@@ -29,7 +29,8 @@ class Spectrum(object):
         This will read the appropriate file.  The header needs to be fixed to
         reflect the changes to the output header from the Andor file.  Because
         another helper file will do the cleaning and background subtraction,
-        those are no longer part of this init.
+        those are no longer part of this init.  This also turns all wavelengths
+        from nm (NIR ones) or cm-1 (THz ones) into eV.
         
         fname = file name of the hsg spectrum
         '''
@@ -50,8 +51,12 @@ class Spectrum(object):
 
         f.close()
 
+        self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["NIR_lambda"])
+        self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["FEL_lambda"])
+        self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
+        self.raw_data = np.array(self.raw_data[:1600,:])
+        self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
         
-        self.raw_data = np.genfromtxt(fname, comments='#', delimiter=',')
         self.hsg_data = None
         
         # These will keep track of what operations have been performed
@@ -113,12 +118,11 @@ class Spectrum(object):
 
     def initial_process(self):
         """
-        This method will divide everything by the number of FEL shots that contributed, as well as change wavelength
-        into energy, nm to eV
+        This method will divide everything by the number of FEL shots that contributed
         :return:
         """
         self.hsg_data = np.array(self.raw_data)
-        self.hsg_data[:, 0] = 1239.84 / self.raw_data[:, 0]
+
         if self.parameters['FEL_pulses'] > 0:
             self.hsg_data[:, 1] = self.raw_data[:, 1] / self.parameters['FEL_pulses']
         else:
@@ -126,14 +130,92 @@ class Spectrum(object):
         self.initial_processing = True
         self.parameters['shot_normalized'] = True
 
-    def guess_sidebands(self, mycutoff=4):
+    def guess_sidebands(self, window=20, cutoff=4):
         '''
-        This just implements the peak_detect function defined below.
+        This method finds all the sideband candidates in hsg_data.  It first
+        finds the lowest order sideband that could be in the data by looking at
+        the first wavelength (eV) in the x_axis and calls that sb_init.  
+        Currently the lowest order sideband that we can measure is the laser,
+        so order will be initialized to zero and the first peak that we'd measure
+        would be the laser peak. 
         '''
-        self.sb_index, sb_loc, sb_amp = peak_detect(self.hsg_data, cut_off=mycutoff)
-        self.sb_guess = np.array([np.asarray(sb_loc), np.asarray(sb_amp)]).T
-        print self.sb_index
-        print len(self.sb_guess[:, 0])
+        x_axis = np.array(self.hsg_data[:, 0])
+        y_axis = np.array(self.hsg_data[:, 1])
+        
+        pre = np.empty(window)
+        post = np.empty(window)
+        
+        pre[:] = -np.Inf
+        post[:] = -np.Inf
+        y_axis_temp = np.concatenate((pre, y_axis, post))
+        
+        NIR_freq = self.parameters["NIR_freq"]
+        THz_freq = self.parameters["THz_freq"]
+        sb_init = False
+        for order in xrange(50):
+            print "I'm checking for sb energy", NIR_freq + order * THz_freq
+            print "That's order", order
+            if x_axis[0] < (NIR_freq + order * THz_freq): #and (x_axis[0] > NIR_freq + (order - 1) * THz):
+                print "Lowest x_axis value is", x_axis[0]
+                sb_init = order
+                break
+            elif order == 49:
+                raise Exception("Source: self.guess_sidebands.\nCouldn't find sb_init.")
+        print "We think the lowest sideband order is", sb_init
+        
+        self.sb_list = []
+        self.sb_index = []
+        sb_freq_guess = []
+        sb_amp_guess = []
+        
+        last_sb = NIR_freq + THz_freq * (sb_init - 1)
+        index_guess = 0
+        consecutive_null_sb = 0
+        for order in xrange(sb_init, 50):
+            lo_freq_bound = last_sb + THz_freq * (1 - 0.15)
+            hi_freq_bound = last_sb + THz_freq * (1 + 0.15)
+            start_index = False
+            end_index = False
+            print "\nSideband", order, "\n"            
+            for i in xrange(index_guess, 1600):
+                if start_index == False and x_axis[i] > lo_freq_bound:
+                    print "start_index is", i
+                    start_index = i
+                elif end_index == False and x_axis[i] > hi_freq_bound:
+                    end_index = i
+                    print "end_index is", i
+                    index_guess = i
+                    break
+                
+            check_y = y_axis_temp[start_index + window:end_index + window]
+            print "check_y is", check_y
+            check_max = check_y.max()
+            print "check_max is", check_max
+            check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
+            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 1])
+            check_ave = np.mean(abs(check_y[np.isfinite(check_y)]))
+            print "check_ave is", check_ave
+            if check_max_area > cutoff * check_ave:
+                found_index = np.argmax(check_y) + start_index
+                self.sb_index.append(found_index)
+                last_sb = x_axis[found_index]
+                print "I just found", last_sb
+                
+                sb_freq_guess.append(x_axis[found_index])
+                sb_amp_guess.append(y_axis[found_index])
+                self.sb_list.append(order)
+                consecutive_null_sb = 0
+            else:
+                print "I could not find sideband with order", order
+                last_sb = last_sb + THz_freq
+                consecutive_null_sb += 1
+            
+            if consecutive_null_sb == 2:
+                print "I can't find any more sidebands"
+                break
+        
+        print "I found these sidebands:", self.sb_list
+        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess)]).T
     
     def fit_sidebands(self, plot=False):
         '''
@@ -214,21 +296,25 @@ class Spectrum(object):
         '''        
         raise NotImplementedError
 
-def peak_detect(data, window=20, cut_off=4):
+def peak_detect(data, jump, window=20, cut_off=4):
     '''
     This function finds local maxima by comparing a point to the maximum and
-    average of the absolute value of a neighborhood the size of 2*window.  I'm 
+    average of the absolute value of a neighborhood the size of 2*window.  The
+    function will look at the lowest wavelength and check which sideband it 
+    will find first.  Then it will find it and 
+    I'm 
     sure this will take some tweaking.  
     
-    data[0] = wavelength axis for the peaked data
-    data[1] = signal we're looking for peaks in
+    data[:, 0] = wavelength axis for the peaked data (in eV)
+    data[:, 1] = signal we're looking for peaks in
+    jump = amount the center of the window moves after it finds a peak. 
     window = half the size of the neighborhood we look in.  
     cut_off = multiplier of the average of the absolute value for peak 
               identification.  This should probably be some noise parameter 
               calculated from the data.
     '''
-    x_axis = data[:,0]
-    y_axis = data[:,1]
+    x_axis = data[:, 0]
+    y_axis = data[:, 1]
     
     pre = np.empty(window)
     post = np.empty(window)
