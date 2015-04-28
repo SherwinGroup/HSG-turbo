@@ -285,7 +285,7 @@ class Spectrum(object):
         
         # Going to label the appropriate row with the sideband
         sb_names = np.vstack(self.sb_list)
-        self.sb_results = np.hstack((sb_names, self.sb_fits))
+        self.sb_results = np.hstack((sb_names, self.sb_fits[:,:6]))
 
     def save_processing(self, file_name, folder_str, marker, index):
         """
@@ -399,9 +399,11 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
         if param_array is None:
             param_array = np.array(temp_1d)
             sb_included = list(spectrum.sb_list)
+            print "param_array initialized:", param_array
         else:
             if sb_included == spectrum.sb_list:
-                param_array = np.vstack(param_array)
+                param_array = np.vstack((param_array, temp_1d))
+                print "param_array added to the easy way:", param_array
             else:   
                 spec_list = list(spectrum.sb_list)
                 perm_list = list(sb_included)
@@ -409,13 +411,27 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
                 print "perm_list:", perm_list
                 temp_order = 0
                 while temp_order < 50:
-                    if temp_order == spec_list[0] and temp_order == perm_list[0]:
+                    print "\ntemp order is:", temp_order
+                    print "spec_list:", spec_list
+                    print "perm_list:", perm_list
+                    print param_array
+                    if spec_list == [] and perm_list == []:
+                        break
+                    elif temp_order == spec_list[0] and temp_order == perm_list[0]:
                         spec_list.pop(0)
                         perm_list.pop(0)
-                        if len(spec_list) + len(perm_list) == 0:
-                            break
-                        temp_order += 1
-                        continue
+                        #temp_order += 1
+                        #continue
+                    elif temp_order == spec_list[0] and perm_list == []:
+                        blank = np.zeros((len(param_array[:, 0]), 7))
+                        blank[:, 0] = temp_order
+                        param_array = np.hstack((param_array, blank))
+                        sb_included = sorted([temp_order] + sb_included)
+                    elif temp_order == perm_list[0] and spec_list == []:
+                        blank = np.zeros(7)
+                        blank[0] = temp_order
+                        temp_1d = np.hstack((temp_1d, blank))
+                        spec_list = [temp_order] + spec_list
                     elif temp_order == spec_list[0] and temp_order < perm_list[0]:
                         param_array_temp = np.hsplit(param_array, [np.nonzero(int(round(param_array[0, :])) == perm_list[0])[0]])
                         blank = np.zeros((len(param_array[:, 0]), 7))
@@ -423,15 +439,17 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
                         param_array = np.hstack((param_array_temp[0], blank, param_array_temp[1]))
                         perm_list = [temp_order] + perm_list
                         sb_included = sorted([temp_order] + sb_included)
-                        continue
-                    elif temp_order == spec_list[0] and temp_order == perm_list[0]:
+                        #continue
+                    elif temp_order == perm_list[0] and temp_order < spec_list[0]:
                         temp = np.hsplit(temp_1d, [np.nonzero(int(round(temp_1d)) == spec_list[0])])
                         blank = np.zeros(7)
                         blank[0] = temp_order
                         temp_1d = np.hstack((temp[0], blank, temp[1]))
                         spec_list = [temp_order] + spec_list
-                        continue
+                        #continue
                     temp_order += 1
+                param_array = np.vstack((param_array, temp_1d))
+                print "param_array added to the hard way:", param_array
     print param_array
     '''
     try:
