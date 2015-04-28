@@ -63,6 +63,7 @@ class Spectrum(object):
         self.initial_processing = False
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
+        #self.sb_results = None
     
     def __add__(self, other):
         """
@@ -247,33 +248,88 @@ class Spectrum(object):
         print "I found these sidebands:", self.sb_list
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess)]).T
     
-    def fit_sidebands(self, plot=False):
-        """
+    def fit_sidebands(self, sensitivity=1, plot=False):
+        '''
         This takes self.sb_guess and fits to each maxima to get the details of
         each sideband.
-        """
+        
+        sensitivity - the multiplier of the noise stdev required to save a peak
+        plot - if you want to plot the fits on the same plot as before
+        '''
+
         self.sb_fits = []
         
         for elem in xrange(len(self.sb_index)):
-            data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
+            data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
             #print "This is the p0:", p0
             #print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
-            except:
-                coeff = np.array(p0)
-                var_list = np.array([p0, p0, p0, p0])
-                print "Had to make coeff equal to p0"
-            coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-            #print coeff
-            #coeff = coeff[:4]
-            if coeff[0] > 0.:
+                coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
+                #print coeff
+                #coeff = coeff[:4]
+                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
+                print coeff[1], " vs. ", noise_stdev
+                
+                #if coeff[1] is not None: 
+                #if 1e-4 > coeff[2] > 20e-6 and coeff[1] > sensitivity * noise_stdev:
+                print "trying to append"
                 self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
+                
+            except:
+                print "I couldn't fit that"        
+        sb_fits_temp = np.asarray(self.sb_fits)
+        reorder = [0, 4, 1, 5, 2, 6, 3, 7]
+        #print "The temp fits list", sb_fits_temp
+        try:
+            self.sb_fits = sb_fits_temp[:, reorder]
+        except:
+            self.sb_fits = list(sb_fits_temp)
+            print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
         
+        # Going to label the appropriate row with the sideband
+        sb_names = np.vstack(self.sb_list)
+        print "sb_names:", sb_names
+        print "self.sb_fits:", self.sb_fits[:,:6]
+        self.sb_results = np.hstack((sb_names, self.sb_fits[:,:6]))
+        print "sb_results:", self.sb_results
+    
+    def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
+        '''
+        This takes self.sb_guess and fits to each maxima to get the details of
+        each sideband.
+        
+        sensitivity - the multiplier of the noise stdev required to save a peak
+        plot - if you want to plot the fits on the same plot as before
+        '''
+        self.sb_fits = []
+        
+        for elem in xrange(len(self.sb_index)):
+            data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
+            #print "This is the p0:", p0
+            #print "Let's fit this shit!"
+            try:
+                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+                coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
+                #print coeff
+                #coeff = coeff[:4]
+                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
+                #print coeff[1], " vs. ", noise_stdev
+                if 1e-4 > coeff[2] > 20e-6 and coeff[1] > sensitivity * noise_stdev:
+                    #print "Going to redefine stuff", coeff[0], 1239.84 / float(self.parameters["NIR_lambda"])
+                    coeff[0] = round((coeff[0] - (1239.84 / float(self.parameters["NIR_lambda"]))) / .002515, 1)
+                    print "New coeff[0] ", coeff[0]
+                    self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
+                    if plot:
+                        x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
+                        plt.plot(x_vals, gauss(x_vals, *coeff))
+            except:
+                print "I couldn't fit that"        
         sb_fits_temp = np.asarray(self.sb_fits)
         reorder = [0, 4, 1, 5, 2, 6, 3, 7]
         #print "The temp fits list", sb_fits_temp
@@ -287,6 +343,7 @@ class Spectrum(object):
         sb_names = np.vstack(self.sb_list)
         self.sb_results = np.hstack((sb_names, self.sb_fits[:,:6]))
 
+    
     def save_processing(self, file_name, folder_str, marker, index):
         """
         This will save all of the results from data processing
@@ -300,10 +357,14 @@ class Spectrum(object):
                 pass
             else:
                 raise
-
+		
         spectra_fname = file_name + str(index) + '.txt'
         self.save_name = spectra_fname
         fit_fname = file_name + str(index) + '_fits.txt'
+		
+        #spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        #fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
+
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
@@ -331,6 +392,7 @@ class Spectrum(object):
         I really hope this is important later!
         """        
         raise NotImplementedError
+
 
 ####################
 # Useful functions 
@@ -393,19 +455,23 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     #included_spectra = dict()
     param_array = None
     sb_included = None    
-    for spectrum in spectrum_list:
-        temp_1d = np.hstack((spectrum.parameters[param_name], spectrum.sb_results.ravel()))
+    for spec in spectrum_list:
+        print "The name is", spec
+        print "the sb_results are", spec.sb_results
+        '''
+        holder = spec.sb_results
+        temp_1d = np.hstack((spec.parameters[param_name], holder.ravel()))
         #included_spectra[spectrum.save_name] = spectrum.parameters[param_name]
         if param_array is None:
             param_array = np.array(temp_1d)
-            sb_included = list(spectrum.sb_list)
+            sb_included = list(spec.sb_list)
             print "param_array initialized:", param_array
         else:
-            if sb_included == spectrum.sb_list:
+            if sb_included == spec.sb_list:
                 param_array = np.vstack((param_array, temp_1d))
                 print "param_array added to the easy way:", param_array
             else:   
-                spec_list = list(spectrum.sb_list)
+                spec_list = list(spec.sb_list)
                 perm_list = list(sb_included)
                 print "spec_list:", spec_list
                 print "perm_list:", perm_list
@@ -451,6 +517,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
                 param_array = np.vstack((param_array, temp_1d))
                 print "param_array added to the hard way:", param_array
     print param_array
+    '''
     '''
     try:
         os.mkdir(folder_str)
