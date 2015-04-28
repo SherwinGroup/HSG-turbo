@@ -25,7 +25,7 @@ class Spectrum(object):
     """
     
     def __init__(self, fname):
-        '''
+        """
         This will read the appropriate file.  The header needs to be fixed to
         reflect the changes to the output header from the Andor file.  Because
         another helper file will do the cleaning and background subtraction,
@@ -33,7 +33,7 @@ class Spectrum(object):
         from nm (NIR ones) or cm-1 (THz ones) into eV.
         
         fname = file name of the hsg spectrum
-        '''
+        """
         self.fname = fname
         
         f = open(fname,'rU')
@@ -91,13 +91,13 @@ class Spectrum(object):
         return ret
         
     def __sub__(self, other):
-        '''
+        """
         This subtracts constants or other data sets between self.hsg_data.  I 
         think it even keeps track of what data sets are in the file and how 
         they got there.
 
         I have no idea if this is something that will be useful?
-        '''
+        """
         if self.initial_processing == True:
             raise Exception('Source: Spectrum.__sub__:\nToo much processing already!')
         ret = copy.deepcopy(self)
@@ -130,17 +130,47 @@ class Spectrum(object):
         self.initial_processing = True
         self.parameters['shot_normalized'] = True
 
-    def guess_sidebands(self, window=20, cutoff=4):
-        '''
+    def guess_sidebands(self, cutoff=4):
+        """
         This method finds all the sideband candidates in hsg_data.  It first
         finds the lowest order sideband that could be in the data by looking at
-        the first wavelength (eV) in the x_axis and calls that sb_init.  
-        Currently the lowest order sideband that we can measure is the laser,
+        the first wavelength (eV) in the x_axis and calls that sb_init. 
+        
+        NB: Currently the lowest order sideband that we can measure is the laser,
         so order will be initialized to zero and the first peak that we'd measure
         would be the laser peak. 
-        '''
+        
+        Next, the algorithm will look for that lowest sideband in a 30% window
+        around where the NIR frequency should be.  It will take the maximum of
+        that window and add it with the two neighboring points.  If this is 
+        larger than the cutoff, then it will save that sideband order, the index
+        of the point, the frequency and the amplitude.  It will look for odd
+        sidebands as well as even ones, and if it cannot find two sidebands in 
+        a row (usually the second missed sideband will be an even one), then it
+        will stop looking.
+        
+        inputs:
+        cutoff: the size of check_max_area must be relative to check_ave to be
+                called a sideband.
+        
+        important local variables:
+        x_axis: a np.array consisting of the frequency axis of self.hsg_data.
+        y_axis: a np.array consisting of the signal axis of self.hsg_data.
+        sb_init: the smallest-order sideband that the frequency axis could see.
+        check_max_index: index of maximum value in the 30% region
+        check_max: amplitude of the sideband candidate, important for fitting
+        check_max_area: approximate integral of the sideband candidate
+        
+        attribute outputs:
+        self.sb_list: list of sideband orders detected by this method
+        self.sb_index: list of the index of the sideband
+        self.sb_guess: 2D array that contains the frequency and amplitude of
+                       the found sidebands.
+        """
         x_axis = np.array(self.hsg_data[:, 0])
         y_axis = np.array(self.hsg_data[:, 1])
+        
+        window = 20
         
         pre = np.empty(window)
         post = np.empty(window)
@@ -218,10 +248,10 @@ class Spectrum(object):
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess)]).T
     
     def fit_sidebands(self, plot=False):
-        '''
+        """
         This takes self.sb_guess and fits to each maxima to get the details of
         each sideband.
-        '''
+        """
         self.sb_fits = []
         
         for elem in xrange(len(self.sb_index)):
@@ -251,6 +281,11 @@ class Spectrum(object):
             self.sb_fits = sb_fits_temp[:, reorder]
         except:
             self.sb_fits = list(sb_fits_temp)
+            print "\n!!!!!!!!!\nSome shit went wrong here!!!\n!!!!!!!!\n"
+        
+        # Going to label the appropriate row with the sideband
+        sb_names = np.vstack(self.sb_list)
+        self.sb_results = np.hstack((sb_names, self.sb_fits))
 
     def save_processing(self, file_name, folder_str, marker, index):
         """
@@ -267,6 +302,7 @@ class Spectrum(object):
                 raise
 
         spectra_fname = file_name + str(index) + '.txt'
+        self.save_name = spectra_fname
         fit_fname = file_name + str(index) + '_fits.txt'
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
@@ -291,63 +327,14 @@ class Spectrum(object):
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
     def stitch_spectra(self):
-        '''
+        """
         I really hope this is important later!
-        '''        
+        """        
         raise NotImplementedError
 
-def peak_detect(data, jump, window=20, cut_off=4):
-    '''
-    This function finds local maxima by comparing a point to the maximum and
-    average of the absolute value of a neighborhood the size of 2*window.  The
-    function will look at the lowest wavelength and check which sideband it 
-    will find first.  Then it will find it and 
-    I'm 
-    sure this will take some tweaking.  
-    
-    data[:, 0] = wavelength axis for the peaked data (in eV)
-    data[:, 1] = signal we're looking for peaks in
-    jump = amount the center of the window moves after it finds a peak. 
-    window = half the size of the neighborhood we look in.  
-    cut_off = multiplier of the average of the absolute value for peak 
-              identification.  This should probably be some noise parameter 
-              calculated from the data.
-    '''
-    x_axis = data[:, 0]
-    y_axis = data[:, 1]
-    
-    pre = np.empty(window)
-    post = np.empty(window)
-    
-    pre[:] = -np.Inf
-    post[:] = -np.Inf
-    y_axis_temp = np.concatenate((pre, y_axis, post))
-    
-    max_index = []
-    max_x = []
-    max_y = []
-    index = 0
-    while index < len(x_axis):
-        test_value = index + window
-        
-        check_y = y_axis_temp[test_value - window:test_value + window]
-        check_max = check_y.max()
-        check_ave = np.mean(abs(check_y[np.isfinite(check_y)])) # The inf's will dominate the mean
-        check_value = y_axis_temp[test_value]
-        
-        if check_value == check_max and check_value > cut_off * check_ave:
-            max_index.append(index)
-            max_x.append(x_axis[index])
-            max_y.append(y_axis[index])
-            if check_value > 2 * cut_off * check_ave:
-                index += window
-            else:
-                index += 1
-        else:
-            index += 1
-        
-    return max_index, max_x, max_y
-
+####################
+# Useful functions 
+####################
 
 def gauss(x, *p):
     mu, A, sigma, y0 = p
@@ -388,5 +375,91 @@ def sum_spectra(object_list):
         good_list.append(temp)
     return good_list
 
+def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit):
+    """
+    This function will take a fully processed list of spectrum objects and 
+    slice Spectrum.sb_fits appropriately to get an output like:
+    
+    "Parameter" | SB1 freq | err | SB1 amp | error | SB1 linewidth | error | SB2...| SBn...|
+    param1      |    .     |
+    param2      |    .     |
+      .
+      .
+      .
+    
+    Currently I'm thinking fuck the offset y0
+    After constructing this large matrix, it will save it somewhere.
+    """
+    #included_spectra = dict()
+    param_array = None
+    sb_included = None    
+    for spectrum in spectrum_list:
+        temp_1d = np.hstack((spectrum.parameters[param_name], spectrum.sb_results.ravel()))
+        #included_spectra[spectrum.save_name] = spectrum.parameters[param_name]
+        if param_array is None:
+            param_array = np.array(temp_1d)
+            sb_included = list(spectrum.sb_list)
+        else:
+            if sb_included == spectrum.sb_list:
+                param_array = np.vstack(param_array)
+            else:   
+                spec_list = list(spectrum.sb_list)
+                perm_list = list(sb_included)
+                print "spec_list:", spec_list
+                print "perm_list:", perm_list
+                temp_order = 0
+                while temp_order < 50:
+                    if temp_order == spec_list[0] and temp_order == perm_list[0]:
+                        spec_list.pop(0)
+                        perm_list.pop(0)
+                        if len(spec_list) + len(perm_list) == 0:
+                            break
+                        temp_order += 1
+                        continue
+                    elif temp_order == spec_list[0] and temp_order < perm_list[0]:
+                        param_array_temp = np.hsplit(param_array, [np.nonzero(int(round(param_array[0, :])) == perm_list[0])[0]])
+                        blank = np.zeros((len(param_array[:, 0]), 7))
+                        blank[:, 0] = temp_order
+                        param_array = np.hstack((param_array_temp[0], blank, param_array_temp[1]))
+                        perm_list = [temp_order] + perm_list
+                        sb_included = sorted([temp_order] + sb_included)
+                        continue
+                    elif temp_order == spec_list[0] and temp_order == perm_list[0]:
+                        temp = np.hsplit(temp_1d, [np.nonzero(int(round(temp_1d)) == spec_list[0])])
+                        blank = np.zeros(7)
+                        blank[0] = temp_order
+                        temp_1d = np.hstack((temp[0], blank, temp[1]))
+                        spec_list = [temp_order] + spec_list
+                        continue
+                    temp_order += 1
+    print param_array
+    '''
+    try:
+        os.mkdir(folder_str)
+    except OSError, e:
+        if e.errno == errno.EEXIST:
+            pass
+        else:
+            raise
 
+    file_name = file_name + '.txt'
+    
+    try:
+        included_spectra_str = json.dumps(included_spectra, sort_keys=True)
+    except:
+        print "Source: save_parameter_sweep\nJSON FAILED"
+        return
+    origin_import1 = param_name
+    origin_import2 = unit
+    for order in sb_included:
+        origin_import1 += ",Sideband,Frequency,error,Amplitude,error,Linewidth,error"
+        origin_import2 += ",order,eV,,arb. u.,,eV,"
+    origin_total = origin_import1 + "\n" + origin_import2 + "\n"
+    header = '#' + included_spectra_str + '\n' + origin_total
+    #print "Spec header: ", spec_header
 
+    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+               header=header, comments='', fmt='%f')
+
+    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
+    '''
