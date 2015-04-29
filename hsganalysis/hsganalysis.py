@@ -58,7 +58,7 @@ class Spectrum(object):
         self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
         
         self.hsg_data = None
-        
+
         # These will keep track of what operations have been performed
         self.initial_processing = False
         self.addenda = self.parameters['addenda']
@@ -128,10 +128,11 @@ class Spectrum(object):
             self.hsg_data[:, 1] = self.raw_data[:, 1] / self.parameters['FEL_pulses']
         else:
             self.parameters['FELP'] = "0"
+        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
         self.initial_processing = True
         self.parameters['shot_normalized'] = True
 
-    def guess_sidebands(self, cutoff=4):
+    def guess_sidebands(self, cutoff=4.5):
         """
         This method finds all the sideband candidates in hsg_data.  It first
         finds the lowest order sideband that could be in the data by looking at
@@ -152,7 +153,9 @@ class Spectrum(object):
         
         inputs:
         cutoff: the size of check_max_area must be relative to check_ave to be
-                called a sideband.
+                called a sideband.  3 is too insensitive, 4 might be too much.  
+                3.5 might be slightly to insensitive.  I've seen definite 
+                sidebands at 3.7 and definitely bad sidebands at 3.9.
         
         important local variables:
         x_axis: a np.array consisting of the frequency axis of self.hsg_data.
@@ -203,8 +206,8 @@ class Spectrum(object):
         index_guess = 0
         consecutive_null_sb = 0
         for order in xrange(sb_init, 50):
-            lo_freq_bound = last_sb + THz_freq * (1 - 0.15)
-            hi_freq_bound = last_sb + THz_freq * (1 + 0.15)
+            lo_freq_bound = last_sb + THz_freq * (1 - 0.2) # Not sure what to do about these
+            hi_freq_bound = last_sb + THz_freq * (1 + 0.2)
             start_index = False
             end_index = False
             print "\nSideband", order, "\n"            
@@ -220,13 +223,18 @@ class Spectrum(object):
                 
             check_y = y_axis_temp[start_index + window:end_index + window]
             print "check_y is", check_y
-            check_max = check_y.max()
-            print "check_max is", check_max
+            #check_max = check_y.max()
+            #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
-            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 1])
-            check_ave = np.mean(abs(check_y[np.isfinite(check_y)]))
+            print "points in check_max_area:", check_y[check_max_index - 1:check_max_index + 2]
+            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
+            check_ave = np.mean(check_y[np.isfinite(check_y)])
+            check_stdev = np.std(check_y[np.isfinite(check_y)])
+            print "\ncheck_max_area is", check_max_area
             print "check_ave is", check_ave
-            if check_max_area > cutoff * check_ave:
+            print "check_stdev is", check_stdev
+            print "check_ratio is", (check_max_area - 3 * check_ave) / check_stdev
+            if (check_max_area - 3 * check_ave) > cutoff * check_stdev:
                 found_index = np.argmax(check_y) + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
@@ -258,13 +266,15 @@ class Spectrum(object):
         '''
 
         self.sb_fits = []
-        
+        sb_counter_index = -1 # Fortranic?
         for elem in xrange(len(self.sb_index)):
+            sb_counter_index += 1
             data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
             #print "This is the p0:", p0
             #print "Let's fit this shit!"
             try:
+                
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print coeff
@@ -273,18 +283,20 @@ class Spectrum(object):
                 print coeff[1], " vs. ", noise_stdev
                 
                 #if coeff[1] is not None: 
-                #if 1e-4 > coeff[2] > 20e-6 and coeff[1] > sensitivity * noise_stdev:
-                print "trying to append"
-                self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
+                if 1e-4 > coeff[2] > 20e-6:
+                    print "trying to append"
+                    self.sb_fits.append(np.hstack((self.sb_list[sb_counter_index],coeff, np.sqrt(np.diag(var_list)))))
+                
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
                 
             except:
-                print "I couldn't fit that"        
+                print "I couldn't fit that"
+                self.sb_list[sb_counter_index] = None
         sb_fits_temp = np.asarray(self.sb_fits)
-        reorder = [0, 4, 1, 5, 2, 6, 3, 7]
-        #print "The temp fits list", sb_fits_temp
+        reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
+        #print "The temp fits list", sb_fits_temp[0, 0+1, 4+1, 1+1, 5+1, 2+1, 6+1, 3+1, 7+1]
         try:
             self.sb_fits = sb_fits_temp[:, reorder]
         except:
@@ -292,10 +304,11 @@ class Spectrum(object):
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
         
         # Going to label the appropriate row with the sideband
+        self.sb_list = list([x for x in self.sb_list if x is not None])
         sb_names = np.vstack(self.sb_list)
         print "sb_names:", sb_names
-        print "self.sb_fits:", self.sb_fits[:,:6]
-        self.sb_results = np.hstack((sb_names, self.sb_fits[:,:6]))
+        print "self.sb_fits:", self.sb_fits[:,:7]
+        self.sb_results = np.array(self.sb_fits[:,:7])
         print "sb_results:", self.sb_results
     
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
@@ -452,73 +465,52 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     Currently I'm thinking fuck the offset y0
     After constructing this large matrix, it will save it somewhere.
     """
-    #included_spectra = dict()
+    included_spectra = dict()
     param_array = None
-    sb_included = None    
+    sb_included = []
+    
     for spec in spectrum_list:
-        print "The name is", spec
-        print "the sb_results are", spec.sb_results
-        '''
-        holder = spec.sb_results
-        temp_1d = np.hstack((spec.parameters[param_name], holder.ravel()))
-        #included_spectra[spectrum.save_name] = spectrum.parameters[param_name]
-        if param_array is None:
+        sb_included = sorted(list(set(sb_included + spec.sb_list)))
+        included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
+    print "full name:", spectrum_list[0].fname
+    print "included names:", included_spectra
+    print "sb_included:", sb_included
+    
+    temp_dict = {}
+    for spec in spectrum_list:
+        #temp_1d = spec.sb_results.ravel()
+        print "the sb_results:", spec.sb_results
+        for index in xrange(len(spec.sb_results[:, 0])):
+            print "my array slice:", spec.sb_results[index, :]
+            temp_dict[spec.sb_results[index, 0]] = np.array(spec.sb_results[index, :])
+        print temp_dict
+        for sb in sb_included:
+            blank = np.zeros(7)
+            blank[0] = float(sb)
+            print "checking sideband order:", sb
+            print "temp_1d:", temp_1d
+            print "blank", blank
+            if sb in spec.sb_list:
+                continue
+            elif sb > spec.sb_list[-1]:
+                print "\nNeed to append sideband order:", sb
+                temp_1d = np.hstack((temp_1d, blank))
+            else:
+                print "\nNeed to add sideband order:", sb
+                test = list([temp_1d[x] for x in xrange(len(temp_1d)) if x % 7 == 0])
+                print "test is", test
+                print "nonzero is", np.nonzero(temp_1d == test[0])[0]
+                split_array = np.hsplit(spec.sb_results, [7,8])#np.nonzero(temp_1d == test[0])[0])
+                print "Split array is:", split_array
+                temp_1d = np.hstack((split_array[0], blank, split_array[1:]))
+        temp_1d = np.hstack((spec.parameters[param_name], temp_1d))
+        try:
+            param_array = np.vstack((param_array, temp_1d))
+        except:
             param_array = np.array(temp_1d)
-            sb_included = list(spec.sb_list)
-            print "param_array initialized:", param_array
-        else:
-            if sb_included == spec.sb_list:
-                param_array = np.vstack((param_array, temp_1d))
-                print "param_array added to the easy way:", param_array
-            else:   
-                spec_list = list(spec.sb_list)
-                perm_list = list(sb_included)
-                print "spec_list:", spec_list
-                print "perm_list:", perm_list
-                temp_order = 0
-                while temp_order < 50:
-                    print "\ntemp order is:", temp_order
-                    print "spec_list:", spec_list
-                    print "perm_list:", perm_list
-                    print param_array
-                    if spec_list == [] and perm_list == []:
-                        break
-                    elif temp_order == spec_list[0] and temp_order == perm_list[0]:
-                        spec_list.pop(0)
-                        perm_list.pop(0)
-                        #temp_order += 1
-                        #continue
-                    elif temp_order == spec_list[0] and perm_list == []:
-                        blank = np.zeros((len(param_array[:, 0]), 7))
-                        blank[:, 0] = temp_order
-                        param_array = np.hstack((param_array, blank))
-                        sb_included = sorted([temp_order] + sb_included)
-                    elif temp_order == perm_list[0] and spec_list == []:
-                        blank = np.zeros(7)
-                        blank[0] = temp_order
-                        temp_1d = np.hstack((temp_1d, blank))
-                        spec_list = [temp_order] + spec_list
-                    elif temp_order == spec_list[0] and temp_order < perm_list[0]:
-                        param_array_temp = np.hsplit(param_array, [np.nonzero(int(round(param_array[0, :])) == perm_list[0])[0]])
-                        blank = np.zeros((len(param_array[:, 0]), 7))
-                        blank[:, 0] = temp_order
-                        param_array = np.hstack((param_array_temp[0], blank, param_array_temp[1]))
-                        perm_list = [temp_order] + perm_list
-                        sb_included = sorted([temp_order] + sb_included)
-                        #continue
-                    elif temp_order == perm_list[0] and temp_order < spec_list[0]:
-                        temp = np.hsplit(temp_1d, [np.nonzero(int(round(temp_1d)) == spec_list[0])])
-                        blank = np.zeros(7)
-                        blank[0] = temp_order
-                        temp_1d = np.hstack((temp[0], blank, temp[1]))
-                        spec_list = [temp_order] + spec_list
-                        #continue
-                    temp_order += 1
-                param_array = np.vstack((param_array, temp_1d))
-                print "param_array added to the hard way:", param_array
-    print param_array
-    '''
-    '''
+        print "The shape of the param_array is:", param_array.shape
+        #print "The param_array itself is:", param_array
+        
     try:
         os.mkdir(folder_str)
     except OSError, e:
@@ -547,4 +539,4 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
                header=header, comments='', fmt='%f')
 
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
-    '''
+    
