@@ -390,7 +390,7 @@ class Spectrum(object):
         origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
         spec_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_spec
         #print "Spec header: ", spec_header
-        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,' + marker
+        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
         fits_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_fits
         #print "Fits header: ", fits_header
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
@@ -472,45 +472,41 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     for spec in spectrum_list:
         sb_included = sorted(list(set(sb_included + spec.sb_list)))
         included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
+        # If these are from summed spectra, then only the the first file name
+        # from that sum will show up here, which should be fine?
     print "full name:", spectrum_list[0].fname
     print "included names:", included_spectra
     print "sb_included:", sb_included
     
-    temp_dict = {}
+    
     for spec in spectrum_list:
-        #temp_1d = spec.sb_results.ravel()
+        temp_dict = {}
         print "the sb_results:", spec.sb_results
         for index in xrange(len(spec.sb_results[:, 0])):
             print "my array slice:", spec.sb_results[index, :]
-            temp_dict[spec.sb_results[index, 0]] = np.array(spec.sb_results[index, :])
+            temp_dict[int(round(spec.sb_results[index, 0]))] = np.array(spec.sb_results[index, :])
         print temp_dict
+        
         for sb in sb_included:
             blank = np.zeros(7)
             blank[0] = float(sb)
             print "checking sideband order:", sb
-            print "temp_1d:", temp_1d
             print "blank", blank
-            if sb in spec.sb_list:
-                continue
-            elif sb > spec.sb_list[-1]:
-                print "\nNeed to append sideband order:", sb
-                temp_1d = np.hstack((temp_1d, blank))
-            else:
+            if not temp_dict.has_key(sb):
                 print "\nNeed to add sideband order:", sb
-                test = list([temp_1d[x] for x in xrange(len(temp_1d)) if x % 7 == 0])
-                print "test is", test
-                print "nonzero is", np.nonzero(temp_1d == test[0])[0]
-                split_array = np.hsplit(spec.sb_results, [7,8])#np.nonzero(temp_1d == test[0])[0])
-                print "Split array is:", split_array
-                temp_1d = np.hstack((split_array[0], blank, split_array[1:]))
-        temp_1d = np.hstack((spec.parameters[param_name], temp_1d))
+                temp_dict[sb] = blank
+        spec_data = np.array([spec.parameters[param_name], spec.dark_stdev])
+        for key in sorted(temp_dict.keys()):
+            print "I am going to hstack this:", temp_dict[key]
+            spec_data = np.hstack((spec_data, temp_dict[key]))
+            
         try:
-            param_array = np.vstack((param_array, temp_1d))
+            param_array = np.vstack((param_array, spec_data))
         except:
-            param_array = np.array(temp_1d)
+            param_array = np.array(spec_data)
         print "The shape of the param_array is:", param_array.shape
         #print "The param_array itself is:", param_array
-        
+    
     try:
         os.mkdir(folder_str)
     except OSError, e:
@@ -526,12 +522,12 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     except:
         print "Source: save_parameter_sweep\nJSON FAILED"
         return
-    origin_import1 = param_name
-    origin_import2 = unit
+    origin_import1 = param_name + ",dark_stdev"
+    origin_import2 = unit + ",post shot norm"
     for order in sb_included:
         origin_import1 += ",Sideband,Frequency,error,Amplitude,error,Linewidth,error"
         origin_import2 += ",order,eV,,arb. u.,,eV,"
-    origin_total = origin_import1 + "\n" + origin_import2 + "\n"
+    origin_total = origin_import1 + "\n" + origin_import2 #+ "\n"
     header = '#' + included_spectra_str + '\n' + origin_total
     #print "Spec header: ", spec_header
 
