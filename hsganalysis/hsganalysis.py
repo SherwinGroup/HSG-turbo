@@ -413,11 +413,11 @@ class Spectrum(object):
 
 def gauss(x, *p):
     mu, A, sigma, y0 = p
-    return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
+    return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
 
 def lingauss(x, *p):
     mu, A, sigma, y0, m = p
-    return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + m*x
+    return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + m*x
 
 def lorentzian(x, *p):
     mu, A, gamma, y0 = p
