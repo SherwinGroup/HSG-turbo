@@ -54,13 +54,15 @@ class Spectrum(object):
         self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["NIR_lambda"])
         self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["FEL_lambda"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
-        self.raw_data = np.array(self.raw_data[:1600,:])
-        self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
         
-        self.hsg_data = None
-
+        self.hsg_data = np.array(self.raw_data[:1600,:])
+        self.hsg_data[:, 0] = 1239.84 / self.hsg_data[:, 0]
+        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['FEL_pulses']
+        
+        self.dark_stdev = None
+        self.std_error = None
         # These will keep track of what operations have been performed
-        self.initial_processing = False
+        
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
         #self.sb_results = None
@@ -70,19 +72,17 @@ class Spectrum(object):
         Add together the image data from self.hsg_data, or add a constant to 
         that np.array.  
         """
-        if self.initial_processing == True:
-            raise Exception('Source: Spectrum.__add__:\nToo much processing already!')
         ret = copy.deepcopy(self)
 
         # Add a constant offset to the data
         if type(other) in (int, float):
-            ret.raw_data[:, 1] = self.raw_data[:, 1] + other # What shall the name be?
+            ret.hsg_data[:, 1] = self.hsg_data[:, 1] + other # What shall the name be?
             ret.addenda[0] = ret.addenda[0] + other
         
         # or add the data of two hsg_spectra together
         else:
             if np.isclose(ret.parameters['center_lambda'], other.parameters['center_lambda']):
-                ret.raw_data[:, 1] = self.raw_data[:, 1] + other.raw_data[:, 1] # Again, need to choose a name
+                ret.hsg_data[:, 1] = self.hsg_data[:, 1] + other.hsg_data[:, 1] # Again, need to choose a name
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
@@ -99,12 +99,14 @@ class Spectrum(object):
 
         I have no idea if this is something that will be useful?
         """
-        if self.initial_processing == True:
-            raise Exception('Source: Spectrum.__sub__:\nToo much processing already!')
         ret = copy.deepcopy(self)
+        
+        # Subtract a constant offset to the data
         if type(other) in (int, float):
             ret.hsg_data[:,1] = self.hsg_data[:,1] - other # Need to choose a name
             ret.addenda[0] = ret.addenda[0] - other
+            
+        # Subtract the data of two hsg_spectra from each other
         else:
             if np.isclose(ret.hsg_data[0,0], other.hsg_data[0,0]):
                 ret.hsg_data[:,1] = self.hsg_data[:,1] - other.hsg_data[:,1]
@@ -117,20 +119,24 @@ class Spectrum(object):
     def __str__(self):
         return self.description
 
-    def initial_process(self):
+    def get_dark_stdev(self):
         """
         This method will divide everything by the number of FEL shots that contributed
         :return:
         """
-        self.hsg_data = np.array(self.raw_data)
-
-        if self.parameters['FEL_pulses'] > 0:
-            self.hsg_data[:, 1] = self.raw_data[:, 1] / self.parameters['FEL_pulses']
-        else:
-            self.parameters['FELP'] = "0"
         self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
-        self.initial_processing = True
-        self.parameters['shot_normalized'] = True
+        
+    def add_std_error(self, std_errors):
+        """
+        This adds a numpy array of standard errors to the 
+        """
+        try:
+            
+            self.hsg_data = np.hstack((self.hsg_data, std_errors.reshape((1600, 1))))
+        except:
+            print "Spectrum.add_std_error fucked up.  What's wrong?"
+            print std_errors.shape
+        
 
     def guess_sidebands(self, cutoff=4.5):
         """
@@ -274,10 +280,9 @@ class Spectrum(object):
             #print "This is the p0:", p0
             #print "Let's fit this shit!"
             try:
-                
-                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0, sigma=data_temp[:, 2], absolute_sigma=True)
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-                #print coeff
+                print "coeffs:", coeff
                 #coeff = coeff[:4]
                 noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
                 print coeff[1], " vs. ", noise_stdev
@@ -285,7 +290,7 @@ class Spectrum(object):
                 #if coeff[1] is not None: 
                 if 1e-4 > coeff[2] > 20e-6:
                     print "trying to append"
-                    self.sb_fits.append(np.hstack((self.sb_list[sb_counter_index],coeff, np.sqrt(np.diag(var_list)))))
+                    self.sb_fits.append(np.hstack((self.sb_list[sb_counter_index], coeff, np.sqrt(np.diag(var_list)))))
                 
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
@@ -384,7 +389,7 @@ class Spectrum(object):
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
             print "Source: EMCCD_image.save_images\nJSON FAILED"
-            print self.parameters
+            print "Here is the dictionary that broke JSON:", self.parameters
             return
 
         origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
@@ -425,28 +430,38 @@ def lorentzian(x, *p):
 
 def sum_spectra(object_list):
     """
-    This function will add all the things that should be added.  Obvs.
+    This function will add all the things that should be added.  Obvs.  It will
+    also calculate the standard error of the mean for every NIR frequency.
 
     object_list: A list of spectrum objects
     :param object_list:
     :return:
     """
+    print "I'm trying!"
     good_list = []
     for index in xrange(len(object_list)):
         try:
             temp = object_list.pop(0)
+            stderr_holder = np.array(temp.hsg_data[:, 1]).reshape((1600, 1))
+#            print "Standard error holder shape 1:", stderr_holder.shape
         except:
+#            print "God damn it, Leroy"
             break
-#        print "temp has series: {}.\ttemp has cl: {}.\ttemp has fn: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.fname[-16:-13])
+#        print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
         for spec in list(object_list):
 #            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
 #            print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
             if temp.parameters['series'] == spec.parameters['series']:
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
+                    stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))
+#                    print "Standard error holder shape 2:", stderr_holder.shape
 #                    print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
+        spec_number = stderr_holder.shape[1]
+        std_error = np.std(stderr_holder, axis=1, dtype=np.float64) / np.sqrt(spec_number)
+        temp.add_std_error(std_error)
         good_list.append(temp)
     return good_list
 
@@ -470,6 +485,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     sb_included = []
     
     for spec in spectrum_list:
+
         sb_included = sorted(list(set(sb_included + spec.sb_list)))
         included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
         # If these are from summed spectra, then only the the first file name
