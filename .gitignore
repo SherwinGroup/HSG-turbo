@@ -28,6 +28,11 @@ local.properties
 # PDT-specific
 .buildpath
 
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+hsganalysis/*.pyc
 
 #################
 ## Visual Studio

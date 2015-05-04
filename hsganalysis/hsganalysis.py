@@ -575,7 +575,7 @@ class CCD(object):
                 coeff, var_list = curve_fit(makeGauss(self.sb_list[elem]), data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-                #print "coeffs:", coeff
+#                print "coeffs:", coeff, self.sb_list[elem]
 #                print coeff[1] / coeff[2], " vs. ", np.max(data/temp[:, 1]), "of", self.sb_list[elem]
 #                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if True: #3e-4 > coeff[2] > 10e-6:
@@ -604,9 +604,20 @@ class CCD(object):
         self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
 #        print "sb_names:", sb_names
-#        print "sb_fits:", sb_fits
+#        print "sb_list:", self.sb_list
         sorter = np.argsort(sb_fits[:, 0])
         
+        
+        """
+        Now in the order
+        0 - SB Num
+        1 - Peak Position
+        2 - PP err
+        3 - Height
+        4 - Height err
+        5 - sigma
+        6 - sigma err
+        """
         self.sb_results = np.array(sb_fits[sorter, :7])
 #        print "sb_results:", self.sb_results
 
@@ -695,12 +706,12 @@ class CCD(object):
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
 
-        origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
-        spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
-        
-        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error\norder,eV,,arb. u.,,meV,,arb. u.,\n' + marker
-        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
-        
+        origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
+        spec_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_spec
+        #print "Spec header: ", spec_header
+        origin_import_fits = '\nCenter energy,error,Sideband strength,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
+        fits_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_fits
+        #print "Fits header: ", fits_header
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
