@@ -276,16 +276,17 @@ class Spectrum(object):
         for elem in xrange(len(self.sb_index)):
             sb_counter_index += 1
             data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
-            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00003, 1.0]
             #print "This is the p0:", p0
             #print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0, sigma=data_temp[:, 2], absolute_sigma=True)
+                coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 print "coeffs:", coeff
                 #coeff = coeff[:4]
                 noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
-                print coeff[1], " vs. ", noise_stdev
+                print coeff[1] / coeff[2], " vs. ", noise_stdev
                 
                 #if coeff[1] is not None: 
                 if 1e-4 > coeff[2] > 20e-6:
