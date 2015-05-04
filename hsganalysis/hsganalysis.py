@@ -390,7 +390,7 @@ class Spectrum(object):
         origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
         spec_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_spec
         #print "Spec header: ", spec_header
-        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
+        origin_import_fits = '\nCenter energy,error,Sideband strength,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
         fits_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_fits
         #print "Fits header: ", fits_header
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
@@ -525,7 +525,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     origin_import1 = param_name + ",dark_stdev"
     origin_import2 = unit + ",post shot norm"
     for order in sb_included:
-        origin_import1 += ",Sideband,Frequency,error,Amplitude,error,Linewidth,error"
+        origin_import1 += ",Sideband,Frequency,error,Sideband strength,error,Linewidth,error"
         origin_import2 += ",order,eV,,arb. u.,,eV,"
     origin_total = origin_import1 + "\n" + origin_import2 #+ "\n"
     header = '#' + included_spectra_str + '\n' + origin_total
