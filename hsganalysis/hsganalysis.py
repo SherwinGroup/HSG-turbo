@@ -9,6 +9,7 @@ Created on Sun Feb 15 15:22:30 2015
 
 from __future__ import division
 import os
+import glob
 import errno
 import copy
 import json
@@ -286,7 +287,7 @@ class Spectrum(object):
                 print "coeffs:", coeff
                 #coeff = coeff[:4]
                 noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
-                print coeff[1] / coeff[2], " vs. ", noise_stdev
+                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
                 
                 #if coeff[1] is not None: 
                 if 1e-4 > coeff[2] > 20e-6:
@@ -294,7 +295,7 @@ class Spectrum(object):
                     self.sb_fits.append(np.hstack((self.sb_list[sb_counter_index], coeff, np.sqrt(np.diag(var_list)))))
                 
                 if plot:
-                    x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
+                    x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
                 
             except:
@@ -412,7 +413,99 @@ class Spectrum(object):
         """        
         raise NotImplementedError
 
-
+class SPEX(object):
+    """
+    This class will handle a bunch of files related to one HSG spectrum.  I'm 
+    not sure currently how to handle the two HSG sources together.
+    """
+    def __init__(self, folder_path):
+        """
+        Initializes a SPEX spectrum.  It'll open a folder, and bring in all of
+        the individual sidebands into this object.
+        
+        attributes:
+            self.parameters - dictionary of important experimental parameters
+            self.description - string of the description of the file(s)
+            self.sb_dict - keys are sideband order, values are PMT data arrays
+            self.sb_list - sorted
+        """
+        file_list = glob.glob(folder_path, '*.txt')
+        self.sb_dict = {}
+        
+        # in __main__.py, look for the method "genSaveHeader"
+        #                 look for method "initSettings" to see what parameters are saved
+        f = open(file_list[0],'rU')
+        sb_num = f.readline() # Just need to get things down to the next line
+        parameters_str = f.readline()
+        self.parameters = json.loads(parameters_str[1:])
+        self.description = ''
+        read_description = True
+        while read_description:
+            line = f.readline()
+            if line[0] == '#':
+                self.description += line[1:]
+            else:
+                read_description = False
+        f.close()
+        
+        for sb_file in file_list:
+            f = open(file_list, 'rU')
+            sb_num = f.readline()
+            f.close()
+            raw_temp = np.genfromtxt(sb_file, comments='#', delimiter=',')
+            frequencies = set(raw_temp[:, 0])
+            FEL_fired = True # Need to set this condition
+            for freq in frequencies:
+                data_temp = np.array([])
+                for raw_point in raw_temp:
+                    if raw_point[0] == freq and FEL_fired:
+                        data_temp = np.concatenate((data_temp, raw_point[3])) # Wherever the actually important value is
+                try:
+                    temp = np.vstack((temp, np.array(freq, np.mean(data_temp), np.std(data_temp))))
+                except:
+                    temp = np.array(freq, np.mean(data_temp), np.std(data_temp))
+            temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
+            self.sb_dict[sb_num] = np.array(temp)
+        
+        self.sb_list = sorted(self.sb_dict.keys())
+        
+    def fit_sidebands(self, plot=False):
+        """
+        This method will fit a gaussian to each of the sidebands provided in 
+        the self.sb_dict and make a list just like in the EMCCD version.
+        """
+        sb_fits = {}
+        for sideband in self.sb_dict.items():
+            index = np.argmax(sideband[1][:, 1])
+            location = sideband[1][index, 0]
+            peak = sideband[1][index, 1]
+            p0 = [location, peak / 30000, 0.00003, 1.0]
+            try: 
+                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0, sigma=sideband[1][:, 2], absolute_sigma=True)
+                coeff[1] = abs(coeff[1])
+                coeff[2] = abs(coeff[2])
+                print "coeffs:", coeff
+                
+                sb_fits[sideband[0]] = np.concatenate((sideband[0], coeff, np.sqrt(np.diag(var_list))))
+                
+                if plot:
+                    x_vals = np.linspsace(sideband[1][0, 0], sideband[1][-1, 0], num=200)
+                    plt.plot(x_vals, gauss(x_vals, *coeff))
+            except:
+                print "God damn it, Leroy.\nYou couldn't fit this."
+                sb_fits[sideband[0]] = None
+            
+        for result in sorted(sb_fits.keys()):
+            try:
+                self.results = np.vstack((self.results, sb_fits[result]))
+            except:
+                self.results = np.array(sb_fits[result])
+        
+        self.results = self.results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
+        self.results = self.results[:, :7]
+        print "And the results, please:", self.results
+            
+        
 ####################
 # Useful functions 
 ####################
