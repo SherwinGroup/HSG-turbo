@@ -9,6 +9,7 @@ Created on Sun Feb 15 15:22:30 2015
 
 from __future__ import division
 import os
+import glob
 import errno
 import copy
 import json
@@ -32,7 +33,25 @@ class Spectrum(object):
         those are no longer part of this init.  This also turns all wavelengths
         from nm (NIR ones) or cm-1 (THz ones) into eV.
         
+        Input:
         fname = file name of the hsg spectrum
+        
+        Internal:
+        self.fname = the filename
+        self.parameters = string with all the relevant experimental perameters
+        self.description = the description we added to the file as the data
+                           was being taken
+        self.raw_data = the unprocessed data that is wavelength vs signal
+        self.hsg_data = processed data that has gone is frequency vs signal/pulse
+        self.dark_stdev = the standard deviation of the dark noise using the
+                          last 200 pixels since they probably(?) don't have 
+                          strong signal
+        self.std_error = Nothing yet, maybe this isn't useful
+        self.addenda = the list of things that have been added to the file, in
+                       form of [constant, *spectra_added]
+        self.subtrahenda = the list of spectra that have been subtracted from
+                           the file.  Constant subtraction is dealt with with
+                           self.addenda
         """
         self.fname = fname
         
@@ -54,13 +73,18 @@ class Spectrum(object):
         self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["NIR_lambda"])
         self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["FEL_lambda"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
-        self.raw_data = np.array(self.raw_data[:1600,:])
-        self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
+        # I used flipup so that the x-axis is an increasing function of frequency
         
-        self.hsg_data = None
-
+        self.hsg_data = np.array(self.raw_data[:1600,:]) # By slicing up to 1600,
+                                                         # we cut out the text 
+                                                         # header
+        self.hsg_data[:, 0] = 1239.84 / self.hsg_data[:, 0]
+        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['FEL_pulses']
+        
+        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
+        self.std_error = None
         # These will keep track of what operations have been performed
-        self.initial_processing = False
+        
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
         #self.sb_results = None
@@ -70,19 +94,17 @@ class Spectrum(object):
         Add together the image data from self.hsg_data, or add a constant to 
         that np.array.  
         """
-        if self.initial_processing == True:
-            raise Exception('Source: Spectrum.__add__:\nToo much processing already!')
         ret = copy.deepcopy(self)
 
         # Add a constant offset to the data
         if type(other) in (int, float):
-            ret.raw_data[:, 1] = self.raw_data[:, 1] + other # What shall the name be?
+            ret.hsg_data[:, 1] = self.hsg_data[:, 1] + other # What shall the name be?
             ret.addenda[0] = ret.addenda[0] + other
         
         # or add the data of two hsg_spectra together
         else:
             if np.isclose(ret.parameters['center_lambda'], other.parameters['center_lambda']):
-                ret.raw_data[:, 1] = self.raw_data[:, 1] + other.raw_data[:, 1] # Again, need to choose a name
+                ret.hsg_data[:, 1] = self.hsg_data[:, 1] + other.hsg_data[:, 1] # Again, need to choose a name
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
@@ -99,12 +121,14 @@ class Spectrum(object):
 
         I have no idea if this is something that will be useful?
         """
-        if self.initial_processing == True:
-            raise Exception('Source: Spectrum.__sub__:\nToo much processing already!')
         ret = copy.deepcopy(self)
+        
+        # Subtract a constant offset to the data
         if type(other) in (int, float):
             ret.hsg_data[:,1] = self.hsg_data[:,1] - other # Need to choose a name
             ret.addenda[0] = ret.addenda[0] - other
+            
+        # Subtract the data of two hsg_spectra from each other
         else:
             if np.isclose(ret.hsg_data[0,0], other.hsg_data[0,0]):
                 ret.hsg_data[:,1] = self.hsg_data[:,1] - other.hsg_data[:,1]
@@ -117,20 +141,26 @@ class Spectrum(object):
     def __str__(self):
         return self.description
 
-    def initial_process(self):
+#    def get_dark_stdev(self):
+#        """
+#        This method will divide everything by the number of FEL shots that contributed
+#        :return:
+#        """
+#        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
+        
+    def add_std_error(self, std_errors):
         """
-        This method will divide everything by the number of FEL shots that contributed
-        :return:
+        This adds a numpy array of standard errors to the self.hsg_data array.
+        It's actually just an append_column method, but there's no reason for 
+        that (I think)
         """
-        self.hsg_data = np.array(self.raw_data)
-
-        if self.parameters['FEL_pulses'] > 0:
-            self.hsg_data[:, 1] = self.raw_data[:, 1] / self.parameters['FEL_pulses']
-        else:
-            self.parameters['FELP'] = "0"
-        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
-        self.initial_processing = True
-        self.parameters['shot_normalized'] = True
+        try:
+            
+            self.hsg_data = np.hstack((self.hsg_data, std_errors.reshape((1600, 1))))
+        except:
+            print "Spectrum.add_std_error fucked up.  What's wrong?"
+            print std_errors.shape
+        
 
     def guess_sidebands(self, cutoff=4.5):
         """
@@ -169,11 +199,13 @@ class Spectrum(object):
         self.sb_list: list of sideband orders detected by this method
         self.sb_index: list of the index of the sideband
         self.sb_guess: 2D array that contains the frequency and amplitude of
-                       the found sidebands.
+                       the found sidebands.  It now also contains an estimate
+                       of the error of area of the sidebands by adding the 
+                       three standard errors nearest the peak.  Seems to work?
         """
         x_axis = np.array(self.hsg_data[:, 0])
         y_axis = np.array(self.hsg_data[:, 1])
-        
+        error = np.array(self.hsg_data[:, 2])
         window = 20
         
         pre = np.empty(window)
@@ -201,6 +233,7 @@ class Spectrum(object):
         self.sb_index = []
         sb_freq_guess = []
         sb_amp_guess = []
+        sb_error_estimate = []
         
         last_sb = NIR_freq + THz_freq * (sb_init - 1)
         index_guess = 0
@@ -241,7 +274,11 @@ class Spectrum(object):
                 print "I just found", last_sb
                 
                 sb_freq_guess.append(x_axis[found_index])
-                sb_amp_guess.append(y_axis[found_index])
+#                sb_amp_guess.append(y_axis[found_index])
+                sb_amp_guess.append(check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 1]])) / (check_max_area - 3 * check_ave)
+                print "My error estimate is:", error_est
+                sb_error_estimate.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
             else:
@@ -254,71 +291,69 @@ class Spectrum(object):
                 break
         
         print "I found these sidebands:", self.sb_list
-        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess)]).T
+        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_estimate)]).T
     
-    def fit_sidebands(self, sensitivity=1, plot=False):
-        '''
+    def fit_sidebands(self, plot=False):
+        """
         This takes self.sb_guess and fits to each maxima to get the details of
-        each sideband.
+        each sideband.  It's really ugly, but it works.  The error of the 
+        sideband area is approximated from the data, not the curve fit.  All
+        else is from the curve fit.
         
-        sensitivity - the multiplier of the noise stdev required to save a peak
-        plot - if you want to plot the fits on the same plot as before
-        '''
-
-        self.sb_fits = []
-        sb_counter_index = -1 # Fortranic?
-        for elem in xrange(len(self.sb_index)):
-            sb_counter_index += 1
-            data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
-            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1], 0.0001, 1.0]
-            #print "This is the p0:", p0
+        Inputs:
+        plot = if you want to plot the fits on the same plot as before
+        
+        Temporary stuff:
+        sb_fits = holder of the fitting results until all spectra have been fit
+        
+        Attributes created:
+        self.sb_results = the money maker
+        """
+        print "Trying to fit these"
+        sb_fits = []
+        for elem in xrange(len(self.sb_index)): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
+            data_temp = self.hsg_data[self.sb_index[elem] - 10:self.sb_index[elem] + 10, :]
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00003, 1.0]
             #print "Let's fit this shit!"
             try:
-                
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+                coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-                #print coeff
-                #coeff = coeff[:4]
-                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
-                print coeff[1], " vs. ", noise_stdev
-                
-                #if coeff[1] is not None: 
-                if 1e-4 > coeff[2] > 20e-6:
-                    print "trying to append"
-                    self.sb_fits.append(np.hstack((self.sb_list[sb_counter_index],coeff, np.sqrt(np.diag(var_list)))))
-                
+                #print "coeffs:", coeff
+                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
+                if 1e-4 > coeff[2] > 10e-6:
+                    sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
+                    sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                 if plot:
-                    x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
+                    x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
-                
             except:
                 print "I couldn't fit that"
-                self.sb_list[sb_counter_index] = None
-        sb_fits_temp = np.asarray(self.sb_fits)
+                self.sb_list[elem] = None
+        sb_fits_temp = np.asarray(sb_fits)
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
-        #print "The temp fits list", sb_fits_temp[0, 0+1, 4+1, 1+1, 5+1, 2+1, 6+1, 3+1, 7+1]
         try:
-            self.sb_fits = sb_fits_temp[:, reorder]
+            sb_fits = sb_fits_temp[:, reorder]
         except:
-            self.sb_fits = list(sb_fits_temp)
+            sb_fits = list(sb_fits_temp)
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
-        
+                
         # Going to label the appropriate row with the sideband
         self.sb_list = list([x for x in self.sb_list if x is not None])
         sb_names = np.vstack(self.sb_list)
         print "sb_names:", sb_names
-        print "self.sb_fits:", self.sb_fits[:,:7]
-        self.sb_results = np.array(self.sb_fits[:,:7])
+        print "sb_fits:", sb_fits[:,:7]
+        self.sb_results = np.array(sb_fits[:,:7])
         print "sb_results:", self.sb_results
-    
+
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
-        '''
+        """
         This takes self.sb_guess and fits to each maxima to get the details of
         each sideband.
         
         sensitivity - the multiplier of the noise stdev required to save a peak
         plot - if you want to plot the fits on the same plot as before
-        '''
+        """
         self.sb_fits = []
         
         for elem in xrange(len(self.sb_index)):
@@ -357,11 +392,21 @@ class Spectrum(object):
         self.sb_results = np.hstack((sb_names, self.sb_fits[:,:6]))
 
     
-    def save_processing(self, file_name, folder_str, marker, index):
+    def save_processing(self, file_name, folder_str, marker='', index=''):
         """
-        This will save all of the results from data processing
-        :param file_prefix:
-        :return:
+        This will save all of the self.hsg_data and the results from the 
+        fitting of this individual file.
+        
+        Inputs:
+        file_name = the beginning of the file name to be saved
+        folder_str = the location of the folder where the file will be saved, 
+                     will create the folder, if necessary.
+        marker = I...I don't know what this was originally for
+        index = used to keep these files from overwriting themselves when in a
+                list
+        
+        Outputs:
+        Two files, one that is self.hsg_data, the other is self.sb_results
         """
         try:
             os.mkdir(folder_str)
@@ -370,32 +415,29 @@ class Spectrum(object):
                 pass
             else:
                 raise
-		
-        spectra_fname = file_name + str(index) + '.txt'
+        
+        spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
-        fit_fname = file_name + str(index) + '_fits.txt'
-		
-        #spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
-        #fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
-
+        
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
             print "Source: EMCCD_image.save_images\nJSON FAILED"
-            print self.parameters
+            print "Here is the dictionary that broke JSON:\n", self.parameters
             return
 
-        origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
-        spec_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_spec
-        #print "Spec header: ", spec_header
-        origin_import_fits = '\nCenter energy,error,Sideband strength,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
-        fits_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_fits
-        #print "Fits header: ", fits_header
+        origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
+        spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+        
+        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
+        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
+
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
-        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_fits, delimiter=',',
+        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
@@ -406,15 +448,107 @@ class Spectrum(object):
         """        
         raise NotImplementedError
 
-
+class SPEX(object):
+    """
+    This class will handle a bunch of files related to one HSG spectrum.  I'm 
+    not sure currently how to handle the two HSG sources together.
+    """
+    def __init__(self, folder_path):
+        """
+        Initializes a SPEX spectrum.  It'll open a folder, and bring in all of
+        the individual sidebands into this object.
+        
+        attributes:
+            self.parameters - dictionary of important experimental parameters
+            self.description - string of the description of the file(s)
+            self.sb_dict - keys are sideband order, values are PMT data arrays
+            self.sb_list - sorted
+        """
+        file_list = glob.glob(folder_path, '*.txt')
+        self.sb_dict = {}
+        
+        # in __main__.py, look for the method "genSaveHeader"
+        #                 look for method "initSettings" to see what parameters are saved
+        f = open(file_list[0],'rU')
+        sb_num = f.readline() # Just need to get things down to the next line
+        parameters_str = f.readline()
+        self.parameters = json.loads(parameters_str[1:])
+        self.description = ''
+        read_description = True
+        while read_description:
+            line = f.readline()
+            if line[0] == '#':
+                self.description += line[1:]
+            else:
+                read_description = False
+        f.close()
+        
+        for sb_file in file_list:
+            f = open(file_list, 'rU')
+            sb_num = f.readline()
+            f.close()
+            raw_temp = np.genfromtxt(sb_file, comments='#', delimiter=',')
+            frequencies = set(raw_temp[:, 0])
+            FEL_fired = True # Need to set this condition
+            for freq in frequencies:
+                data_temp = np.array([])
+                for raw_point in raw_temp:
+                    if raw_point[0] == freq and FEL_fired:
+                        data_temp = np.concatenate((data_temp, raw_point[3])) # Wherever the actually important value is
+                try:
+                    temp = np.vstack((temp, np.array(freq, np.mean(data_temp), np.std(data_temp))))
+                except:
+                    temp = np.array(freq, np.mean(data_temp), np.std(data_temp))
+            temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
+            self.sb_dict[sb_num] = np.array(temp)
+        
+        self.sb_list = sorted(self.sb_dict.keys())
+        
+    def fit_sidebands(self, plot=False):
+        """
+        This method will fit a gaussian to each of the sidebands provided in 
+        the self.sb_dict and make a list just like in the EMCCD version.
+        """
+        sb_fits = {}
+        for sideband in self.sb_dict.items():
+            index = np.argmax(sideband[1][:, 1])
+            location = sideband[1][index, 0]
+            peak = sideband[1][index, 1]
+            p0 = [location, peak / 30000, 0.00003, 1.0]
+            try: 
+                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0, sigma=sideband[1][:, 2], absolute_sigma=True)
+                coeff[1] = abs(coeff[1])
+                coeff[2] = abs(coeff[2])
+                print "coeffs:", coeff
+                
+                sb_fits[sideband[0]] = np.concatenate((sideband[0], coeff, np.sqrt(np.diag(var_list))))
+                
+                if plot:
+                    x_vals = np.linspsace(sideband[1][0, 0], sideband[1][-1, 0], num=200)
+                    plt.plot(x_vals, gauss(x_vals, *coeff))
+            except:
+                print "God damn it, Leroy.\nYou couldn't fit this."
+                sb_fits[sideband[0]] = None
+            
+        for result in sorted(sb_fits.keys()):
+            try:
+                self.sb_results = np.vstack((self.sb_results, sb_fits[result]))
+            except:
+                self.sb_results = np.array(sb_fits[result])
+        
+        self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
+        self.sb_results = self.sb_results[:, :7]
+        print "And the results, please:", self.results
+            
+        
 ####################
-# Useful functions 
+# Fitting functions 
 ####################
 
 def gauss(x, *p):
     mu, A, sigma, y0 = p
     return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
-
+    
 def lingauss(x, *p):
     mu, A, sigma, y0, m = p
     return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + m*x
@@ -423,30 +557,53 @@ def lorentzian(x, *p):
     mu, A, gamma, y0 = p
     return (A * gamma**2) / ((x - mu)**2 + gamma**2) + y0
 
+####################
+# Collection functions
+####################
+
 def sum_spectra(object_list):
     """
-    This function will add all the things that should be added.  Obvs.
+    This function will add all the things that should be added.  Obvs.  It will
+    also calculate the standard error of the mean for every NIR frequency.  The
+    standard error is the sum of the dark noise and the "shot" noise.
 
     object_list: A list of spectrum objects
     :param object_list:
     :return:
     """
+    print "I'm trying!"
+    
     good_list = []
     for index in xrange(len(object_list)):
+        dark_var = 0
         try:
             temp = object_list.pop(0)
+            stderr_holder = np.array(temp.hsg_data[:, 1]).reshape((1600, 1))
+#            print "Standard error holder shape 1:", stderr_holder.shape
         except:
+#            print "God damn it, Leroy"
             break
-#        print "temp has series: {}.\ttemp has cl: {}.\ttemp has fn: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.fname[-16:-13])
+#        print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
         for spec in list(object_list):
 #            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
 #            print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
             if temp.parameters['series'] == spec.parameters['series']:
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
+                    stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))
+                    print "Individual dark_stdev:", spec.dark_stdev
+                    dark_var += (spec.dark_stdev)**2
+#                    print "Standard error holder shape 2:", stderr_holder.shape
 #                    print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
+        spec_number = stderr_holder.shape[1]
+        std_error = np.sqrt(np.var(stderr_holder, axis=1, dtype=np.float64) + dark_var) / np.sqrt(spec_number) # Checking some sigma stuff from curve_fit
+        # This standard error is for every point.  I think it actually overestimates
+        # the error at places with no signal because we add the dark variance
+        # effectively twice.
+        print "final dark_stdev:", np.sqrt(dark_var)
+        temp.add_std_error(std_error)
         good_list.append(temp)
     return good_list
 
@@ -470,6 +627,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     sb_included = []
     
     for spec in spectrum_list:
+
         sb_included = sorted(list(set(sb_included + spec.sb_list)))
         included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
         # If these are from summed spectra, then only the the first file name
