@@ -33,7 +33,25 @@ class Spectrum(object):
         those are no longer part of this init.  This also turns all wavelengths
         from nm (NIR ones) or cm-1 (THz ones) into eV.
         
+        Input:
         fname = file name of the hsg spectrum
+        
+        Internal:
+        self.fname = the filename
+        self.parameters = string with all the relevant experimental perameters
+        self.description = the description we added to the file as the data
+                           was being taken
+        self.raw_data = the unprocessed data that is wavelength vs signal
+        self.hsg_data = processed data that has gone is frequency vs signal/pulse
+        self.dark_stdev = the standard deviation of the dark noise using the
+                          last 200 pixels since they probably(?) don't have 
+                          strong signal
+        self.std_error = Nothing yet, maybe this isn't useful
+        self.addenda = the list of things that have been added to the file, in
+                       form of [constant, *spectra_added]
+        self.subtrahenda = the list of spectra that have been subtracted from
+                           the file.  Constant subtraction is dealt with with
+                           self.addenda
         """
         self.fname = fname
         
@@ -120,16 +138,18 @@ class Spectrum(object):
     def __str__(self):
         return self.description
 
-    def get_dark_stdev(self):
-        """
-        This method will divide everything by the number of FEL shots that contributed
-        :return:
-        """
-        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
+#    def get_dark_stdev(self):
+#        """
+#        This method will divide everything by the number of FEL shots that contributed
+#        :return:
+#        """
+#        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
         
     def add_std_error(self, std_errors):
         """
-        This adds a numpy array of standard errors to the 
+        This adds a numpy array of standard errors to the self.hsg_data array.
+        It's actually just an append_column method, but there's no reason for 
+        that (I think)
         """
         try:
             
@@ -176,7 +196,9 @@ class Spectrum(object):
         self.sb_list: list of sideband orders detected by this method
         self.sb_index: list of the index of the sideband
         self.sb_guess: 2D array that contains the frequency and amplitude of
-                       the found sidebands.
+                       the found sidebands.  It now also contains an estimate
+                       of the error of area of the sidebands by adding the 
+                       three standard errors nearest the peak.  Seems to work?
         """
         x_axis = np.array(self.hsg_data[:, 0])
         y_axis = np.array(self.hsg_data[:, 1])
@@ -268,69 +290,96 @@ class Spectrum(object):
         print "I found these sidebands:", self.sb_list
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_estimate)]).T
     
-    def fit_sidebands(self, sensitivity=1, plot=False):
-        '''
+    def fit_sidebands(self, plot=False):
+        """
         This takes self.sb_guess and fits to each maxima to get the details of
-        each sideband.
+        each sideband.  It's really ugly, but it works.
         
-        sensitivity - the multiplier of the noise stdev required to save a peak
-        plot - if you want to plot the fits on the same plot as before
-        '''
+        Inputs:
+        plot = if you want to plot the fits on the same plot as before
+        
+        Attributes modified/created:
+        self.sb_fits = meaningless carrier list, it needs to die
+        self.sb_results = the money maker
+        """
         print "Trying to fit these"
-        self.sb_fits = []
+        sb_fits = []
         sb_counter_index = -1 # Fortranic?
         for elem in xrange(len(self.sb_index)):
             sb_counter_index += 1
             data_temp = self.hsg_data[self.sb_index[elem] - 10:self.sb_index[elem] + 10, :]
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00003, 1.0]
-            #print "This is the p0:", p0
             #print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-                print "coeffs:", coeff
-                #coeff = coeff[:4]
-#                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
+                #print "coeffs:", coeff
                 print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
-                #if coeff[1] is not None: 
                 if 1e-4 > coeff[2] > 20e-6:
-                    self.sb_fits.append(np.hstack((self.sb_list[sb_counter_index], coeff, np.sqrt(np.diag(var_list)))))
-                    print "Going to add:", self.sb_guess[elem, 2] * self.sb_fits[-1][2]
-                    self.sb_fits[-1][6] = self.sb_guess[elem, 2] * self.sb_fits[-1][2]
-                    print "now sb_fits is:", self.sb_fits
+                    sb_fits.append(np.hstack((self.sb_list[sb_counter_index], coeff, np.sqrt(np.diag(var_list)))))
+                    sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2]
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
-                
             except:
                 print "I couldn't fit that"
                 self.sb_list[sb_counter_index] = None
-        sb_fits_temp = np.asarray(self.sb_fits)
+        sb_fits_temp = np.asarray(sb_fits)
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
-        #print "The temp fits list", sb_fits_temp[0, 0+1, 4+1, 1+1, 5+1, 2+1, 6+1, 3+1, 7+1]
         try:
-            self.sb_fits = sb_fits_temp[:, reorder]
+            sb_fits = sb_fits_temp[:, reorder]
         except:
-            self.sb_fits = list(sb_fits_temp)
+            sb_fits = list(sb_fits_temp)
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
-        
+                
         # Going to label the appropriate row with the sideband
         self.sb_list = list([x for x in self.sb_list if x is not None])
         sb_names = np.vstack(self.sb_list)
         print "sb_names:", sb_names
-        print "self.sb_fits:", self.sb_fits[:,:7]
-        self.sb_results = np.array(self.sb_fits[:,:7])
+        print "sb_fits:", sb_fits[:,:7]
+        self.sb_results = np.array(sb_fits[:,:7])
         print "sb_results:", self.sb_results
-    
+#########################################
+        sb_fits = {}
+        for sideband in self.sb_dict.items():
+            index = np.argmax(sideband[1][:, 1])
+            location = sideband[1][index, 0]
+            peak = sideband[1][index, 1]
+            p0 = [location, peak / 30000, 0.00003, 1.0]
+            try: 
+                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0, sigma=sideband[1][:, 2], absolute_sigma=True)
+                coeff[1] = abs(coeff[1])
+                coeff[2] = abs(coeff[2])
+                print "coeffs:", coeff
+                
+                sb_fits[sideband[0]] = np.concatenate((sideband[0], coeff, np.sqrt(np.diag(var_list))))
+                
+                if plot:
+                    x_vals = np.linspsace(sideband[1][0, 0], sideband[1][-1, 0], num=200)
+                    plt.plot(x_vals, gauss(x_vals, *coeff))
+            except:
+                print "God damn it, Leroy.\nYou couldn't fit this."
+                sb_fits[sideband[0]] = None
+            
+        for result in sorted(sb_fits.keys()):
+            try:
+                self.sb_results = np.vstack((self.sb_results, sb_fits[result]))
+            except:
+                self.sb_results = np.array(sb_fits[result])
+        
+        self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
+        self.sb_results = self.sb_results[:, :7]
+        print "And the results, please:", self.results
+#########################################    
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
-        '''
+        """
         This takes self.sb_guess and fits to each maxima to get the details of
         each sideband.
         
         sensitivity - the multiplier of the noise stdev required to save a peak
         plot - if you want to plot the fits on the same plot as before
-        '''
+        """
         self.sb_fits = []
         
         for elem in xrange(len(self.sb_index)):
@@ -369,11 +418,21 @@ class Spectrum(object):
         self.sb_results = np.hstack((sb_names, self.sb_fits[:,:6]))
 
     
-    def save_processing(self, file_name, folder_str, marker, index):
+    def save_processing(self, file_name, folder_str, marker='', index=''):
         """
-        This will save all of the results from data processing
-        :param file_prefix:
-        :return:
+        This will save all of the self.hsg_data and the results from the 
+        fitting of this individual file.
+        
+        Inputs:
+        file_name = the beginning of the file name to be saved
+        folder_str = the location of the folder where the file will be saved, 
+                     will create the folder, if necessary.
+        marker = I...I don't know what this was originally for
+        index = used to keep these files from overwriting themselves when in a
+                list
+        
+        Outputs:
+        Two files, one that is self.hsg_data, the other is self.sb_results
         """
         try:
             os.mkdir(folder_str)
@@ -382,32 +441,29 @@ class Spectrum(object):
                 pass
             else:
                 raise
-		
-        spectra_fname = file_name + str(index) + '.txt'
+        
+        spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
-        fit_fname = file_name + str(index) + '_fits.txt'
-		
-        #spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
-        #fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
-
+        
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
             print "Source: EMCCD_image.save_images\nJSON FAILED"
-            print "Here is the dictionary that broke JSON:", self.parameters
+            print "Here is the dictionary that broke JSON:\n", self.parameters
             return
 
-        origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
-        spec_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_spec
-        #print "Spec header: ", spec_header
+        origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
+        spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+        
         origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
-        fits_header = '#' + parameter_str + '\n' + '#' + self.description[:-2] + origin_import_fits
-        #print "Fits header: ", fits_header
+        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
+        
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
-        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_fits, delimiter=',',
+        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
@@ -502,12 +558,12 @@ class SPEX(object):
             
         for result in sorted(sb_fits.keys()):
             try:
-                self.results = np.vstack((self.results, sb_fits[result]))
+                self.sb_results = np.vstack((self.sb_results, sb_fits[result]))
             except:
-                self.results = np.array(sb_fits[result])
+                self.sb_results = np.array(sb_fits[result])
         
-        self.results = self.results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
-        self.results = self.results[:, :7]
+        self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
+        self.sb_results = self.sb_results[:, :7]
         print "And the results, please:", self.results
             
         
@@ -519,10 +575,6 @@ def gauss(x, *p):
     mu, A, sigma, y0 = p
     return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
     
-def altgauss(x, *p):
-    mu, A, sigma, y0 = p
-    return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
-
 def lingauss(x, *p):
     mu, A, sigma, y0, m = p
     return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + m*x
