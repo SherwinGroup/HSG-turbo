@@ -60,7 +60,7 @@ class Spectrum(object):
         self.hsg_data[:, 0] = 1239.84 / self.hsg_data[:, 0]
         self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['FEL_pulses']
         
-        self.dark_stdev = None
+        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
         self.std_error = None
         # These will keep track of what operations have been performed
         
@@ -180,7 +180,7 @@ class Spectrum(object):
         """
         x_axis = np.array(self.hsg_data[:, 0])
         y_axis = np.array(self.hsg_data[:, 1])
-        
+        error = np.array(self.hsg_data[:, 2])
         window = 20
         
         pre = np.empty(window)
@@ -208,6 +208,7 @@ class Spectrum(object):
         self.sb_index = []
         sb_freq_guess = []
         sb_amp_guess = []
+        sb_error_estimate = []
         
         last_sb = NIR_freq + THz_freq * (sb_init - 1)
         index_guess = 0
@@ -248,7 +249,11 @@ class Spectrum(object):
                 print "I just found", last_sb
                 
                 sb_freq_guess.append(x_axis[found_index])
-                sb_amp_guess.append(y_axis[found_index])
+#                sb_amp_guess.append(y_axis[found_index])
+                sb_amp_guess.append(check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 1]])) / (check_max_area - 3 * check_ave)
+                print "My error estimate is:", error_est
+                sb_error_estimate.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
             else:
@@ -261,7 +266,7 @@ class Spectrum(object):
                 break
         
         print "I found these sidebands:", self.sb_list
-        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess)]).T
+        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_estimate)]).T
     
     def fit_sidebands(self, sensitivity=1, plot=False):
         '''
@@ -271,29 +276,29 @@ class Spectrum(object):
         sensitivity - the multiplier of the noise stdev required to save a peak
         plot - if you want to plot the fits on the same plot as before
         '''
-
+        print "Trying to fit these"
         self.sb_fits = []
         sb_counter_index = -1 # Fortranic?
         for elem in xrange(len(self.sb_index)):
             sb_counter_index += 1
-            data_temp = self.hsg_data[self.sb_index[elem] - 50:self.sb_index[elem] + 50, :]
+            data_temp = self.hsg_data[self.sb_index[elem] - 10:self.sb_index[elem] + 10, :]
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00003, 1.0]
             #print "This is the p0:", p0
             #print "Let's fit this shit!"
             try:
-                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0, sigma=data_temp[:, 2], absolute_sigma=True)
+                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 print "coeffs:", coeff
                 #coeff = coeff[:4]
-                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
+#                noise_stdev = (np.std(data_temp[:45]) + np.std(data_temp[55:])) / 2
                 print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
-                
                 #if coeff[1] is not None: 
                 if 1e-4 > coeff[2] > 20e-6:
-                    print "trying to append"
                     self.sb_fits.append(np.hstack((self.sb_list[sb_counter_index], coeff, np.sqrt(np.diag(var_list)))))
-                
+                    print "Going to add:", self.sb_guess[elem, 2] * self.sb_fits[-1][2]
+                    self.sb_fits[-1][6] = self.sb_guess[elem, 2] * self.sb_fits[-1][2]
+                    print "now sb_fits is:", self.sb_fits
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
@@ -513,6 +518,10 @@ class SPEX(object):
 def gauss(x, *p):
     mu, A, sigma, y0 = p
     return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
+    
+def altgauss(x, *p):
+    mu, A, sigma, y0 = p
+    return A * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
 
 def lingauss(x, *p):
     mu, A, sigma, y0, m = p
@@ -525,15 +534,18 @@ def lorentzian(x, *p):
 def sum_spectra(object_list):
     """
     This function will add all the things that should be added.  Obvs.  It will
-    also calculate the standard error of the mean for every NIR frequency.
+    also calculate the standard error of the mean for every NIR frequency.  The
+    standard error is the sum of the dark noise and the "shot" noise.
 
     object_list: A list of spectrum objects
     :param object_list:
     :return:
     """
     print "I'm trying!"
+    
     good_list = []
     for index in xrange(len(object_list)):
+        dark_var = 0
         try:
             temp = object_list.pop(0)
             stderr_holder = np.array(temp.hsg_data[:, 1]).reshape((1600, 1))
@@ -549,12 +561,15 @@ def sum_spectra(object_list):
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))
+                    print "Individual dark_stdev:", spec.dark_stdev
+                    dark_var += (spec.dark_stdev)**2
 #                    print "Standard error holder shape 2:", stderr_holder.shape
 #                    print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
         spec_number = stderr_holder.shape[1]
-        std_error = np.std(stderr_holder, axis=1, dtype=np.float64) / np.sqrt(spec_number)
+        std_error = np.sqrt(np.var(stderr_holder, axis=1, dtype=np.float64) + dark_var) / np.sqrt(spec_number) # Checking some sigma stuff from curve_fit
+        print "final dark_stdev:", np.sqrt(dark_var)
         temp.add_std_error(std_error)
         good_list.append(temp)
     return good_list
