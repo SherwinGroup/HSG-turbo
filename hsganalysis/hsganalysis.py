@@ -293,20 +293,22 @@ class Spectrum(object):
     def fit_sidebands(self, plot=False):
         """
         This takes self.sb_guess and fits to each maxima to get the details of
-        each sideband.  It's really ugly, but it works.
+        each sideband.  It's really ugly, but it works.  The error of the 
+        sideband area is approximated from the data, not the curve fit.  All
+        else is from the curve fit.
         
         Inputs:
         plot = if you want to plot the fits on the same plot as before
         
-        Attributes modified/created:
-        self.sb_fits = meaningless carrier list, it needs to die
+        Temporary stuff:
+        sb_fits = holder of the fitting results until all spectra have been fit
+        
+        Attributes created:
         self.sb_results = the money maker
         """
         print "Trying to fit these"
         sb_fits = []
-        sb_counter_index = -1 # Fortranic?
-        for elem in xrange(len(self.sb_index)):
-            sb_counter_index += 1
+        for elem in xrange(len(self.sb_index)): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
             data_temp = self.hsg_data[self.sb_index[elem] - 10:self.sb_index[elem] + 10, :]
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00003, 1.0]
             #print "Let's fit this shit!"
@@ -316,15 +318,15 @@ class Spectrum(object):
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
                 print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
-                if 1e-4 > coeff[2] > 20e-6:
-                    sb_fits.append(np.hstack((self.sb_list[sb_counter_index], coeff, np.sqrt(np.diag(var_list)))))
-                    sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2]
+                if 1e-4 > coeff[2] > 10e-6:
+                    sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
+                    sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
             except:
                 print "I couldn't fit that"
-                self.sb_list[sb_counter_index] = None
+                self.sb_list[elem] = None
         sb_fits_temp = np.asarray(sb_fits)
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
         try:
@@ -340,38 +342,7 @@ class Spectrum(object):
         print "sb_fits:", sb_fits[:,:7]
         self.sb_results = np.array(sb_fits[:,:7])
         print "sb_results:", self.sb_results
-#########################################
-        sb_fits = {}
-        for sideband in self.sb_dict.items():
-            index = np.argmax(sideband[1][:, 1])
-            location = sideband[1][index, 0]
-            peak = sideband[1][index, 1]
-            p0 = [location, peak / 30000, 0.00003, 1.0]
-            try: 
-                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0, sigma=sideband[1][:, 2], absolute_sigma=True)
-                coeff[1] = abs(coeff[1])
-                coeff[2] = abs(coeff[2])
-                print "coeffs:", coeff
-                
-                sb_fits[sideband[0]] = np.concatenate((sideband[0], coeff, np.sqrt(np.diag(var_list))))
-                
-                if plot:
-                    x_vals = np.linspsace(sideband[1][0, 0], sideband[1][-1, 0], num=200)
-                    plt.plot(x_vals, gauss(x_vals, *coeff))
-            except:
-                print "God damn it, Leroy.\nYou couldn't fit this."
-                sb_fits[sideband[0]] = None
-            
-        for result in sorted(sb_fits.keys()):
-            try:
-                self.sb_results = np.vstack((self.sb_results, sb_fits[result]))
-            except:
-                self.sb_results = np.array(sb_fits[result])
-        
-        self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
-        self.sb_results = self.sb_results[:, :7]
-        print "And the results, please:", self.results
-#########################################    
+
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
         """
         This takes self.sb_guess and fits to each maxima to get the details of
