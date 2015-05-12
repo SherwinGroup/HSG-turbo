@@ -273,7 +273,8 @@ class Spectrum(object):
                 sb_freq_guess.append(x_axis[found_index])
 #                sb_amp_guess.append(y_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
-                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 1]])) / (check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
+                # I think that should be a "+ 2" in the second index of slicing?
                 print "My error estimate is:", error_est
                 sb_error_estimate.append(error_est)
                 self.sb_list.append(order)
@@ -321,6 +322,7 @@ class Spectrum(object):
                 if 1e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
+                    # And had to scale by the area?
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
@@ -494,9 +496,10 @@ class SPEX(object):
                 data_temp = np.array([])
                 for raw_point in raw_temp:
                     if raw_point[0] == freq and raw_point[2] > fire_condition:
-                        print "I'm going to add this", raw_point[0], raw_point[3]
+                        #print "I'm going to add this", raw_point[0], raw_point[3]
                         data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
                 print "The data temp is", data_temp
+                print len(data_temp)
                 try:
                     temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
                 except:
@@ -520,15 +523,19 @@ class SPEX(object):
             p0 = [nir_frequency, peak / 3000, 0.00006, 0.00001]
             print "p0:", p0
             try: 
-                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0, sigma=sideband[1][:, 2], absolute_sigma=True)
+                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0)#, sigma=10*sideband[1][:, 2], absolute_sigma=True)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2])
                 print "coeffs:", coeff
-                
-                sb_fits[sideband[0]] = np.concatenate((sideband[0], coeff, np.sqrt(np.diag(var_list))))
-                
+
+                sb_fits[sideband[0]] = np.concatenate((np.array([sideband[0]]), coeff, np.sqrt(np.diag(var_list))))
+                #print "error then:", sb_fits[sideband[0]][6]
+                relative_error = np.sqrt(sum([x**2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(sideband[1][index - 1:index + 2, 1])
+                print "relative error:", relative_error
+                sb_fits[sideband[0]][6] = coeff[1] * relative_error
+                #print "error now:", sb_fits[sideband[0]][6]                
                 if plot:
-                    x_vals = np.linspsace(sideband[1][0, 0], sideband[1][-1, 0], num=200)
+                    x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
             except:
                 print "God damn it, Leroy.\nYou couldn't fit this."
@@ -542,7 +549,7 @@ class SPEX(object):
         
         self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
         self.sb_results = self.sb_results[:, :7]
-        print "And the results, please:", self.results
+        print "And the results, please:", self.sb_results # Need to do errors correctly
             
         
 ####################
