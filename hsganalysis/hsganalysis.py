@@ -73,8 +73,11 @@ class Spectrum(object):
         self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["NIR_lambda"])
         self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["FEL_lambda"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
+        # I used flipup so that the x-axis is an increasing function of frequency
         
-        self.hsg_data = np.array(self.raw_data[:1600,:])
+        self.hsg_data = np.array(self.raw_data[:1600,:]) # By slicing up to 1600,
+                                                         # we cut out the text 
+                                                         # header
         self.hsg_data[:, 0] = 1239.84 / self.hsg_data[:, 0]
         self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['FEL_pulses']
         
@@ -553,7 +556,7 @@ class SPEX(object):
             
         
 ####################
-# Useful functions 
+# Fitting functions 
 ####################
 
 def gauss(x, *p):
@@ -567,6 +570,10 @@ def lingauss(x, *p):
 def lorentzian(x, *p):
     mu, A, gamma, y0 = p
     return (A * gamma**2) / ((x - mu)**2 + gamma**2) + y0
+
+####################
+# Collection functions
+####################
 
 def sum_spectra(object_list):
     """
@@ -606,6 +613,9 @@ def sum_spectra(object_list):
                     object_list.remove(spec)
         spec_number = stderr_holder.shape[1]
         std_error = np.sqrt(np.var(stderr_holder, axis=1, dtype=np.float64) + dark_var) / np.sqrt(spec_number) # Checking some sigma stuff from curve_fit
+        # This standard error is for every point.  I think it actually overestimates
+        # the error at places with no signal because we add the dark variance
+        # effectively twice.
         print "final dark_stdev:", np.sqrt(dark_var)
         temp.add_std_error(std_error)
         good_list.append(temp)
