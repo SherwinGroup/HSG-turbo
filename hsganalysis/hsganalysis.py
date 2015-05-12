@@ -461,13 +461,13 @@ class SPEX(object):
             self.sb_dict - keys are sideband order, values are PMT data arrays
             self.sb_list - sorted
         """
-        file_list = glob.glob(folder_path, '*.txt')
+        print "This started"
+        file_list = glob.glob(os.path.join(folder_path, '*.txt'))
         self.sb_dict = {}
-        
         # in __main__.py, look for the method "genSaveHeader"
         #                 look for method "initSettings" to see what parameters are saved
         f = open(file_list[0],'rU')
-        sb_num = f.readline() # Just need to get things down to the next line
+        throw_away = f.readline() # Just need to get things down to the next line
         parameters_str = f.readline()
         self.parameters = json.loads(parameters_str[1:])
         self.description = ''
@@ -478,24 +478,29 @@ class SPEX(object):
                 self.description += line[1:]
             else:
                 read_description = False
-        f.close()
         
         for sb_file in file_list:
-            f = open(file_list, 'rU')
-            sb_num = f.readline()
+            f = open(sb_file, 'rU')
+            sb_num = int(f.readline().split(' ')[-1])
+            print "Sideband number is", sb_num
             f.close()
-            raw_temp = np.genfromtxt(sb_file, comments='#', delimiter=',')
+            raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
+            # Hopefully saving will be comma delimited soon!
             frequencies = set(raw_temp[:, 0])
-            FEL_fired = True # Need to set this condition
+            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the cavity dump signal is more than half the mean of the cavity dump signal
+            print "The fire condition is", fire_condition
+            temp = None
             for freq in frequencies:
                 data_temp = np.array([])
                 for raw_point in raw_temp:
-                    if raw_point[0] == freq and FEL_fired:
-                        data_temp = np.concatenate((data_temp, raw_point[3])) # Wherever the actually important value is
+                    if raw_point[0] == freq and raw_point[2] > fire_condition:
+                        print "I'm going to add this", raw_point[0], raw_point[3]
+                        data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
+                print "The data temp is", data_temp
                 try:
-                    temp = np.vstack((temp, np.array(freq, np.mean(data_temp), np.std(data_temp))))
+                    temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
                 except:
-                    temp = np.array(freq, np.mean(data_temp), np.std(data_temp))
+                    temp = np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])
             temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
             self.sb_dict[sb_num] = np.array(temp)
         
@@ -508,10 +513,12 @@ class SPEX(object):
         """
         sb_fits = {}
         for sideband in self.sb_dict.items():
+            print "Sideband number", sideband[0]
             index = np.argmax(sideband[1][:, 1])
-            location = sideband[1][index, 0]
+            nir_frequency = sideband[1][index, 0]
             peak = sideband[1][index, 1]
-            p0 = [location, peak / 30000, 0.00003, 1.0]
+            p0 = [nir_frequency, peak / 3000, 0.00006, 0.00001]
+            print "p0:", p0
             try: 
                 coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0, sigma=sideband[1][:, 2], absolute_sigma=True)
                 coeff[1] = abs(coeff[1])
