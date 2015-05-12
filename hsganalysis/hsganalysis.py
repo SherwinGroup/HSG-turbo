@@ -17,12 +17,15 @@ import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 
-class Spectrum(object):
+####################
+# Objects 
+####################
+
+class CCD(object):
     """
-    This class will be for loading hsg spectra.  Currently, this will only load
-    data output from the EMCCD.  I think future versions should be able to
-    combine PMT and EMCCD data, as well as stitching scans.  It will contain 
-    all the methods useful for loading this kind of data.
+    This class will be for loading CCD spectra.  I think future versions should
+    be able to combine PMT and EMCCD data, as well as stitching scans.  It will
+    contain all the methods useful for loading this kind of data.
     """
     
     def __init__(self, fname):
@@ -276,7 +279,8 @@ class Spectrum(object):
                 sb_freq_guess.append(x_axis[found_index])
 #                sb_amp_guess.append(y_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
-                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 1]])) / (check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
+                # I think that should be a "+ 2" in the second index of slicing?
                 print "My error estimate is:", error_est
                 sb_error_estimate.append(error_est)
                 self.sb_list.append(order)
@@ -324,6 +328,7 @@ class Spectrum(object):
                 if 1e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
+                    # And had to scale by the area?
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
@@ -456,7 +461,8 @@ class SPEX(object):
     def __init__(self, folder_path):
         """
         Initializes a SPEX spectrum.  It'll open a folder, and bring in all of
-        the individual sidebands into this object.
+        the individual sidebands into this object. To work, all the individual
+        sidebands need to be in that folder, not in separate folders
         
         attributes:
             self.parameters - dictionary of important experimental parameters
@@ -464,13 +470,13 @@ class SPEX(object):
             self.sb_dict - keys are sideband order, values are PMT data arrays
             self.sb_list - sorted
         """
-        file_list = glob.glob(folder_path, '*.txt')
+        print "This started"
+        file_list = glob.glob(os.path.join(folder_path, '*.txt'))
         self.sb_dict = {}
-        
         # in __main__.py, look for the method "genSaveHeader"
         #                 look for method "initSettings" to see what parameters are saved
         f = open(file_list[0],'rU')
-        sb_num = f.readline() # Just need to get things down to the next line
+        throw_away = f.readline() # Just need to get things down to the next line
         parameters_str = f.readline()
         self.parameters = json.loads(parameters_str[1:])
         self.description = ''
@@ -481,24 +487,30 @@ class SPEX(object):
                 self.description += line[1:]
             else:
                 read_description = False
-        f.close()
         
         for sb_file in file_list:
-            f = open(file_list, 'rU')
-            sb_num = f.readline()
+            f = open(sb_file, 'rU')
+            sb_num = int(f.readline().split(' ')[-1])
+            print "Sideband number is", sb_num
             f.close()
-            raw_temp = np.genfromtxt(sb_file, comments='#', delimiter=',')
+            raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
+            # Hopefully saving will be comma delimited soon!
             frequencies = set(raw_temp[:, 0])
-            FEL_fired = True # Need to set this condition
+            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the cavity dump signal is more than half the mean of the cavity dump signal
+            print "The fire condition is", fire_condition
+            temp = None
             for freq in frequencies:
                 data_temp = np.array([])
                 for raw_point in raw_temp:
-                    if raw_point[0] == freq and FEL_fired:
-                        data_temp = np.concatenate((data_temp, raw_point[3])) # Wherever the actually important value is
+                    if raw_point[0] == freq and raw_point[2] > fire_condition:
+                        #print "I'm going to add this", raw_point[0], raw_point[3]
+                        data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
+                print "The data temp is", data_temp
+                print len(data_temp)
                 try:
-                    temp = np.vstack((temp, np.array(freq, np.mean(data_temp), np.std(data_temp))))
+                    temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
                 except:
-                    temp = np.array(freq, np.mean(data_temp), np.std(data_temp))
+                    temp = np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])
             temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
             self.sb_dict[sb_num] = np.array(temp)
         
@@ -507,24 +519,37 @@ class SPEX(object):
     def fit_sidebands(self, plot=False):
         """
         This method will fit a gaussian to each of the sidebands provided in 
-        the self.sb_dict and make a list just like in the EMCCD version.
+        the self.sb_dict and make a list just like in the EMCCD version.  It 
+        will also use the standard error of the integral of the PMT peak as the
+        error of the gaussian area instead of that element from the covariance
+        matrix.  Seems more legit.  
+        
+        attributes:
+        self.sb_results: the numpy array that contains all of the fit info just
+                         like it does in the CCD class.
         """
         sb_fits = {}
         for sideband in self.sb_dict.items():
+            print "Sideband number", sideband[0]
             index = np.argmax(sideband[1][:, 1])
-            location = sideband[1][index, 0]
+            nir_frequency = sideband[1][index, 0]
             peak = sideband[1][index, 1]
-            p0 = [location, peak / 30000, 0.00003, 1.0]
+            p0 = [nir_frequency, peak / 3000, 0.00006, 0.00001]
+            print "p0:", p0
             try: 
-                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0, sigma=sideband[1][:, 2], absolute_sigma=True)
+                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0)#, sigma=10*sideband[1][:, 2], absolute_sigma=True)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2])
                 print "coeffs:", coeff
-                
-                sb_fits[sideband[0]] = np.concatenate((sideband[0], coeff, np.sqrt(np.diag(var_list))))
-                
+
+                sb_fits[sideband[0]] = np.concatenate((np.array([sideband[0]]), coeff, np.sqrt(np.diag(var_list))))
+                #print "error then:", sb_fits[sideband[0]][6]
+                relative_error = np.sqrt(sum([x**2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(sideband[1][index - 1:index + 2, 1])
+                print "relative error:", relative_error
+                sb_fits[sideband[0]][6] = coeff[1] * relative_error
+                #print "error now:", sb_fits[sideband[0]][6]                
                 if plot:
-                    x_vals = np.linspsace(sideband[1][0, 0], sideband[1][-1, 0], num=200)
+                    x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
                     plt.plot(x_vals, gauss(x_vals, *coeff))
             except:
                 print "God damn it, Leroy.\nYou couldn't fit this."
@@ -538,8 +563,126 @@ class SPEX(object):
         
         self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
         self.sb_results = self.sb_results[:, :7]
-        print "And the results, please:", self.results
+        print "And the results, please:", self.sb_results 
+    
+    def save_processing(self, file_name, folder_str, marker='', index=''):
+        """
+        This will save all of the self.hsg_data and the results from the 
+        fitting of this individual file.
+        
+        Inputs:
+        file_name = the beginning of the file name to be saved
+        folder_str = the location of the folder where the file will be saved, 
+                     will create the folder, if necessary.
+        marker = I...I don't know what this was originally for
+        index = used to keep these files from overwriting themselves when in a
+                list
+        
+        Outputs:
+        Two files, one that is self.hsg_data, the other is self.sb_results
+        """
+        try:
+            os.mkdir(folder_str)
+        except OSError, e:
+            if e.errno == errno.EEXIST:
+                pass
+            else:
+                raise
+        
+        spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
+        self.save_name = spectra_fname
+        
+        self.parameters['addenda'] = self.addenda
+        self.parameters['subtrahenda'] = self.subtrahenda
+        try:
+            parameter_str = json.dumps(self.parameters, sort_keys=True)
+        except:
+            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print "Here is the dictionary that broke JSON:\n", self.parameters
+            return
+
+        origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
+        spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+        
+        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error\neV,,arb. u.,,eV,,\n,,'# + marker
+        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
+        
+        for sideband in sorted(self.sb_dict.keys()):
+            try:
+                complete = np.vstack((complete, self.sb_dict[sideband]))
+            except:
+                complete = np.array([self.sb_dict[sideband]])
+        
+        np.savetxt(os.path.join(folder_str, spectra_fname), complete, delimiter=',',
+                   header=spec_header, comments='', fmt='%f')
+        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
+                   header=fits_header, comments='', fmt='%f')
+
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
             
+class Spectrum(object):
+    """
+    This class will collect the sb_results arrays from PMT and CCD arrays and
+    combine them to make a complete spectrum.  Details are forthcoming.
+    """
+    def __init__(self, PMT_spectrum, CCD_spectrum):
+        """
+        This init will currently take a PMT object and a CCD object, grab the
+        sb_results attributes, then overwrite the sidebands too low-order to 
+        see accurately with the CCD with PMT results.  I have a feeling the CCD
+        data will always be better, which is definitely true from a resolution
+        standpoint.
+        
+        As it stands, we'll have to pair up the appropriate measurements 
+        beforehand.  I'm not sure how to pass this a list of pmt spectra and
+        ccd spectra and make it sort everything out.  I don't think that's how
+        we'd want to do it.
+        
+        Hopefully we will have to add multiple CCD spectra to this class in the
+        future.  I think the reason to make this a class is that this 
+        functionality could be best implemented with methods.  
+        """
+        self.pmt_results = PMT_spectrum.sb_results
+        self.ccd_results = CCD_spectrum.sb_results
+        
+        # Some functionality will be much easier with dictionaries, I think
+        self.pmt_dict = {}
+        self.ccd_dict = {}
+        for sb in self.pmt_result:
+            self.pmt_dict[sb[0]] = sb[1:]
+        for sb in self.ccd_result:
+            self.full_dict[sb[0]] = sb[1:]
+        
+        # Find sidebands that overlap
+        overlap = []
+        for pmt_sb in sorted(self.pmt_dict.keys()):
+            if pmt_sb in self.full_dict.keys():
+                overlap.append(pmt_sb)
+        
+        # Cut out the likely-bad ones from the CCD data
+        overlap = [x for x in overlap if x > 5.5]
+        
+        # Calculate the ratio of the signals
+        ratio_list = []
+        for sb in overlap:
+            ratio_list.append(self.full_dict[sb] / self.pmt_dict[sb])
+        print "ratio_list:", ratio_list
+        ratio = np.mean(ratio_list)
+        ratio_err = np.std(ratio_list) / np.sqrt(len(ratio_list))
+        
+        # Scale up PMT data, and propagate errors
+        for sb in sorted(self.pmt_dict.keys()):
+            old = self.pmt_dict[sb][3]
+            self.pmt_dict[sb][3] = ratio * self.pmt_dict[sb][3]
+            #self.pmt_dict[sb][4] = ratio * self.pmt_dict[sb][4]
+            self.pmt_dict[sb][4] = sb.pmt_dict[sb][3] * np.sqrt((ratio_err / ratio)**2 + (old / self.pmt_dict[sb][4])**2)
+            if sb not in overlap: # Because I want to get rid of the lowest order guys attenuated by SP filter
+                self.full_dict[sb] = self.pmt_dict[sb]
+    
+    
+        
+        
         
 ####################
 # Fitting functions 
