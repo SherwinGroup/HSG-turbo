@@ -73,8 +73,8 @@ class CCD(object):
 
         f.close()
 
-        self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["NIR_lambda"])
-        self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["FEL_lambda"])
+        self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
+        self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
         # I used flipup so that the x-axis is an increasing function of frequency
         
@@ -82,7 +82,7 @@ class CCD(object):
                                                          # we cut out the text 
                                                          # header
         self.hsg_data[:, 0] = 1239.84 / self.hsg_data[:, 0]
-        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['FEL_pulses']
+        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['fel_pulses']
         
         self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
         self.std_error = None
@@ -111,7 +111,7 @@ class CCD(object):
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
-                ret.parameters['FEL_pulses'] += other.parameters['FEL_pulses']
+                ret.parameters['fel_pulses'] += other.parameters['fel_pulses']
             else:
                 raise Exception('Source: Spectrum.__add__:\nThese are not from the same grating settings')
         return ret
@@ -421,6 +421,8 @@ class CCD(object):
             else:
                 raise
         
+        self.sb_results[:, 5:] = self.sb_results[:, 5:] * 1000 # For meV linewidths
+        
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
@@ -437,7 +439,7 @@ class CCD(object):
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
-        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error,Constant offset,error\neV,,arb. u.,,eV,,arb. u.,\n,,'# + marker
+        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error\norder,eV,,arb. u.,,meV,,arb. u.,\n' + marker
         fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
@@ -453,7 +455,7 @@ class CCD(object):
         """        
         raise NotImplementedError
 
-class SPEX(object):
+class PMT(object):
     """
     This class will handle a bunch of files related to one HSG spectrum.  I'm 
     not sure currently how to handle the two HSG sources together.
@@ -541,16 +543,16 @@ class SPEX(object):
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2])
                 print "coeffs:", coeff
-
-                sb_fits[sideband[0]] = np.concatenate((np.array([sideband[0]]), coeff, np.sqrt(np.diag(var_list))))
-                #print "error then:", sb_fits[sideband[0]][6]
-                relative_error = np.sqrt(sum([x**2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(sideband[1][index - 1:index + 2, 1])
-                print "relative error:", relative_error
-                sb_fits[sideband[0]][6] = coeff[1] * relative_error
-                #print "error now:", sb_fits[sideband[0]][6]                
-                if plot:
-                    x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
-                    plt.plot(x_vals, gauss(x_vals, *coeff))
+                if np.sqrt(np.diag(var_list))[0] < 0.001: # The error on where the sideband is should be small
+                    sb_fits[sideband[0]] = np.concatenate((np.array([sideband[0]]), coeff, np.sqrt(np.diag(var_list))))
+                    #print "error then:", sb_fits[sideband[0]][6]
+                    relative_error = np.sqrt(sum([x**2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(sideband[1][index - 1:index + 2, 1])
+                    print "relative error:", relative_error
+                    sb_fits[sideband[0]][6] = coeff[1] * relative_error
+                    #print "error now:", sb_fits[sideband[0]][6]                
+                    if plot:
+                        x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
+                        plt.plot(x_vals, gauss(x_vals, *coeff))
             except:
                 print "God damn it, Leroy.\nYou couldn't fit this."
                 sb_fits[sideband[0]] = None
@@ -645,45 +647,91 @@ class Spectrum(object):
         """
         self.pmt_results = PMT_spectrum.sb_results
         self.ccd_results = CCD_spectrum.sb_results
-        
+        self.parameters = CCD_spectrum.parameters
         # Some functionality will be much easier with dictionaries, I think
         self.pmt_dict = {}
-        self.ccd_dict = {}
-        for sb in self.pmt_result:
-            self.pmt_dict[sb[0]] = sb[1:]
-        for sb in self.ccd_result:
-            self.full_dict[sb[0]] = sb[1:]
+        self.full_dict = {}
+        for sb in self.pmt_results:
+            self.pmt_dict[sb[0]] = np.asarray(sb[1:])
+        for sb in self.ccd_results:
+            self.full_dict[sb[0]] = np.asarray(sb[1:])
+        print "Full dictionary:", self.full_dict
         
-        # Find sidebands that overlap
-        overlap = []
-        for pmt_sb in sorted(self.pmt_dict.keys()):
-            if pmt_sb in self.full_dict.keys():
-                overlap.append(pmt_sb)
+        self.full_dict = stitch_dicts(self.full_dict, self.pmt_dict, bad_order=1)
         
-        # Cut out the likely-bad ones from the CCD data
-        overlap = [x for x in overlap if x > 5.5]
+    def plot_prep(self):
+        """
+        This method is called once the full_dict has been completed.  It will
+        turn full_dict into a list like the results lists.
+        """
+        for sb in sorted(self.full_dict):
+            temp = np.concatenate((np.array([sb]), self.full_dict[sb]))
+            try:
+                self.full_results = np.vstack((self.full_results, temp))
+            except:
+                self.full_results = np.array(temp)
         
-        # Calculate the ratio of the signals
-        ratio_list = []
-        for sb in overlap:
-            ratio_list.append(self.full_dict[sb] / self.pmt_dict[sb])
-        print "ratio_list:", ratio_list
-        ratio = np.mean(ratio_list)
-        ratio_err = np.std(ratio_list) / np.sqrt(len(ratio_list))
-        
-        # Scale up PMT data, and propagate errors
-        for sb in sorted(self.pmt_dict.keys()):
-            old = self.pmt_dict[sb][3]
-            self.pmt_dict[sb][3] = ratio * self.pmt_dict[sb][3]
-            #self.pmt_dict[sb][4] = ratio * self.pmt_dict[sb][4]
-            self.pmt_dict[sb][4] = sb.pmt_dict[sb][3] * np.sqrt((ratio_err / ratio)**2 + (old / self.pmt_dict[sb][4])**2)
-            if sb not in overlap: # Because I want to get rid of the lowest order guys attenuated by SP filter
-                self.full_dict[sb] = self.pmt_dict[sb]
+        self.full_results[:, 5:] = self.full_results[:, 5:] * 1000
     
-    
+    def add_sidebands(self, CCD_spectrum):
+        """
+        This method will add more sidebands to the end of the current spectrum,
+        to increase the effective dynamic range.
+        """
+        self.ccd2_results = CCD_spectrum.sb_results
         
+        self.ccd2_dict = {}
+        for sb in self.ccd2_results:
+            self.ccd2_dict[sb[0]] = np.asarray(sb[1:])
         
+        self.full_dict = stitch_dicts(self.ccd2_dict, self.full_dict, bad_order=1)      
         
+    def save_processing(self, file_name, folder_str, marker='', index=''):
+        """
+        This will save all of the self.hsg_data and the results from the 
+        fitting of this individual file.
+        
+        Inputs:
+        file_name = the beginning of the file name to be saved
+        folder_str = the location of the folder where the file will be saved, 
+                     will create the folder, if necessary.
+        marker = I...I don't know what this was originally for
+        index = used to keep these files from overwriting themselves when in a
+                list
+        
+        Outputs:
+        Two files, one that is self.hsg_data, the other is self.sb_results
+        """
+        try:
+            os.mkdir(folder_str)
+        except OSError, e:
+            if e.errno == errno.EEXIST:
+                pass
+            else:
+                raise
+        
+        spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
+        self.save_name = spectra_fname
+        '''
+        self.parameters['addenda'] = self.addenda
+        self.parameters['subtrahenda'] = self.subtrahenda
+        '''
+        try:
+            parameter_str = json.dumps(self.parameters, sort_keys=True)
+        except:
+            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print "Here is the dictionary that broke JSON:\n", self.parameters
+            return
+
+        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error\norder,eV,,arb. u.,,meV,,\n,,' + marker
+        fits_header = '#' + parameter_str + origin_import_fits
+        
+        np.savetxt(os.path.join(folder_str, fit_fname), self.full_results, delimiter=',',
+                   header=fits_header, comments='', fmt='%f')
+
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
+
 ####################
 # Fitting functions 
 ####################
@@ -699,6 +747,42 @@ def lingauss(x, *p):
 def lorentzian(x, *p):
     mu, A, gamma, y0 = p
     return (A * gamma**2) / ((x - mu)**2 + gamma**2) + y0
+
+def stitch_dicts(main, new, bad_order=5):
+    """
+    This function will make the Spectrum class more readable.
+    """
+    overlap = []
+    for new_sb in sorted(new.keys()):
+        if new_sb in main.keys():
+            overlap.append(new_sb)
+    print "overlap:", overlap
+    # Cut out the likely-bad ones from the CCD data
+    overlap = [x for x in overlap if x > (bad_order + 0.5)]
+#    overlap = overlap[-2:]
+        
+    # Calculate the ratio of the signals
+    ratio_list = []
+    for sb in overlap:
+        ratio_list.append(main[sb][2] / new[sb][2])
+    print "ratio_list:", ratio_list
+    ratio = np.mean(ratio_list)
+    ratio_err = np.std(ratio_list) / np.sqrt(len(ratio_list))
+    print "ratio:", ratio
+    print "ratio error:", ratio_err
+    print "New data:", new
+        
+    # Scale up PMT data and add it to the full_dict, and propagate errors
+    for sb in sorted(new.keys()):
+        old = new[sb][2]
+#        print "sideband:", sb
+#        print "data relative error:", new[sb][3] / old
+#        print "ratio relative error:", ratio_err / ratio
+        new[sb][2] = ratio * new[sb][2]
+        new[sb][3] = new[sb][2] * np.sqrt((ratio_err / ratio)**2 + (new[sb][3] / old)**2)
+        if sb not in overlap: # Because I want to get rid of the lowest order guys attenuated by SP filter
+            main[sb] = new[sb]
+    return main
 
 ####################
 # Collection functions
