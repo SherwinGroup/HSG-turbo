@@ -241,8 +241,9 @@ class CCD(object):
         last_sb = NIR_freq + THz_freq * (sb_init - 1)
         index_guess = 0
         consecutive_null_sb = 0
+        break_condition = False
         for order in xrange(sb_init, 50):
-            lo_freq_bound = last_sb + THz_freq * (1 - 0.2) # Not sure what to do about these
+            lo_freq_bound = last_sb + THz_freq * (1 - 0.25) # Not sure what to do about these
             hi_freq_bound = last_sb + THz_freq * (1 + 0.2)
             start_index = False
             end_index = False
@@ -251,12 +252,18 @@ class CCD(object):
                 if start_index == False and x_axis[i] > lo_freq_bound:
                     print "start_index is", i
                     start_index = i
+                elif i == 1599:
+                    break_condition = True
+                    print "hit end of data, end_index is", i
+                    break
                 elif end_index == False and x_axis[i] > hi_freq_bound:
                     end_index = i
                     print "end_index is", i
                     index_guess = i
                     break
-                
+            if break_condition:
+                break
+            
             check_y = y_axis_temp[start_index + window:end_index + window]
             print "check_y is", check_y
             #check_max = check_y.max()
@@ -340,7 +347,7 @@ class CCD(object):
         try:
             sb_fits = sb_fits_temp[:, reorder]
         except:
-            sb_fits = list(sb_fits_temp)
+            print "The file is:", self.fname
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
                 
         # Going to label the appropriate row with the sideband
