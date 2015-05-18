@@ -194,6 +194,10 @@ class CCD(object):
         x_axis: a np.array consisting of the frequency axis of self.hsg_data.
         y_axis: a np.array consisting of the signal axis of self.hsg_data.
         sb_init: the smallest-order sideband that the frequency axis could see.
+        found_anything: boolean that keeps the method looking for sidebands 
+                        if they aren't within two orders of the start.
+        break_condition: boolean that will stop the method from looking past 
+                         the edge of the spectrum.
         check_max_index: index of maximum value in the 30% region
         check_max: amplitude of the sideband candidate, important for fitting
         check_max_area: approximate integral of the sideband candidate
@@ -241,10 +245,17 @@ class CCD(object):
         last_sb = NIR_freq + THz_freq * (sb_init - 1)
         index_guess = 0
         consecutive_null_sb = 0
+        consecutive_null_odd = 0
         break_condition = False
+        no_more_odds = False
+        found_anything = False
+        
         for order in xrange(sb_init, 50):
-            lo_freq_bound = last_sb + THz_freq * (1 - 0.25) # Not sure what to do about these
-            hi_freq_bound = last_sb + THz_freq * (1 + 0.2)
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb + THz_freq
+                continue
+            lo_freq_bound = last_sb + THz_freq * (1 - 0.22) # Not sure what to do about these
+            hi_freq_bound = last_sb + THz_freq * (1 + 0.22)
             start_index = False
             end_index = False
             print "\nSideband", order, "\n"            
@@ -277,6 +288,7 @@ class CCD(object):
             print "check_ave is", check_ave
             print "check_stdev is", check_stdev
             print "check_ratio is", (check_max_area - 3 * check_ave) / check_stdev
+            
             if (check_max_area - 3 * check_ave) > cutoff * check_stdev:
                 found_index = np.argmax(check_y) + start_index
                 self.sb_index.append(found_index)
@@ -292,11 +304,19 @@ class CCD(object):
                 sb_error_estimate.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
+                found_anything = True
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
             else:
                 print "I could not find sideband with order", order
                 last_sb = last_sb + THz_freq
-                consecutive_null_sb += 1
-            
+                if found_anything == True:
+                    consecutive_null_sb += 1
+                if found_anything == True and order % 2 == 1:
+                    consecutive_null_odd += 1
+            if consecutive_null_odd == 2 and no_more_odds == False:
+                print "I'm done looking for odd sidebands"
+                no_more_odds = True
             if consecutive_null_sb == 2:
                 print "I can't find any more sidebands"
                 break
