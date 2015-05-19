@@ -163,8 +163,212 @@ class CCD(object):
         except:
             print "Spectrum.add_std_error fucked up.  What's wrong?"
             print std_errors.shape
+    
+    def calc_approx_sb_order(self, freq):
+        """
+        This simple method will simply return a float approximating the order
+        of the frequency input.
+        """
+        nir_freq = self.parameters['NIR_freq']
+        thz_freq = self.parameters['THz_freq']
+        approx_order = (freq - nir_freq) / thz_freq
+        return approx_order
         
+    def guess_better(self, cutoff=4.5):
+        """
+        This method will replace the previous one for guessing sidebands.
+        """
+        
+        x_axis = np.array(self.hsg_data[:, 0])
+        y_axis = np.array(self.hsg_data[:, 1])
+        error = np.array(self.hsg_data[:, 2])
+        #window = 20
+        
+        min_sb = int(self.calc_approx_sb_order(x_axis[0])) + 1
+        max_sb = int(self.calc_approx_sb_order(x_axis[-1]))
+        
+        #pre = np.empty(window)
+        #post = np.empty(window)
+        
+        #pre[:] = -np.Inf
+        #post[:] = -np.Inf
+        #y_axis_temp = np.concatenate((pre, y_axis, post))
+        
+        nir_freq = self.parameters["NIR_freq"]
+        thz_freq = self.parameters["THz_freq"]
+        
+        # Find max strength sideband and it's order
+        global_max = np.argmax(y_axis)
+        order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
 
+        check_y = y_axis[global_max - 15:global_max + 15]
+        print "Global max checking:", check_y
+        check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
+        check_ave = np.mean(check_y)
+        check_stdev = np.std(check_y)
+        print "\ncheck_max_area is", check_max_area
+        print "check_ave is", check_ave
+        print "check_stdev is", check_stdev
+        check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+        print "check_ratio is", check_ratio
+        if check_ratio > cutoff:
+            self.sb_list = [order_init]
+            self.sb_index = [global_max]
+            sb_freq_guess = [x_axis[global_max]]
+            sb_amp_guess = [y_axis[global_max]]
+            sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 1:global_max + 2]])) / (check_max_area - 3 * check_ave)]
+        else:
+            print "There are no sidebands in", self.fname
+            assert False
+        
+        
+        # Look for lower order sidebands
+        
+        last_sb = sb_freq_guess[0]
+        index_guess = global_max
+        consecutive_null_sb = 0
+        consecutive_null_odd = 0
+        no_more_odds = False
+        
+        for order in xrange(order_init - 1, min_sb - 1, -1):
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb - thz_freq
+                continue
+            lo_freq_bound = last_sb - thz_freq * (1 + 0.22) # Not sure what to do about these
+            hi_freq_bound = last_sb - thz_freq * (1 - 0.22)
+            start_index = False
+            end_index = False
+            print "\nSideband", order, "\n"            
+            for i in xrange(index_guess, 0, -1):
+                if end_index == False and x_axis[i] < hi_freq_bound:
+                    print "end_index is", i
+                    end_index = i
+                elif i == 1:
+                    start_index = 0
+                    print "hit end of data, start_index is 0"
+                elif start_index == False and x_axis[i] < lo_freq_bound:
+                    start_index = i
+                    print "start_index is", i
+                    index_guess = i
+                    break
+                
+            check_y = y_axis[start_index:end_index]
+            print "check_y is", check_y
+            #check_max = check_y.max()
+            #print "check_max is", check_max
+            check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
+            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
+            check_ave = np.mean(check_y)
+            check_stdev = np.std(check_y)
+            check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", check_ratio
+            
+            if check_ratio > cutoff:
+                found_index = check_max_index + start_index
+                self.sb_index.append(found_index)
+                last_sb = x_axis[found_index]
+                print "I just found", last_sb
+                
+                sb_freq_guess.append(x_axis[found_index])
+                sb_amp_guess.append(check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
+                print "My error estimate is:", error_est
+                sb_error_est.append(error_est)
+                self.sb_list.append(order)
+                consecutive_null_sb = 0
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
+            else:
+                print "I could not find sideband with order", order
+                last_sb = last_sb + thz_freq
+                consecutive_null_sb += 1
+                if order % 2 == 1:
+                    consecutive_null_odd += 1
+            if consecutive_null_odd == 1 and no_more_odds == False:
+                print "I'm done looking for odd sidebands"
+                no_more_odds = True
+            if consecutive_null_sb == 2:
+                print "I can't find any more sidebands"
+                break  
+        
+        # Look for higher sidebands
+        
+        last_sb = sb_freq_guess[0]
+        index_guess = global_max
+        consecutive_null_sb = 0
+        consecutive_null_odd = 0
+        no_more_odds = False
+        for order in xrange(order_init + 1, max_sb + 1):
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb + thz_freq
+                continue
+            lo_freq_bound = last_sb + thz_freq * (1 - 0.22) # Not sure what to do about these
+            hi_freq_bound = last_sb + thz_freq * (1 + 0.22)
+            start_index = False
+            end_index = False
+            print "\nSideband", order, "\n"            
+            for i in xrange(index_guess, 1600):
+                if start_index == False and x_axis[i] > lo_freq_bound:
+                    print "start_index is", i
+                    start_index = i
+                elif i == 1599:
+                    end_index = 1599
+                    print "hit end of data, end_index is 1599"
+                elif end_index == False and x_axis[i] > hi_freq_bound:
+                    end_index = i
+                    print "end_index is", i
+                    index_guess = i
+                    break
+                
+            check_y = y_axis[start_index:end_index]
+            print "check_y is", check_y
+            #check_max = check_y.max()
+            #print "check_max is", check_max
+            check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
+            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
+            check_ave = np.mean(check_y)
+            check_stdev = np.std(check_y)
+            check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", check_ratio
+            
+            if check_ratio > cutoff:
+                found_index = check_max_index + start_index
+                self.sb_index.append(found_index)
+                last_sb = x_axis[found_index]
+                print "I just found", last_sb
+                
+                sb_freq_guess.append(x_axis[found_index])
+                sb_amp_guess.append(check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
+                print "My error estimate is:", error_est
+                sb_error_est.append(error_est)
+                self.sb_list.append(order)
+                consecutive_null_sb = 0
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
+            else:
+                print "I could not find sideband with order", order
+                last_sb = last_sb + thz_freq
+                consecutive_null_sb += 1
+                if order % 2 == 1:
+                    consecutive_null_odd += 1
+            if consecutive_null_odd == 1 and no_more_odds == False:
+                print "I'm done looking for odd sidebands"
+                no_more_odds = True
+            if consecutive_null_sb == 2:
+                print "I can't find any more sidebands"
+                break  
+        
+        print "I found these sidebands:", self.sb_list
+        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_est)]).T
+
+        
     def guess_sidebands(self, cutoff=4.5):
         """
         This method finds all the sideband candidates in hsg_data.  It first
