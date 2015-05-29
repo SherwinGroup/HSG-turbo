@@ -72,9 +72,19 @@ class CCD(object):
                 read_description = False
 
         f.close()
-
+        '''
+        ###
+        # This section is for old code compatability
+        ###
+        self.parameters["nir_lambda"] = self.parameters["NIR_lambda"] 
+        self.parameters["fel_lambda"] = self.parameters["FEL_lambda"]
+        self.parameters["fel_pulses"] = self.parameters["FEL_pulses"]
+        ### End section
+        '''
         self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
+        self.parameters["nir_power"] = float(self.parameters["nir_power"])
+        self.parameters["thz_power"] = float(self.parameters["fel_power"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
         # I used flipup so that the x-axis is an increasing function of frequency
         
@@ -229,7 +239,7 @@ class CCD(object):
         consecutive_null_sb = 0
         consecutive_null_odd = 0
         no_more_odds = False
-        
+        break_condition = False
         for order in xrange(order_init - 1, min_sb - 1, -1):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb - thz_freq
@@ -240,6 +250,9 @@ class CCD(object):
             end_index = False
             print "\nSideband", order, "\n"            
             for i in xrange(index_guess, 0, -1):
+                if end_index == False and i == 1:
+                    break_condition = True
+                    break
                 if end_index == False and x_axis[i] < hi_freq_bound:
                     print "end_index is", i
                     end_index = i
@@ -251,7 +264,9 @@ class CCD(object):
                     print "start_index is", i
                     index_guess = i
                     break
-                
+            
+            if break_condition:
+                break
             check_y = y_axis[start_index:end_index]
             print "check_y is", check_y
             #check_max = check_y.max()
@@ -301,6 +316,7 @@ class CCD(object):
         consecutive_null_sb = 0
         consecutive_null_odd = 0
         no_more_odds = False
+        break_condition = False
         for order in xrange(order_init + 1, max_sb + 1):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
@@ -311,7 +327,11 @@ class CCD(object):
             end_index = False
             print "\nSideband", order, "\n"            
             for i in xrange(index_guess, 1600):
-                if start_index == False and x_axis[i] > lo_freq_bound:
+                if start_index == False and i == 1599:
+                    print "I'm all out of space, captain!"
+                    break_condition = True
+                    break
+                elif start_index == False and x_axis[i] > lo_freq_bound:
                     print "start_index is", i
                     start_index = i
                 elif i == 1599:
@@ -322,7 +342,8 @@ class CCD(object):
                     print "end_index is", i
                     index_guess = i
                     break
-                
+            if break_condition:
+                break
             check_y = y_axis[start_index:end_index]
             print "check_y is", check_y
             #check_max = check_y.max()
@@ -556,13 +577,13 @@ class CCD(object):
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
                 print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
-                if 1e-4 > coeff[2] > 10e-6:
+                if 3e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     # And had to scale by the area?
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    plt.plot(x_vals, gauss(x_vals, *coeff))
+                    plt.plot(x_vals, gauss(x_vals, *coeff), linewidth = 2)
             except:
                 print "I couldn't fit that"
                 self.sb_list[elem] = None
@@ -575,11 +596,13 @@ class CCD(object):
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
                 
         # Going to label the appropriate row with the sideband
-        self.sb_list = list([x for x in self.sb_list if x is not None])
+        self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
         print "sb_names:", sb_names
-        print "sb_fits:", sb_fits[:,:7]
-        self.sb_results = np.array(sb_fits[:,:7])
+        print "sb_fits:", sb_fits
+        sorter = np.argsort(sb_fits[:, 0])
+        
+        self.sb_results = np.array(sb_fits[sorter, :7])
         print "sb_results:", self.sb_results
 
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
@@ -1141,13 +1164,13 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     origin_import1 = param_name + ",dark_stdev"
     origin_import2 = unit + ",post shot norm"
     for order in sb_included:
-        origin_import1 += ",Sideband,Frequency,error,Amplitude,error,Linewidth,error"
+        origin_import1 += ",Sideband,Frequency,error,Sideband strength,error,Linewidth,error"
         origin_import2 += ",order,eV,,arb. u.,,eV,"
     origin_total = origin_import1 + "\n" + origin_import2 #+ "\n"
     header = '#' + included_spectra_str + '\n' + origin_total
     #print "Spec header: ", spec_header
-
-    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+    print "the param_array is:", param_array
+    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
                header=header, comments='', fmt='%f')
 
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
