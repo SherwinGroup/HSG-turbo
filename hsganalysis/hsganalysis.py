@@ -567,23 +567,27 @@ class CCD(object):
         """
         print "Trying to fit these"
         sb_fits = []
-        for elem in xrange(len(self.sb_index)): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
+        for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
             data_temp = self.hsg_data[self.sb_index[elem] - 10:self.sb_index[elem] + 10, :]
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00003, 1.0]
             #print "Let's fit this shit!"
             try:
-                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+                coeff, var_list = curve_fit(makeGauss(self.sb_list[elem]), data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
-                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
-                if 3e-4 > coeff[2] > 10e-6:
+                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
+                if True: #3e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     # And had to scale by the area?
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    plt.plot(x_vals, gauss(x_vals, *coeff), linewidth = 2)
+                    plt.plot(x_vals, gauss(x_vals, *coeff), 
+                             plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
+                                                         # just looked around at what functions
+                                                         # matplotlib has...
+                             , linewidth = 3)
             except:
                 print "I couldn't fit that"
                 self.sb_list[elem] = None
@@ -989,6 +993,16 @@ class Spectrum(object):
 ####################
 # Fitting functions 
 ####################
+
+def makeGauss(sbNum):
+    def gaussian(x, *p):
+        sbNum = 1
+        mu, A, sigma, y0 = p
+        penalty = 0
+        if not 3e-4*sbNum > sigma > 0.01e-4*sbNum: penalty += 1e6
+        if abs(y0)>1e2: penalty+=1e60
+        return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + penalty
+    return gaussian
 
 def gauss(x, *p):
     mu, A, sigma, y0 = p
