@@ -72,9 +72,19 @@ class CCD(object):
                 read_description = False
 
         f.close()
-
+        '''
+        ###
+        # This section is for old code compatability
+        ###
+        self.parameters["nir_lambda"] = self.parameters["NIR_lambda"] 
+        self.parameters["fel_lambda"] = self.parameters["FEL_lambda"]
+        self.parameters["fel_pulses"] = self.parameters["FEL_pulses"]
+        ### End section
+        '''
         self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
+        self.parameters["nir_power"] = float(self.parameters["nir_power"])
+        self.parameters["thz_power"] = float(self.parameters["fel_power"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
         # I used flipup so that the x-axis is an increasing function of frequency
         
@@ -163,8 +173,223 @@ class CCD(object):
         except:
             print "Spectrum.add_std_error fucked up.  What's wrong?"
             print std_errors.shape
+    
+    def calc_approx_sb_order(self, freq):
+        """
+        This simple method will simply return a float approximating the order
+        of the frequency input.
+        """
+        nir_freq = self.parameters['NIR_freq']
+        thz_freq = self.parameters['THz_freq']
+        approx_order = (freq - nir_freq) / thz_freq
+        return approx_order
         
+    def guess_better(self, cutoff=4.5):
+        """
+        This method will replace the previous one for guessing sidebands.
+        """
+        
+        x_axis = np.array(self.hsg_data[:, 0])
+        y_axis = np.array(self.hsg_data[:, 1])
+        error = np.array(self.hsg_data[:, 2])
+        #window = 20
+        
+        min_sb = int(self.calc_approx_sb_order(x_axis[0])) + 1
+        max_sb = int(self.calc_approx_sb_order(x_axis[-1]))
+        
+        #pre = np.empty(window)
+        #post = np.empty(window)
+        
+        #pre[:] = -np.Inf
+        #post[:] = -np.Inf
+        #y_axis_temp = np.concatenate((pre, y_axis, post))
+        
+        nir_freq = self.parameters["NIR_freq"]
+        thz_freq = self.parameters["THz_freq"]
+        
+        # Find max strength sideband and it's order
+        global_max = np.argmax(y_axis)
+        order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
 
+        check_y = y_axis[global_max - 15:global_max + 15]
+        print "Global max checking:", check_y
+        check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
+        check_ave = np.mean(check_y)
+        check_stdev = np.std(check_y)
+        print "\ncheck_max_area is", check_max_area
+        print "check_ave is", check_ave
+        print "check_stdev is", check_stdev
+        check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+        print "check_ratio is", check_ratio
+        if check_ratio > cutoff:
+            self.sb_list = [order_init]
+            self.sb_index = [global_max]
+            sb_freq_guess = [x_axis[global_max]]
+            sb_amp_guess = [y_axis[global_max]]
+            sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 1:global_max + 2]])) / (check_max_area - 3 * check_ave)]
+        else:
+            print "There are no sidebands in", self.fname
+            assert False
+        
+        
+        # Look for lower order sidebands
+        
+        last_sb = sb_freq_guess[0]
+        index_guess = global_max
+        consecutive_null_sb = 0
+        consecutive_null_odd = 0
+        no_more_odds = False
+        break_condition = False
+        for order in xrange(order_init - 1, min_sb - 1, -1):
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb - thz_freq
+                continue
+            lo_freq_bound = last_sb - thz_freq * (1 + 0.22) # Not sure what to do about these
+            hi_freq_bound = last_sb - thz_freq * (1 - 0.22)
+            start_index = False
+            end_index = False
+            print "\nSideband", order, "\n"            
+            for i in xrange(index_guess, 0, -1):
+                if end_index == False and i == 1:
+                    break_condition = True
+                    break
+                if end_index == False and x_axis[i] < hi_freq_bound:
+                    print "end_index is", i
+                    end_index = i
+                elif i == 1:
+                    start_index = 0
+                    print "hit end of data, start_index is 0"
+                elif start_index == False and x_axis[i] < lo_freq_bound:
+                    start_index = i
+                    print "start_index is", i
+                    index_guess = i
+                    break
+            
+            if break_condition:
+                break
+            check_y = y_axis[start_index:end_index]
+            print "check_y is", check_y
+            #check_max = check_y.max()
+            #print "check_max is", check_max
+            check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
+            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
+            check_ave = np.mean(check_y)
+            check_stdev = np.std(check_y)
+            check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", check_ratio
+            
+            if check_ratio > cutoff:
+                found_index = check_max_index + start_index
+                self.sb_index.append(found_index)
+                last_sb = x_axis[found_index]
+                print "I just found", last_sb
+                
+                sb_freq_guess.append(x_axis[found_index])
+                sb_amp_guess.append(check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
+                print "My error estimate is:", error_est
+                sb_error_est.append(error_est)
+                self.sb_list.append(order)
+                consecutive_null_sb = 0
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
+            else:
+                print "I could not find sideband with order", order
+                last_sb = last_sb + thz_freq
+                consecutive_null_sb += 1
+                if order % 2 == 1:
+                    consecutive_null_odd += 1
+            if consecutive_null_odd == 1 and no_more_odds == False:
+                print "I'm done looking for odd sidebands"
+                no_more_odds = True
+            if consecutive_null_sb == 2:
+                print "I can't find any more sidebands"
+                break  
+        
+        # Look for higher sidebands
+        
+        last_sb = sb_freq_guess[0]
+        index_guess = global_max
+        consecutive_null_sb = 0
+        consecutive_null_odd = 0
+        no_more_odds = False
+        break_condition = False
+        for order in xrange(order_init + 1, max_sb + 1):
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb + thz_freq
+                continue
+            lo_freq_bound = last_sb + thz_freq * (1 - 0.22) # Not sure what to do about these
+            hi_freq_bound = last_sb + thz_freq * (1 + 0.22)
+            start_index = False
+            end_index = False
+            print "\nSideband", order, "\n"            
+            for i in xrange(index_guess, 1600):
+                if start_index == False and i == 1599:
+                    print "I'm all out of space, captain!"
+                    break_condition = True
+                    break
+                elif start_index == False and x_axis[i] > lo_freq_bound:
+                    print "start_index is", i
+                    start_index = i
+                elif i == 1599:
+                    end_index = 1599
+                    print "hit end of data, end_index is 1599"
+                elif end_index == False and x_axis[i] > hi_freq_bound:
+                    end_index = i
+                    print "end_index is", i
+                    index_guess = i
+                    break
+            if break_condition:
+                break
+            check_y = y_axis[start_index:end_index]
+            print "check_y is", check_y
+            #check_max = check_y.max()
+            #print "check_max is", check_max
+            check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
+            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
+            check_ave = np.mean(check_y)
+            check_stdev = np.std(check_y)
+            check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", check_ratio
+            
+            if check_ratio > cutoff:
+                found_index = check_max_index + start_index
+                self.sb_index.append(found_index)
+                last_sb = x_axis[found_index]
+                print "I just found", last_sb
+                
+                sb_freq_guess.append(x_axis[found_index])
+                sb_amp_guess.append(check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
+                print "My error estimate is:", error_est
+                sb_error_est.append(error_est)
+                self.sb_list.append(order)
+                consecutive_null_sb = 0
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
+            else:
+                print "I could not find sideband with order", order
+                last_sb = last_sb + thz_freq
+                consecutive_null_sb += 1
+                if order % 2 == 1:
+                    consecutive_null_odd += 1
+            if consecutive_null_odd == 1 and no_more_odds == False:
+                print "I'm done looking for odd sidebands"
+                no_more_odds = True
+            if consecutive_null_sb == 2:
+                print "I can't find any more sidebands"
+                break  
+        
+        print "I found these sidebands:", self.sb_list
+        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_est)]).T
+
+        
     def guess_sidebands(self, cutoff=4.5):
         """
         This method finds all the sideband candidates in hsg_data.  It first
@@ -194,6 +419,10 @@ class CCD(object):
         x_axis: a np.array consisting of the frequency axis of self.hsg_data.
         y_axis: a np.array consisting of the signal axis of self.hsg_data.
         sb_init: the smallest-order sideband that the frequency axis could see.
+        found_anything: boolean that keeps the method looking for sidebands 
+                        if they aren't within two orders of the start.
+        break_condition: boolean that will stop the method from looking past 
+                         the edge of the spectrum.
         check_max_index: index of maximum value in the 30% region
         check_max: amplitude of the sideband candidate, important for fitting
         check_max_area: approximate integral of the sideband candidate
@@ -241,9 +470,17 @@ class CCD(object):
         last_sb = NIR_freq + THz_freq * (sb_init - 1)
         index_guess = 0
         consecutive_null_sb = 0
+        consecutive_null_odd = 0
+        break_condition = False
+        no_more_odds = False
+        found_anything = False
+        
         for order in xrange(sb_init, 50):
-            lo_freq_bound = last_sb + THz_freq * (1 - 0.2) # Not sure what to do about these
-            hi_freq_bound = last_sb + THz_freq * (1 + 0.2)
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb + THz_freq
+                continue
+            lo_freq_bound = last_sb + THz_freq * (1 - 0.22) # Not sure what to do about these
+            hi_freq_bound = last_sb + THz_freq * (1 + 0.22)
             start_index = False
             end_index = False
             print "\nSideband", order, "\n"            
@@ -251,12 +488,18 @@ class CCD(object):
                 if start_index == False and x_axis[i] > lo_freq_bound:
                     print "start_index is", i
                     start_index = i
+                elif i == 1599:
+                    break_condition = True
+                    print "hit end of data, end_index is", i
+                    break
                 elif end_index == False and x_axis[i] > hi_freq_bound:
                     end_index = i
                     print "end_index is", i
                     index_guess = i
                     break
-                
+            if break_condition:
+                break
+            
             check_y = y_axis_temp[start_index + window:end_index + window]
             print "check_y is", check_y
             #check_max = check_y.max()
@@ -270,6 +513,7 @@ class CCD(object):
             print "check_ave is", check_ave
             print "check_stdev is", check_stdev
             print "check_ratio is", (check_max_area - 3 * check_ave) / check_stdev
+            
             if (check_max_area - 3 * check_ave) > cutoff * check_stdev:
                 found_index = np.argmax(check_y) + start_index
                 self.sb_index.append(found_index)
@@ -285,11 +529,19 @@ class CCD(object):
                 sb_error_estimate.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
+                found_anything = True
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
             else:
                 print "I could not find sideband with order", order
                 last_sb = last_sb + THz_freq
-                consecutive_null_sb += 1
-            
+                if found_anything == True:
+                    consecutive_null_sb += 1
+                if found_anything == True and order % 2 == 1:
+                    consecutive_null_odd += 1
+            if consecutive_null_odd == 2 and no_more_odds == False:
+                print "I'm done looking for odd sidebands"
+                no_more_odds = True
             if consecutive_null_sb == 2:
                 print "I can't find any more sidebands"
                 break
@@ -325,13 +577,13 @@ class CCD(object):
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
                 print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1])
-                if 1e-4 > coeff[2] > 10e-6:
+                if 3e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     # And had to scale by the area?
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    plt.plot(x_vals, gauss(x_vals, *coeff))
+                    plt.plot(x_vals, gauss(x_vals, *coeff), linewidth = 2)
             except:
                 print "I couldn't fit that"
                 self.sb_list[elem] = None
@@ -340,15 +592,17 @@ class CCD(object):
         try:
             sb_fits = sb_fits_temp[:, reorder]
         except:
-            sb_fits = list(sb_fits_temp)
+            print "The file is:", self.fname
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
                 
         # Going to label the appropriate row with the sideband
-        self.sb_list = list([x for x in self.sb_list if x is not None])
+        self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
         print "sb_names:", sb_names
-        print "sb_fits:", sb_fits[:,:7]
-        self.sb_results = np.array(sb_fits[:,:7])
+        print "sb_fits:", sb_fits
+        sorter = np.argsort(sb_fits[:, 0])
+        
+        self.sb_results = np.array(sb_fits[sorter, :7])
         print "sb_results:", self.sb_results
 
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
@@ -915,8 +1169,8 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     origin_total = origin_import1 + "\n" + origin_import2 #+ "\n"
     header = '#' + included_spectra_str + '\n' + origin_total
     #print "Spec header: ", spec_header
-
-    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+    print "the param_array is:", param_array
+    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
                header=header, comments='', fmt='%f')
 
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
