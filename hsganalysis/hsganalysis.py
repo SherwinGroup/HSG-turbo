@@ -568,15 +568,16 @@ class CCD(object):
         print "Trying to fit these"
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
-            data_temp = self.hsg_data[self.sb_index[elem] - 10:self.sb_index[elem] + 10, :]
-            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00003, 1.0]
+            data_temp = self.hsg_data[self.sb_index[elem] - 20:self.sb_index[elem] + 20, :]
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00007, 1.0]
             #print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(makeGauss(self.sb_list[elem]), data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
-                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
+#                print coeff[1] / coeff[2], " vs. ", np.max(data/temp[:, 1]), "of", self.sb_list[elem]
+#                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if True: #3e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
@@ -602,12 +603,12 @@ class CCD(object):
         # Going to label the appropriate row with the sideband
         self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
-        print "sb_names:", sb_names
-        print "sb_fits:", sb_fits
+#        print "sb_names:", sb_names
+#        print "sb_fits:", sb_fits
         sorter = np.argsort(sb_fits[:, 0])
         
         self.sb_results = np.array(sb_fits[sorter, :7])
-        print "sb_results:", self.sb_results
+#        print "sb_results:", self.sb_results
 
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
         """
@@ -994,13 +995,38 @@ class Spectrum(object):
 # Fitting functions 
 ####################
 
+
+"""
+Hey nutsack
+
+It doesn't seem to work, obviously. Sigma is seeded with 3e-5, which just so happens to be
+nearly the exact value that all of the sigmas seem to settle around. If I had to guess,
+the algorithm does something weird where it steps outside the allowed band, sees it can't go there,
+thinks it fucked up hard, and doesn't move again. maybe the gradient is too large, so it assumes
+that it can't move. Maybe lower the walls, or have them be a function of the deviation from allowed, 
+instead of a sharp wall. Or see if you can look into the stepping algorithm to figure out
+another way to stop it.
+
+"""
+
+
 def makeGauss(sbNum):
+    # The width of the sidebands is vaguely a function of sb number
+    # I fit a sample set without bounding and found the general trend
+    # of width vs. sbnum and rough bounds. I assumed it was linear and
+    # just picked bounds which fairly well fit everything and cut out
+    # the clearly incorrect ones
+    m = 2.6e-6
+    b1 = 3e-5 + 4e-5
+    b2 = 3e-5 - 4e-5
     def gaussian(x, *p):
-        sbNum = 1
         mu, A, sigma, y0 = p
         penalty = 0
-        if not 3e-4*sbNum > sigma > 0.01e-4*sbNum: penalty += 1e6
-        if abs(y0)>1e2: penalty+=1e60
+#        if m*sbNum+b1 < sigma:
+#            penalty += 1e3 * (m*sbNum+b1 - sigma)/sigma
+#        elif sigma< m*sbNum+b2:
+#            penalty += 1e3 * (sigma - m*sbNum+b2)/sigma
+#        if abs(y0)>1e2: penalty+=1e60
         return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + penalty
     return gaussian
 
