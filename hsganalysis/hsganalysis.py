@@ -92,9 +92,10 @@ class CCD(object):
                                                          # we cut out the text 
                                                          # header
         self.hsg_data[:, 0] = 1239.84 / self.hsg_data[:, 0]
-        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['fel_pulses']
+        # Need to do this next line AFTER adding all the spectra together
+        #self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['fel_pulses']
         
-        self.dark_stdev = np.std(self.hsg_data[1400:1600, 1])
+        self.dark_stdev = self.parameters["background_darkcount_std"] # What do I do with this now that hsg_data is not normalized?
         self.std_error = None
         # These will keep track of what operations have been performed
         
@@ -183,7 +184,16 @@ class CCD(object):
         thz_freq = self.parameters['THz_freq']
         approx_order = (freq - nir_freq) / thz_freq
         return approx_order
-        
+    
+    def pulse_normalize(self):
+        """
+        This method will divide the hsg_data by the number of pulses, and it
+        must be done AFTER adding all the individual scans together.
+        """
+        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['fel_pulses']
+        self.hsg_data[:, 2] = self.hsg_data[:, 2] / self.parameters['fel_pulses']
+
+    
     def guess_better(self, cutoff=4.5):
         """
         This method will replace the previous one for guessing sidebands.
@@ -568,17 +578,17 @@ class CCD(object):
         print "Trying to fit these"
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
-            data_temp = self.hsg_data[self.sb_index[elem] - 20:self.sb_index[elem] + 20, :]
-            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.00007, 1.0]
+            data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.0003, 1.0]
             #print "Let's fit this shit!"
             try:
-                coeff, var_list = curve_fit(makeGauss(self.sb_list[elem]), data_temp[:, 0], data_temp[:, 1], p0=p0)
+                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
 #                print coeff[1] / coeff[2], " vs. ", np.max(data/temp[:, 1]), "of", self.sb_list[elem]
 #                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
-                if True: #3e-4 > coeff[2] > 10e-6:
+                if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     # And had to scale by the area?
@@ -590,7 +600,7 @@ class CCD(object):
                                                          # matplotlib has...
                              , linewidth = 3)
             except:
-                print "I couldn't fit that"
+                print "I couldn't fit", elem
                 self.sb_list[elem] = None
         sb_fits_temp = np.asarray(sb_fits)
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
@@ -1112,8 +1122,8 @@ def sum_spectra(object_list):
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))
-                    print "Individual dark_stdev:", spec.dark_stdev
-                    dark_var += (spec.dark_stdev)**2
+                    print "Individual dark_stdev:", spec.parameters["background_darkcount_std"]
+                    dark_var += (spec.parameters["background_darkcount_std"])**2
 #                    print "Standard error holder shape 2:", stderr_holder.shape
 #                    print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
@@ -1125,6 +1135,7 @@ def sum_spectra(object_list):
         # effectively twice.
         print "final dark_stdev:", np.sqrt(dark_var)
         temp.add_std_error(std_error)
+        temp.pulse_normalize()
         good_list.append(temp)
     return good_list
 
@@ -1174,7 +1185,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
             if not temp_dict.has_key(sb):
                 print "\nNeed to add sideband order:", sb
                 temp_dict[sb] = blank
-        spec_data = np.array([spec.parameters[param_name], spec.dark_stdev])
+        spec_data = np.array([float(spec.parameters[param_name]), spec.dark_stdev])
         for key in sorted(temp_dict.keys()):
             print "I am going to hstack this:", temp_dict[key]
             spec_data = np.hstack((spec_data, temp_dict[key]))
@@ -1203,10 +1214,12 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
         return
     origin_import1 = param_name + ",dark_stdev"
     origin_import2 = unit + ",post shot norm"
+    origin_import3 = ","
     for order in sb_included:
         origin_import1 += ",Sideband,Frequency,error,Sideband strength,error,Linewidth,error"
         origin_import2 += ",order,eV,,arb. u.,,eV,"
-    origin_total = origin_import1 + "\n" + origin_import2 #+ "\n"
+        origin_import3 += ",,{0},,{0},,{0},".format(order)
+    origin_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
     header = '#' + included_spectra_str + '\n' + origin_total
     #print "Spec header: ", spec_header
     print "the param_array is:", param_array
