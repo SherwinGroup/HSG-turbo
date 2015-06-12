@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'C:\Users\dvalovcin\Documents\GitHub\HSG-turbo\hsganalysis\UI\mainWin.ui'
 #
-# Created: Tue Jun 02 10:07:57 2015
+# Created: Thu Jun 11 11:25:36 2015
 #      by: PyQt4 UI code generator 4.10.4
 #
 # WARNING! All changes made in this file will be lost!
@@ -42,7 +42,7 @@ class Ui_MainWindow(object):
         self.splitSpectrum.setObjectName(_fromUtf8("splitSpectrum"))
         self.ptFile = ParameterTree(self.splitSpectrum)
         self.ptFile.setObjectName(_fromUtf8("ptFile"))
-        self.gSpectrum = PlotWidget(self.splitSpectrum)
+        self.gSpectrum = DraggablePlotWidget(self.splitSpectrum)
         self.gSpectrum.setObjectName(_fromUtf8("gSpectrum"))
         self.horizontalLayout_2.addWidget(self.splitSpectrum)
         self.tabWidget.addTab(self.tabSpectrum, _fromUtf8(""))
@@ -53,7 +53,7 @@ class Ui_MainWindow(object):
         self.splitFits = QtGui.QSplitter(self.tabFits)
         self.splitFits.setOrientation(QtCore.Qt.Vertical)
         self.splitFits.setObjectName(_fromUtf8("splitFits"))
-        self.gFits = PlotWidget(self.splitFits)
+        self.gFits = DraggablePlotWidget(self.splitFits)
         self.gFits.setObjectName(_fromUtf8("gFits"))
         self.ptFits = ParameterTree(self.splitFits)
         self.ptFits.setObjectName(_fromUtf8("ptFits"))
@@ -70,7 +70,7 @@ class Ui_MainWindow(object):
         MainWindow.setStatusBar(self.statusbar)
 
         self.retranslateUi(MainWindow)
-        self.tabWidget.setCurrentIndex(1)
+        self.tabWidget.setCurrentIndex(0)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
     def retranslateUi(self, MainWindow):
@@ -78,5 +78,5 @@ class Ui_MainWindow(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabSpectrum), _translate("MainWindow", "Spectrum", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabFits), _translate("MainWindow", "Fits", None))
 
-from pyqtgraph import PlotWidget
+from draggablePlotWidget import DraggablePlotWidget
 from pyqtgraph.parametertree import ParameterTree

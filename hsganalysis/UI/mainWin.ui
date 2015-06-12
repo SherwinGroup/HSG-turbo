@@ -18,7 +18,7 @@
     <item>
      <widget class="QTabWidget" name="tabWidget">
       <property name="currentIndex">
-       <number>1</number>
+       <number>0</number>
       </property>
       <widget class="QWidget" name="tabSpectrum">
        <attribute name="title">
@@ -31,7 +31,7 @@
            <enum>Qt::Horizontal</enum>
           </property>
           <widget class="ParameterTree" name="ptFile" native="true"/>
-          <widget class="PlotWidget" name="gSpectrum"/>
+          <widget class="DraggablePlotWidget" name="gSpectrum"/>
          </widget>
         </item>
        </layout>
@@ -46,7 +46,7 @@
           <property name="orientation">
            <enum>Qt::Vertical</enum>
           </property>
-          <widget class="PlotWidget" name="gFits"/>
+          <widget class="DraggablePlotWidget" name="gFits"/>
           <widget class="ParameterTree" name="ptFits" native="true"/>
          </widget>
         </item>
@@ -70,15 +70,15 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>PlotWidget</class>
-   <extends>QGraphicsView</extends>
-   <header>pyqtgraph</header>
-  </customwidget>
-  <customwidget>
    <class>ParameterTree</class>
    <extends>QWidget</extends>
    <header>pyqtgraph.parametertree</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>DraggablePlotWidget</class>
+   <extends>QGraphicsView</extends>
+   <header>draggablePlotWidget</header>
   </customwidget>
  </customwidgets>
  <resources/>

@@ -81,8 +81,17 @@ class CCD(object):
         self.parameters["fel_pulses"] = self.parameters["FEL_pulses"]
         ### End section
         '''
-        self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
+        try:
+            self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
+        except ZeroDivisionError:
+            self.parameters["NIR_freq"] = 1
+        if self.parameters["fel_pulses"]==0:
+            self.parameters["fel_pulses"] = 1
+
         self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
+        if self.parameters["THz_freq"]==0:
+            self.parameters["THz_freq"] = 1
+
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
         self.parameters["thz_power"] = float(self.parameters["fel_power"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
@@ -1119,7 +1128,7 @@ def sum_spectra(object_list):
         for spec in list(object_list):
 #            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
 #            print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
-            if temp.parameters['series'] == spec.parameters['series']:
+            if temp.parameters['series'] == spec.parameters['series'] != '': #? Don't want to series if they aren't a series..
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))

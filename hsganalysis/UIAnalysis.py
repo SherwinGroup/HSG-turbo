@@ -15,6 +15,7 @@ import hsganalysis as hsg # local file, not global, no hsg.hsg
 from UI.mainWin_ui import Ui_MainWindow
 
 fileList = dict()
+combinedWindowList = []
 
 
 class MainWindow(QtGui.QMainWindow):
@@ -34,30 +35,27 @@ class MainWindow(QtGui.QMainWindow):
         self.__class__.dragMoveEvent = self.dragEnterEvent
         self.__class__.dropEvent = self.drop
         self.setAcceptDrops(True)
+        self.hsgObj = None
 
         if inp is not None:
             if type(inp) is str: # a filename to open
-                pass
-            elif type(inp) is type(hsg.CCD):
-                pass
+                self.openFile(inp)
+            elif type(inp) is hsg.CCD:
+                self.processSingleHSG(inp)
             else:
                 print "unknown type, ", type(inp)
 
-        self.hsgObj = None
 
-        import pyqtgraph.console as pgc
-        self.consoleWindow = pgc.ConsoleWidget(namespace={"self": self, "np": np})
-        self.consoleWindow.show()
-        
+
     def initUI(self):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         self.spectrumPlot = self.ui.gSpectrum.plot()
-        
+
         params = self.genParameters()
         p = Parameter.create(name='Open a File', type='group', children=params)
         self.ui.ptFile.setParameters(p, showTop=True)
-        
+
         self.sbLine = pg.InfiniteLine(pos = 750, movable=True)
         self.ui.gSpectrum.addItem(self.sbLine)
         self.sbLine.sigPositionChanged.connect(self.updateSBCalc)
@@ -68,9 +66,19 @@ class MainWindow(QtGui.QMainWindow):
         self.ui.splitFits.setStretchFactor(1, 1)
 
 
+        self.ui.gFits.plotItem.vb.sigDropEvent.connect(self.handleFitDragEvent)
+        self.ui.gSpectrum.plotItem.vb.sigDropEvent.connect(self.handleSpecDragEvent)
+
+
 
         self.menuSpec = QtGui.QMenu("Plot")
 
+
+        #################################
+        #
+        # Spectrum menu, x-axis
+        #
+        #################################
         self.menuSpecX = QtGui.QMenu("x")
         act = self.menuSpecX.addAction("nm")
         act.setCheckable(True)
@@ -83,10 +91,26 @@ class MainWindow(QtGui.QMainWindow):
         act.setCheckable(True)
         act.triggered.connect(self.parseSpecXChange)
 
+
+        #################################
+        #
+        # Spectrum menu, y-axis
+        #
+        #################################
+
         self.menuSpecY = QtGui.QMenu("y")
         act = self.menuSpecY.addAction("Log")
         act.setCheckable(True)
         act.triggered.connect(self.parseSpecYChange)
+
+        self.menuSpecScaleY = QtGui.QMenu("Divide By")
+
+        self.uisbDivideBy = pg.SpinBox(value=1, step=1.0)
+        self.uisbDivideByAction = QtGui.QWidgetAction(None)
+        self.uisbDivideByAction.setDefaultWidget(self.uisbDivideBy)
+        self.menuSpecScaleY.addAction(self.uisbDivideByAction)
+        self.menuSpecY.addMenu(self.menuSpecScaleY)
+        self.uisbDivideBy.sigValueChanged.connect(self.scaleData)
 
         self.menuSpec.addMenu(self.menuSpecX)
         self.menuSpec.addMenu(self.menuSpecY)
@@ -94,10 +118,20 @@ class MainWindow(QtGui.QMainWindow):
 
 
         self.menuFit = QtGui.QMenu("Plot")
+
+
+        #################################
+        #
+        # Fit menu, x-axis
+        #
+        #################################
         self.menuFitX = QtGui.QMenu("x")
-        act = self.menuFitX.addAction("nm")
+        act = self.menuFitX.addAction("SB Num")
         act.setCheckable(True)
         act.setChecked(True)
+        act.triggered.connect(self.parseFitXChange)
+        act = self.menuFitX.addAction("nm")
+        act.setCheckable(True)
         act.triggered.connect(self.parseFitXChange)
         act = self.menuFitX.addAction("eV")
         act.setCheckable(True)
@@ -106,14 +140,33 @@ class MainWindow(QtGui.QMainWindow):
         act.setCheckable(True)
         act.triggered.connect(self.parseFitXChange)
 
+
+
+
+
+        #################################
+        #
+        # Fit menu, y-axis
+        #
+        #################################
+
         self.menuFitY = QtGui.QMenu("y")
         act = self.menuFitY.addAction("Log")
         act.setCheckable(True)
         act.triggered.connect(self.parseFitYChange)
+
+        # self.menuFitScaleY = QtGui.QMenu("Divide By")
+        # self.uisbDivideByF = pg.SpinBox()
+        # self.uisbDivideByActionF = QtGui.QWidgetAction(None)
+        # self.uisbDivideByActionF.setDefaultWidget(self.uisbDivideByF)
+        # self.menuFitScaleY.addAction(self.uisbDivideByActionF)
+        # self.menuFitY.addMenu(self.menuFitScaleY)
+
         self.menuFitY.addSeparator()
 
         act = self.menuFitY.addAction("Height")
         act.setCheckable(True)
+        act.setChecked(True)
         act.triggered.connect(self.parseFitYChange)
 
         act = self.menuFitY.addAction("Sigma")
@@ -133,8 +186,8 @@ class MainWindow(QtGui.QMainWindow):
         # self.menuFit.setVisible(False)
         self.ui.menubar.addMenu(self.menuFit)
         self.changeToolbars()
-        
-        
+
+
         self.show()
 
     def changeToolbars(self):
@@ -153,7 +206,7 @@ class MainWindow(QtGui.QMainWindow):
 
     @staticmethod
     def __OPENTHINGS(): pass
-        
+
     @staticmethod
     def genParameters(**kwargs):
         params = [
@@ -234,10 +287,23 @@ class MainWindow(QtGui.QMainWindow):
         self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
         hsgObj = hsg.CCD(filename)
+        self.processSingleHSG(hsgObj)
+
+    def processSingleHSG(self, hsgObj):
         hsgObj = hsg.sum_spectra([hsgObj])[0]
+
+
         hsgObj.guess_better(cutoff = 3.5)
         hsgObj.fit_sidebands(plot=False)
+
+
         self.hsgObj = hsgObj
+
+
+        params = self.genParameters(**hsgObj.parameters)
+        self.specParams = Parameter.create(name=hsgObj.fname, type='group', children=params)
+        self.ui.ptFile.setParameters(self.specParams, showTop=True)
+
 
         self.plotSBFits(hsgObj)
         self.plotSpectrum(hsgObj.hsg_data)
@@ -245,6 +311,8 @@ class MainWindow(QtGui.QMainWindow):
         params = self.genFitParams(hsgObj.sb_results)
         self.fitParams = Parameter.create(name="Fit Results. FEL Freq: {}".format(self.calcFELFreq(hsgObj.sb_results)), type="group", children=params)
         self.ui.ptFits.setParameters(self.fitParams)
+
+        self.plotFits()
 
 
 
@@ -268,7 +336,7 @@ class MainWindow(QtGui.QMainWindow):
             elif xType == "wavenumber":
                 x = 10000000*x/1239.84
 
-            self.ui.gSpectrum.plot(x, y, pen=pg.mkPen('g'))
+            self.ui.gSpectrum.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen('g'))
 
     def plotSpectrum(self, data):
         # Assumes data[:,0] is in eV
@@ -279,8 +347,20 @@ class MainWindow(QtGui.QMainWindow):
         elif xType == "wavenumber":
             x = 10000000*x/1239.84
         print x
-        self.ui.gSpectrum.plot(x, data[:,1])
+        self.ui.gSpectrum.plot(x, data[:,1]/self.uisbDivideBy.value())
 
+
+    @staticmethod
+    def __PLOTTING_FIT_RESUTLS(): pass
+    def plotFits(self):
+        data = self.hsgObj.sb_results
+        want = [str(i.text()) for i in self.menuFitY.actions() if i.isChecked() and str(i.text())!="Log"][0]
+        x = data[:,0]
+        y = data[:, {"Height":   3,
+                     "Sigma":    5,
+                     "Position": 1}[want]]
+
+        self.ui.gFits.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen("w"), symbol="o")
 
 
 
@@ -292,12 +372,23 @@ class MainWindow(QtGui.QMainWindow):
         if not val: # ignore if you uncheck
             sent.setChecked(True)
             return
+        oldName = [str(i.text()) for i in self.menuSpecX.actions() if i is not sent and i.isChecked()][0]
+        newName = str(sent.text())
         [i.setChecked(False) for i in self.menuSpecX.actions() if i is not sent] #uncheck the other one
 
+
         if self.hsgObj is not None: #reupdate plots if we've already loaded some data
+            sb = self.sbLine.value()
             self.ui.gSpectrum.getPlotItem().clear()
             self.plotSpectrum(self.hsgObj.hsg_data)
             self.plotSBFits(self.hsgObj)
+            sb = converter[oldName][newName](sb)
+
+
+            self.sbLine.setValue(sb)
+            self.ui.gSpectrum.addItem(self.sbLine)
+
+
 
 
     def parseSpecYChange(self, val=None):
@@ -311,26 +402,102 @@ class MainWindow(QtGui.QMainWindow):
         if not val: #untoggled an option
             sent.setChecked(True)
 
+        # uncheck what was previously checked
+        [i.setChecked(False) for i in self.menuFitY.actions() if i is not sent and str(i.text())!="Log"]
+        if self.hsgObj is not None:
+            self.ui.gFits.plotItem.clear()
+            self.plotFits()
+
     def parseFitXChange(self, val=None):
-        pass
+        return # I don't care to deal with non SB x-axis right now
+        sent = self.sender()
+        if not val: # ignore if you uncheck
+            sent.setChecked(True)
+            return
+        oldName = [str(i.text()) for i in self.menuFitX.actions() if i is not sent and i.isChecked()][0]
+        newName = str(sent.text())
+        [i.setChecked(False) for i in self.menuFitX.actions() if i is not sent]
+        if self.hsgObj is not None:
+            self.plotFits()
+
+    def scaleData(self, sb):
+        if self.hsgObj is not None:
+            self.ui.gSpectrum.getPlotItem().clear()
+            self.plotSpectrum(self.hsgObj.hsg_data)
+            self.plotSBFits(self.hsgObj)
+            self.ui.gSpectrum.addItem(self.sbLine)
 
 
     @staticmethod
     def __DRAGGING_CONTROLS(): pass
-        
+
     def dragEnterEvent(self, event):
         event.accept()
-        
+
     def drop(self, event):
         global fileList
         if not event.mimeData().hasUrls():
             event.reject()
             return
-        filename = event.mimeData().urls()[0].toLocalFile()
-        if not fileList: # no files have been opened
-            self.openFile(filename)
+
+        if len(event.mimeData().urls()) == 1:
+            filename = str(event.mimeData().urls()[0].toLocalFile())
+            if not fileList: # no files have been opened
+                self.openFile(filename)
+                fileList[filename] = self
+            else:
+                if filename in fileList.keys():
+                    print "Already opened file"
+                else:
+                    a = MainWindow(filename)
+                    fileList[filename] = a
         else:
-            pass
+            filelist = [str(i.toLocalFile()) for i in event.mimeData().urls()]
+            filelist = [i for i in filelist if "seriesed" not in i.lower()]
+            objlist = [hsg.CCD(i) for i in filelist]
+            series = hsg.sum_spectra(objlist)
+
+            for obj in series:
+                if obj.parameters["series"] == "":
+                    fileList[obj.fname] = MainWindow(obj)
+                    fileList[obj.fname].setWindowTitle(str(obj.parameters["center_lambda"]))
+                elif obj.parameters["series"] in fileList.keys():
+                    print "already opened this series,", obj.parameters["series"]
+                else:
+                    fileList[obj.parameters["series"]] = MainWindow(obj)
+                    fileList[obj.parameters["series"]].setWindowTitle(
+                        "Series: {}".format(obj.parameters["series"]))
+        if self.hsgObj is None: # the first window. Get outta here!
+            self.close()
+
+
+    def handleFitDragEvent(self, obj, val):
+        d = [self.ui.gFits.plotItem.curves[1].xData,
+             self.ui.gFits.plotItem.curves[1].yData]
+        self.createCompWindow(data = d, p = val)
+
+    def handleSpecDragEvent(self, obj, val):
+        d = [self.ui.gSpectrum.plotItem.curves[-1].xData,
+             self.ui.gSpectrum.plotItem.curves[-1].yData]
+        self.createCompWindow(data = d, p = val)
+
+    def createCompWindow(self, data, p, label=None):
+
+        if combinedWindowList:
+            inners = [i for i in combinedWindowList if i.containsPoint(p.toQPoint())]
+            if inners:
+                a = inners[-1] # last focused window
+                a.addCurve(data, str(self.windowTitle()))
+                return
+
+        a = ComparisonWindow()
+        a.sigClosed.connect(updateCompClose)
+        a.sigGotFocus.connect(updateFocusList)
+        a.addCurve(data, str(self.windowTitle()))
+        combinedWindowList.append(a)
+
+
+
 
 
 
@@ -341,9 +508,14 @@ class MainWindow(QtGui.QMainWindow):
         params = self.specParams.getValues()
         NIRL = float(params["Laser Settings"][1]["NIR Frequency (nm)"][0])
         FELL = float(self.specParams.childs[2].childs[2].value())
+        rawVal = self.sbLine.value()
+        units = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
+        linenm = converter[units]["nm"](rawVal)
+
+
 
         laserL = 10000000./NIRL
-        wantedWN = 10000000./self.sbLine.value()
+        wantedWN = 10000000./linenm
         sbn = (wantedWN-laserL)/FELL
 
         self.specParams.childs[2].childs[0].setValue(sbn)
@@ -351,7 +523,10 @@ class MainWindow(QtGui.QMainWindow):
     def calcFELFreq(self, sbList):
         params = self.specParams.getValues()
         NIRL = float(params["Laser Settings"][1]["NIR Frequency (nm)"][0])
-        laserL = 10000000./NIRL
+        try:
+            laserL = 10000000./NIRL
+        except ZeroDivisionError:
+            return -1
 
         spacings = []
 
@@ -361,13 +536,86 @@ class MainWindow(QtGui.QMainWindow):
 
         return np.mean(spacings)
 
+penList = [pg.intColor(i, 20) for i in range(20)]
 
-        
-        
-        
-        
-        
+class ComparisonWindow(QtGui.QMainWindow):
+    sigClosed = QtCore.pyqtSignal(object) #emit oneself when closed
+    sigGotFocus = QtCore.pyqtSignal(object)
+    def __init__(self, parent = None,  data = None):
+        super(ComparisonWindow, self).__init__()
+        self.initUI()
+        self.curveList = {} # a way to keep track of what's been added
 
+        self.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.gPlot.setFocusPolicy(QtCore.Qt.StrongFocus)
+
+        self.gPlot.focusInEvent = self.focusInEvent
+        self.gPlot.changeEvent = self.changeEvent
+
+    def initUI(self):
+        self.gPlot= pg.PlotWidget()
+        self.setCentralWidget(self.gPlot)
+        self.legend = pg.LegendItem()
+        self.legend.setParentItem(self.gPlot.plotItem)
+        self.show()
+
+    def containsPoint(self, p):
+        """
+        Calculates whether a specified QPoint (in abs coords) is
+        within the bounds of myself
+        :param p: the q point
+        :return: True if it is within my bounds, else false
+        """
+        return self.frameGeometry().contains(p)
+
+    def addCurve(self, data, label=None):
+        p = self.gPlot.plotItem.plot(data[0], data[1], pen=pg.intColor(len(self.curveList), hues=20))
+        if label is not None:
+            self.curveList[label] = p
+            self.legend.addItem(p, label)
+
+    def close(self):
+        self.sigClosed.emit(self)
+        super(ComparisonWindow, self).close()
+
+    def focusInEvent(self, *args, **kwargs):
+        print "got focus", args, kwargs
+        self.sigGotFocus.emit(self)
+
+    def changeEvent(self, ev):
+        ev.accept()
+        if ev.type() == QtCore.QEvent.ActivationChange:
+            if self.isActiveWindow():
+                self.sigGotFocus.emit(self)
+
+
+def updateCompClose(obj):
+    try:
+        combinedWindowList.remove(obj)
+    except Exception as e:
+        print "error removign from list,", e
+
+def updateFocusList(obj):
+    try:
+        combinedWindowList.remove(obj)
+        combinedWindowList.append(obj)
+    except Exception as e:
+        print "error updating focus list", e
+
+
+# converter[<inp>][<out>]
+#                                           I N P U T
+converterArr = [               #nm                        #eV                          #wn
+                 [lambda x: x,           lambda x:1239.84/x,            lambda x: 10000000./x          ], #nm
+                 [lambda x: 1239.84/x,   lambda x: x,                   lambda x: 10000000. * x/1239.84], #eV
+                 [lambda x: 10000000./x, lambda x: 1239.84/x/10000000., lambda x: x                   ]  # wn
+]
+
+converter = {
+    "nm":         {"nm": lambda x: x,           "eV": lambda x:1239.84/x,            "wavenumber": lambda x: 10000000./x},
+    "eV":         {"nm": lambda x: 1239.84/x,   "eV": lambda x: x,                   "wavenumber":lambda x: 10000000. * x/1239.84},
+    "wavenumber": {"nm": lambda x: 10000000./x, "eV": lambda x: 1239.84/x/10000000., "wavenumber": lambda x: x}
+}
 
 
 
@@ -375,5 +623,16 @@ if __name__=="__main__":
     import sys
     ex = QtGui.QApplication(sys.argv)
     win = MainWindow()
+
+#
+#     a = pg.Point(120, 250)
+#
+# cl[0].frameGeometry().contains(a.toQPoint())
+#[i.handleSpecDragEvent(None, a) for i in sorted(fl.values(), key=lambda v:v.windowTitle())]
+
+    import pyqtgraph.console as pgc
+    consoleWindow = pgc.ConsoleWidget(namespace={"fl":fileList,"np": np, "cl":combinedWindowList, "pg":pg})
+    consoleWindow.show()
+
     sys.exit(ex.exec_())
     
