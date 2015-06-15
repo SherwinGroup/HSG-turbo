@@ -1,0 +1,4 @@
+High priority:
+ - Be able to have parameter sweep function normalize columns
+ - Have stitch spectra be able to accept just CCD objects and return something that feeds into parameter sweep
+ 
