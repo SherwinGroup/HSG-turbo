@@ -95,25 +95,15 @@ class CCD(object):
             self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         except ZeroDivisionError:
             self.parameters["NIR_freq"] = 1
-        except KeyError: # This shouldn't have to be here
-            self.parameters["NIR_freq"] = 1
-        if self.parameters.get("fel_pulses", 0) == 0:
+        if self.parameters["fel_pulses"]==0:
             self.parameters["fel_pulses"] = 1
-        try:
-            self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
-        except KeyError:
-            self.parameters["THz_freq"] = 0
+
+        self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         if self.parameters["THz_freq"]==0:
             self.parameters["THz_freq"] = 1
-        
-        try:
-            self.parameters["nir_power"] = float(self.parameters["nir_power"])
-            self.parameters["thz_power"] = float(self.parameters["fel_power"])
-        except KeyError:
-            self.parameters["nir_power"] = 1
-            self.parameters["thz_power"] = 1
-            
-        
+
+        self.parameters["nir_power"] = float(self.parameters["nir_power"])
+        self.parameters["thz_power"] = float(self.parameters["fel_power"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
         # I used flipup so that the x-axis is an increasing function of frequency
         
@@ -256,7 +246,7 @@ class CCD(object):
             sb_amp_guess = [y_axis[global_max]]
             sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 1:global_max + 2]])) / (check_max_area - 3 * check_ave)]
         else:
-            log.error("There are no sidebands in {}".format(self.fname))
+            log.error("There are no sidebands in {}".self.fname)
             assert False
         
         
@@ -296,7 +286,7 @@ class CCD(object):
             if break_condition:
                 break
             check_y = y_axis[start_index:end_index]
-            log.debug("check_y is {}".format( check_y))
+            print "check_y is", check_y
             #check_max = check_y.max()
             #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
@@ -304,37 +294,37 @@ class CCD(object):
             check_ave = np.mean(check_y)
             check_stdev = np.std(check_y)
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
-            log.debug("\ncheck_max_area is {}".format( check_max_area))
-            log.debug("check_ave is {}".format( check_ave))
-            log.debug("check_stdev is {}".format( check_stdev))
-            log.debug("check_ratio is {}".format( check_ratio))
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", check_ratio
             
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
-                log.debug("I just found {}".format( last_sb))
+                print "I just found", last_sb
                 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
                 error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
-                log.debug("My error estimate is: {}".format( error_est))
+                print "My error estimate is:", error_est
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
                 if order % 2 == 1:
                     consecutive_null_odd = 0
             else:
-                log.debug("I could not find sideband with order {}".format( order))
+                print "I could not find sideband with order", order
                 last_sb = last_sb + thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
             if consecutive_null_odd == 1 and no_more_odds == False:
-                log.debug("I'm done looking for odd sidebands".format())
+                print "I'm done looking for odd sidebands"
                 no_more_odds = True
             if consecutive_null_sb == 2:
-                log.debug("I can't find any more sidebands".format())
+                print "I can't find any more sidebands"
                 break  
         
         # Look for higher sidebands
@@ -353,27 +343,27 @@ class CCD(object):
             hi_freq_bound = last_sb + thz_freq * (1 + 0.22)
             start_index = False
             end_index = False
-            log.debug("\nSideband {} {}".format( order,  '\n'))
+            print "\nSideband", order, "\n"            
             for i in xrange(index_guess, 1600):
                 if start_index == False and i == 1599:
-                    log.debug("I'm all out of space, captain!".format())
+                    print "I'm all out of space, captain!"
                     break_condition = True
                     break
                 elif start_index == False and x_axis[i] > lo_freq_bound:
-                    log.debug("start_index is {}".format( i))
+                    print "start_index is", i
                     start_index = i
                 elif i == 1599:
                     end_index = 1599
-                    log.debug("hit end of data, end_index is 1599".format())
+                    print "hit end of data, end_index is 1599"
                 elif end_index == False and x_axis[i] > hi_freq_bound:
                     end_index = i
-                    log.debug("end_index is {}".format( i))
+                    print "end_index is", i
                     index_guess = i
                     break
             if break_condition:
                 break
             check_y = y_axis[start_index:end_index]
-            log.debug("check_y is {}".format( check_y))
+            print "check_y is", check_y
             #check_max = check_y.max()
             #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
@@ -381,40 +371,40 @@ class CCD(object):
             check_ave = np.mean(check_y)
             check_stdev = np.std(check_y)
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
-            log.debug("\ncheck_max_area is {}".format( check_max_area))
-            log.debug("check_ave is {}".format( check_ave))
-            log.debug("check_stdev is {}".format( check_stdev))
-            log.debug("check_ratio is {}".format( check_ratio))
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", check_ratio
             
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
-                log.debug("I just found {}".format( last_sb))
+                print "I just found", last_sb
                 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
                 error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
-                log.debug("My error estimate is: {}".format( error_est))
+                print "My error estimate is:", error_est
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
                 if order % 2 == 1:
                     consecutive_null_odd = 0
             else:
-                log.debug("I could not find sideband with order {}".format( order))
+                print "I could not find sideband with order", order
                 last_sb = last_sb + thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
             if consecutive_null_odd == 1 and no_more_odds == False:
-                log.debug("I'm done looking for odd sidebands".format())
+                print "I'm done looking for odd sidebands"
                 no_more_odds = True
             if consecutive_null_sb == 2:
-                log.debug("I can't find any more sidebands".format())
+                print "I can't find any more sidebands"
                 break  
         
-        log.debug("I found these sidebands: {}".format( self.sb_list))
+        print "I found these sidebands:", self.sb_list
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_est)]).T
 
         
@@ -479,15 +469,15 @@ class CCD(object):
         THz_freq = self.parameters["THz_freq"]
         sb_init = False
         for order in xrange(50):
-            log.debug("I'm checking for sb energy {}".format( NIR_freq + order * THz_freq))
-            log.debug("That's order {}".format( order))
+            print "I'm checking for sb energy", NIR_freq + order * THz_freq
+            print "That's order", order
             if x_axis[0] < (NIR_freq + order * THz_freq): #and (x_axis[0] > NIR_freq + (order - 1) * THz):
-                log.debug("Lowest x_axis value is {}".format( x_axis[0]))
+                print "Lowest x_axis value is", x_axis[0]
                 sb_init = order
                 break
             elif order == 49:
                 raise Exception("Source: self.guess_sidebands.\nCouldn't find sb_init.")
-        log.debug("We think the lowest sideband order is {}".format( sb_init))
+        print "We think the lowest sideband order is", sb_init
         
         self.sb_list = []
         self.sb_index = []
@@ -511,49 +501,49 @@ class CCD(object):
             hi_freq_bound = last_sb + THz_freq * (1 + 0.22)
             start_index = False
             end_index = False
-            log.debug("\nSideband {} {}".format( order,  '\n'))
+            print "\nSideband", order, "\n"            
             for i in xrange(index_guess, 1600):
                 if start_index == False and x_axis[i] > lo_freq_bound:
-                    log.debug("start_index is {}".format( i))
+                    print "start_index is", i
                     start_index = i
                 elif i == 1599:
                     break_condition = True
-                    log.debug("hit end of data, end_index is {}".format( i))
+                    print "hit end of data, end_index is", i
                     break
                 elif end_index == False and x_axis[i] > hi_freq_bound:
                     end_index = i
-                    log.debug("end_index is {}".format( i))
+                    print "end_index is", i
                     index_guess = i
                     break
             if break_condition:
                 break
             
             check_y = y_axis_temp[start_index + window:end_index + window]
-            log.debug("check_y is {}".format( check_y))
+            print "check_y is", check_y
             #check_max = check_y.max()
             #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
-            log.debug("points in check_max_area: {}".format( check_y[check_max_index - 1:check_max_index + 2]))
+            print "points in check_max_area:", check_y[check_max_index - 1:check_max_index + 2]
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
             check_ave = np.mean(check_y[np.isfinite(check_y)])
             check_stdev = np.std(check_y[np.isfinite(check_y)])
-            log.debug("\ncheck_max_area is {}".format( check_max_area))
-            log.debug("check_ave is {}".format( check_ave))
-            log.debug("check_stdev is {}".format( check_stdev))
-            log.debug("check_ratio is {}".format( (check_max_area - 3 * check_ave) / check_stdev))
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", (check_max_area - 3 * check_ave) / check_stdev
             
             if (check_max_area - 3 * check_ave) > cutoff * check_stdev:
                 found_index = np.argmax(check_y) + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
-                log.debug("I just found {}".format( last_sb))
+                print "I just found", last_sb
                 
                 sb_freq_guess.append(x_axis[found_index])
 #                sb_amp_guess.append(y_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
                 error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
                 # I think that should be a "+ 2" in the second index of slicing?
-                log.debug("My error estimate is: {}".format( error_est))
+                print "My error estimate is:", error_est
                 sb_error_estimate.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
@@ -561,20 +551,20 @@ class CCD(object):
                 if order % 2 == 1:
                     consecutive_null_odd = 0
             else:
-                log.debug("I could not find sideband with order {}".format( order))
+                print "I could not find sideband with order", order
                 last_sb = last_sb + THz_freq
                 if found_anything == True:
                     consecutive_null_sb += 1
                 if found_anything == True and order % 2 == 1:
                     consecutive_null_odd += 1
             if consecutive_null_odd == 2 and no_more_odds == False:
-                log.debug("I'm done looking for odd sidebands".format())
+                print "I'm done looking for odd sidebands"
                 no_more_odds = True
             if consecutive_null_sb == 2:
-                log.debug("I can't find any more sidebands".format())
+                print "I can't find any more sidebands"
                 break
         
-        log.debug("I found these sidebands: {}".format( self.sb_list))
+        print "I found these sidebands:", self.sb_list
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_estimate)]).T
     
     def fit_sidebands(self, plot=False):
@@ -593,7 +583,7 @@ class CCD(object):
         Attributes created:
         self.sb_results = the money maker
         """
-        log.debug("Trying to fit these".format())
+        print "Trying to fit these"
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
             data_temp = self.hsg_data[self.sb_index[elem] - 20:self.sb_index[elem] + 20, :]
@@ -603,9 +593,9 @@ class CCD(object):
                 coeff, var_list = curve_fit(makeGauss(self.sb_list[elem]), data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-#log.debug("coeffs: {} {}".format( coeff,  self.sb_list[elem]))
-#log.debug(" vs.  {} {} {} {}".format( np.max(data/temp[:,  1]),  of,  self.sb_list[elem]))
-#log.debug("sigma for {}: {} {}".format( coeff[2])))
+#                print "coeffs:", coeff, self.sb_list[elem]
+#                print coeff[1] / coeff[2], " vs. ", np.max(data/temp[:, 1]), "of", self.sb_list[elem]
+#                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if True: #3e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
@@ -618,21 +608,21 @@ class CCD(object):
                                                          # matplotlib has...
                              , linewidth = 3)
             except:
-                log.debug("I couldn't fit that".format())
+                print "I couldn't fit that"
                 self.sb_list[elem] = None
         sb_fits_temp = np.asarray(sb_fits)
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
         try:
             sb_fits = sb_fits_temp[:, reorder]
         except:
-            log.debug("The file is: {}".format( self.fname))
-            log.debug("\n!!!!!\nSHIT WENT WRONG\n!!!!!".format())
+            print "The file is:", self.fname
+            print "\n!!!!!\nSHIT WENT WRONG\n!!!!!"
                 
         # Going to label the appropriate row with the sideband
         self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
-#log.debug("sb_names: {}".format( sb_names))
-#log.debug("sb_list: {}".format( self.sb_list))
+#        print "sb_names:", sb_names
+#        print "sb_list:", self.sb_list
         sorter = np.argsort(sb_fits[:, 0])
         
         
@@ -647,7 +637,7 @@ class CCD(object):
         6 - sigma err
         """
         self.sb_results = np.array(sb_fits[sorter, :7])
-#log.debug("sb_results: {}".format( self.sb_results))
+#        print "sb_results:", self.sb_results
 
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
         """
@@ -674,13 +664,13 @@ class CCD(object):
                 if 1e-4 > coeff[2] > 20e-6 and coeff[1] > sensitivity * noise_stdev:
                     #print "Going to redefine stuff", coeff[0], 1239.84 / float(self.parameters["NIR_lambda"])
                     coeff[0] = round((coeff[0] - (1239.84 / float(self.parameters["NIR_lambda"]))) / .002515, 1)
-                    log.debug("New coeff[0]  {}".format( coeff[0]))
+                    print "New coeff[0] ", coeff[0]
                     self.sb_fits.append(np.hstack((coeff, np.sqrt(np.diag(var_list)))))
                     if plot:
                         x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=200)
                         plt.plot(x_vals, gauss(x_vals, *coeff))
             except:
-                log.debug("I couldn't fit that".format())
+                print "I couldn't fit that"        
         sb_fits_temp = np.asarray(self.sb_fits)
         reorder = [0, 4, 1, 5, 2, 6, 3, 7]
         #print "The temp fits list", sb_fits_temp
@@ -688,7 +678,7 @@ class CCD(object):
             self.sb_fits = sb_fits_temp[:, reorder]
         except:
             self.sb_fits = list(sb_fits_temp)
-            log.debug("\n!!!!!!!!!\nSome shit went wrong here!!!\n!!!!!!!!\n".format())
+            print "\n!!!!!!!!!\nSome shit went wrong here!!!\n!!!!!!!!\n"
         
         # Going to label the appropriate row with the sideband
         sb_names = np.vstack(self.sb_list)
@@ -730,8 +720,8 @@ class CCD(object):
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
-            log.debug("Source: EMCCD_image.save_images\nJSON FAILED".format())
-            log.debug("Here is the dictionary that broke JSON:\n {}".format( self.parameters))
+            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print "Here is the dictionary that broke JSON:\n", self.parameters
             return
 
         origin_import_spec = '\nWavelength,Signal\neV,arb. u.'
@@ -745,7 +735,7 @@ class CCD(object):
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
 
-        log.debug("Save image.\nDirectory: {} {}".format( os.path.join(folder_str, spectra_fname)))
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
     def stitch_spectra(self):
         """
@@ -770,7 +760,7 @@ class PMT(object):
             self.sb_dict - keys are sideband order, values are PMT data arrays
             self.sb_list - sorted
         """
-        log.debug("This started".format())
+        print "This started"
         file_list = glob.glob(os.path.join(folder_path, '*.txt'))
         self.sb_dict = {}
         # in __main__.py, look for the method "genSaveHeader"
@@ -791,13 +781,13 @@ class PMT(object):
         for sb_file in file_list:
             f = open(sb_file, 'rU')
             sb_num = int(f.readline().split(' ')[-1])
-            log.debug("Sideband number is {}".format( sb_num))
+            print "Sideband number is", sb_num
             f.close()
             raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
             # Hopefully saving will be comma delimited soon!
             frequencies = set(raw_temp[:, 0])
             fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the cavity dump signal is more than half the mean of the cavity dump signal
-            log.debug("The fire condition is {}".format( fire_condition))
+            print "The fire condition is", fire_condition
             temp = None
             for freq in frequencies:
                 data_temp = np.array([])
@@ -805,8 +795,8 @@ class PMT(object):
                     if raw_point[0] == freq and raw_point[2] > fire_condition:
                         #print "I'm going to add this", raw_point[0], raw_point[3]
                         data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
-                log.debug("The data temp is {}".format( data_temp))
-                log.debug(len(data_temp))
+                print "The data temp is", data_temp
+                print len(data_temp)
                 try:
                     temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
                 except:
@@ -830,29 +820,29 @@ class PMT(object):
         """
         sb_fits = {}
         for sideband in self.sb_dict.items():
-            log.debug("Sideband number {}".format( sideband[0]))
+            print "Sideband number", sideband[0]
             index = np.argmax(sideband[1][:, 1])
             nir_frequency = sideband[1][index, 0]
             peak = sideband[1][index, 1]
             p0 = [nir_frequency, peak / 3000, 0.00006, 0.00001]
-            log.debug("p0: {}".format( p0))
+            print "p0:", p0
             try: 
                 coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0)#, sigma=10*sideband[1][:, 2], absolute_sigma=True)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2])
-                log.debug("coeffs: {}".format( coeff))
+                print "coeffs:", coeff
                 if np.sqrt(np.diag(var_list))[0] < 0.001: # The error on where the sideband is should be small
                     sb_fits[sideband[0]] = np.concatenate((np.array([sideband[0]]), coeff, np.sqrt(np.diag(var_list))))
                     #print "error then:", sb_fits[sideband[0]][6]
                     relative_error = np.sqrt(sum([x**2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(sideband[1][index - 1:index + 2, 1])
-                    log.debug("relative error: {}".format( relative_error))
+                    print "relative error:", relative_error
                     sb_fits[sideband[0]][6] = coeff[1] * relative_error
                     #print "error now:", sb_fits[sideband[0]][6]                
                     if plot:
                         x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
                         plt.plot(x_vals, gauss(x_vals, *coeff))
             except:
-                log.debug("God damn it, Leroy.\nYou couldn't fit this.".format())
+                print "God damn it, Leroy.\nYou couldn't fit this."
                 sb_fits[sideband[0]] = None
             
         for result in sorted(sb_fits.keys()):
@@ -863,7 +853,7 @@ class PMT(object):
         
         self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
         self.sb_results = self.sb_results[:, :7]
-        log.debug("And the results, please: {}".format( self.sb_results))
+        print "And the results, please:", self.sb_results 
     
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
@@ -898,8 +888,8 @@ class PMT(object):
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
-            log.debug("Source: EMCCD_image.save_images\nJSON FAILED".format())
-            log.debug("Here is the dictionary that broke JSON:\n {}".format( self.parameters))
+            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print "Here is the dictionary that broke JSON:\n", self.parameters
             return
 
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
@@ -919,7 +909,7 @@ class PMT(object):
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
 
-        log.debug("Save image.\nDirectory: {} {}".format( os.path.join(folder_str, spectra_fname)))
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
             
 class Spectrum(object):
     """
@@ -953,7 +943,7 @@ class Spectrum(object):
             self.pmt_dict[sb[0]] = np.asarray(sb[1:])
         for sb in self.ccd_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
-        log.debug("Full dictionary: {}".format( self.full_dict))
+        print "Full dictionary:", self.full_dict
         
         self.full_dict = stitch_dicts(self.full_dict, self.pmt_dict, bad_order=1)
         
@@ -1018,8 +1008,8 @@ class Spectrum(object):
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
-            log.debug("Source: EMCCD_image.save_images\nJSON FAILED".format())
-            log.debug("Here is the dictionary that broke JSON:\n {}".format( self.parameters))
+            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print "Here is the dictionary that broke JSON:\n", self.parameters
             return
 
         origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error\norder,eV,,arb. u.,,meV,,\n,,' + marker
@@ -1028,7 +1018,7 @@ class Spectrum(object):
         np.savetxt(os.path.join(folder_str, fit_fname), self.full_results, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
 
-        log.debug("Save image.\nDirectory: {} {}".format( os.path.join(folder_str, spectra_fname)))
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
 ####################
 # Fitting functions 
@@ -1089,7 +1079,7 @@ def stitch_dicts(main, new, bad_order=5):
     for new_sb in sorted(new.keys()):
         if new_sb in main.keys():
             overlap.append(new_sb)
-    log.debug("overlap: {}".format( overlap))
+    print "overlap:", overlap
     # Cut out the likely-bad ones from the CCD data
     overlap = [x for x in overlap if x > (bad_order + 0.5)]
 #    overlap = overlap[-2:]
@@ -1098,19 +1088,19 @@ def stitch_dicts(main, new, bad_order=5):
     ratio_list = []
     for sb in overlap:
         ratio_list.append(main[sb][2] / new[sb][2])
-    log.debug("ratio_list: {}".format( ratio_list))
+    print "ratio_list:", ratio_list
     ratio = np.mean(ratio_list)
     ratio_err = np.std(ratio_list) / np.sqrt(len(ratio_list))
-    log.debug("ratio: {}".format( ratio))
-    log.debug("ratio error: {}".format( ratio_err))
-    log.debug("New data: {}".format( new))
+    print "ratio:", ratio
+    print "ratio error:", ratio_err
+    print "New data:", new
         
     # Scale up PMT data and add it to the full_dict, and propagate errors
     for sb in sorted(new.keys()):
         old = new[sb][2]
-#log.debug("sideband: {}".format( sb))
-#log.debug("data relative error: {}".format( new[sb][3] / old))
-#log.debug("ratio relative error: {}".format( ratio_err / ratio))
+#        print "sideband:", sb
+#        print "data relative error:", new[sb][3] / old
+#        print "ratio relative error:", ratio_err / ratio
         new[sb][2] = ratio * new[sb][2]
         new[sb][3] = new[sb][2] * np.sqrt((ratio_err / ratio)**2 + (new[sb][3] / old)**2)
         if sb not in overlap: # Because I want to get rid of the lowest order guys attenuated by SP filter
@@ -1131,7 +1121,7 @@ def sum_spectra(object_list):
     :param object_list:
     :return:
     """
-    log.debug("I'm trying!".format())
+    print "I'm trying!"
     
     good_list = []
     for index in xrange(len(object_list)):
@@ -1139,22 +1129,22 @@ def sum_spectra(object_list):
         try:
             temp = object_list.pop(0)
             stderr_holder = np.array(temp.hsg_data[:, 1]).reshape((1600, 1))
-#log.debug("Standard error holder shape 1: {}".format( stderr_holder.shape))
+#            print "Standard error holder shape 1:", stderr_holder.shape
         except:
-#log.debug("God damn it, Leroy".format())
+#            print "God damn it, Leroy"
             break
-#log.debug("temp has series: {}.\ttemp has cl: {}.\ttemp has series: {} {} {}".format( temp.parameters['center_lambda'],  temp.parameters['series'])))
+#        print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
         for spec in list(object_list):
-#log.debug("\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {} {} {}".format( spec.parameters['center_lambda'],  spec.fname[-16:-13])))
-#log.debug("I am trying to add {} {}".format( temp.parameters['FELP'],  spec.parameters['FELP']))
+#            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
+#            print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
             if temp.parameters['series'] == spec.parameters['series'] != '': #? Don't want to series if they aren't a series..
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))
-                    log.debug("Individual dark_stdev: {}".format( spec.dark_stdev))
+                    print "Individual dark_stdev:", spec.dark_stdev
                     dark_var += (spec.dark_stdev)**2
-#log.debug("Standard error holder shape 2: {}".format( stderr_holder.shape))
-#log.debug("\t\tadded".format())
+#                    print "Standard error holder shape 2:", stderr_holder.shape
+#                    print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
         spec_number = stderr_holder.shape[1]
@@ -1162,7 +1152,7 @@ def sum_spectra(object_list):
         # This standard error is for every point.  I think it actually overestimates
         # the error at places with no signal because we add the dark variance
         # effectively twice.
-        log.debug("final dark_stdev: {}".format( np.sqrt(dark_var)))
+        print "final dark_stdev:", np.sqrt(dark_var)
         temp.add_std_error(std_error)
         good_list.append(temp)
     return good_list
@@ -1192,37 +1182,37 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
         included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
-    log.debug("full name: {}".format( spectrum_list[0].fname))
-    log.debug("included names: {}".format( included_spectra))
-    log.debug("sb_included: {}".format( sb_included))
+    print "full name:", spectrum_list[0].fname
+    print "included names:", included_spectra
+    print "sb_included:", sb_included
     
     
     for spec in spectrum_list:
         temp_dict = {}
-        log.debug("the sb_results: {}".format( spec.sb_results))
+        print "the sb_results:", spec.sb_results
         for index in xrange(len(spec.sb_results[:, 0])):
-            log.debug("my array slice: {} {}".format( spec.sb_results[index,  :]))
+            print "my array slice:", spec.sb_results[index, :]
             temp_dict[int(round(spec.sb_results[index, 0]))] = np.array(spec.sb_results[index, :])
-        log.debug(temp_dict)
+        print temp_dict
         
         for sb in sb_included:
             blank = np.zeros(7)
             blank[0] = float(sb)
-            log.debug("checking sideband order: {}".format( sb))
-            log.debug("blank {}".format( blank))
+            print "checking sideband order:", sb
+            print "blank", blank
             if not temp_dict.has_key(sb):
-                log.debug("\nNeed to add sideband order: {}".format( sb))
+                print "\nNeed to add sideband order:", sb
                 temp_dict[sb] = blank
         spec_data = np.array([spec.parameters[param_name], spec.dark_stdev])
         for key in sorted(temp_dict.keys()):
-            log.debug("I am going to hstack this: {}".format( temp_dict[key]))
+            print "I am going to hstack this:", temp_dict[key]
             spec_data = np.hstack((spec_data, temp_dict[key]))
             
         try:
             param_array = np.vstack((param_array, spec_data))
         except:
             param_array = np.array(spec_data)
-        log.debug("The shape of the param_array is: {}".format( param_array.shape))
+        print "The shape of the param_array is:", param_array.shape
         #print "The param_array itself is:", param_array
     
     try:
@@ -1238,7 +1228,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     try:
         included_spectra_str = json.dumps(included_spectra, sort_keys=True)
     except:
-        log.debug("Source: save_parameter_sweep\nJSON FAILED".format())
+        print "Source: save_parameter_sweep\nJSON FAILED"
         return
     origin_import1 = param_name + ",dark_stdev"
     origin_import2 = unit + ",post shot norm"
@@ -1248,9 +1238,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     origin_total = origin_import1 + "\n" + origin_import2 #+ "\n"
     header = '#' + included_spectra_str + '\n' + origin_total
     #print "Spec header: ", spec_header
-    log.debug("the param_array is: {}".format( param_array))
+    print "the param_array is:", param_array
     np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
                header=header, comments='', fmt='%f')
 
-    log.debug("Saved the file.\nDirectory: {} {}".format( os.path.join(folder_str, file_name)))
+    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
     
