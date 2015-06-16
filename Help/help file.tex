@@ -1,0 +1,236 @@
+\documentclass{article}
+
+\usepackage{amsmath,amsthm,amssymb,mathrsfs,fancyhdr,geometry,bm,graphicx,mhchem}
+\pagestyle{fancy}
+\newcommand{\norm}[1]{\left|#1\right|}
+\newcommand{\bra}[1]{\langle #1|}
+\newcommand{\ket}[1]{|#1\rangle}
+\newcommand{\braket}[2]{\langle #1|#2\rangle}
+\newcommand{\code}{\texttt}
+\begin{document}
+\lhead{\textit{HSG analysis\\Help file}}
+	\rhead{Sherwin Lab\\ \today}
+	\begin{center}
+		\begin{Large}
+			\textbf{On the Organization of the HSG Analysis Python Library}\vspace{5pt}\\
+		\end{Large}
+		%\emph{\today}
+	\end{center}
+
+\section{Introduction}
+\indent \indent This will give a brief foray into the dark underbelly of hsganalysis.py.
+\section{The classes}
+\indent \indent There are three classes: CCD, PMT, and Spectrum.  CCD currently handles hsg spectrum data from the EMCCD.  The PMT class handles data from the PMT detector.  Spectrum combines CCD and PMT classes to make whole spectra.
+\subsection{CCD class}
+\indent \indent As covered previously, the CCD class handles data taken with the Andor EMCCD.  The general processing guide is to initialize the CCD instance, guess the sideband locations and determine their strengths, fit those sidebands to gaussians (or any arbitrary function), and finally to save the processed spectrum and the fit results.
+\subsubsection{Attributes}
+\subsubsection{Methods}
+There are many methods in the class, only some of which need to be called by the user.\\
+Magic methods:
+\begin{enumerate}
+	\item \code{\_\_init\_\_(fname)} - Initializes the CCD object. 
+	\begin{itemize}
+		\item Inputs: \code{fname} - The whole path to the spectrum file.  This file contains a dictionary with all of the important experimental descriptions and parameters.
+		\item Internals: 
+		\begin{enumerate}
+			\item \code{self.fname} - the path that the imported file came from.
+			\item \code{self.parameters} - dictionary with all of the important experimental details
+			\item \code{self.description} - string with a brief description of the spectrum
+			\item \code{self.raw\_data} - np.array of size $1600\times2$. The first column is in nm, the second column has the raw counts from the CCD.
+			\item \code{self.hsg\_data} - np.array of size $1600\times2$. The first column is in eV, the second column contains the counts normalized by the number of FEL pulses.
+			\item \code{self.dark\_stdev} - standard deviation of the dark counts as calculated during the experiment divided by the number of FEL counts.
+			\item \code{self.addenda} - a list of the things added to this object to make it what it is, including constant offsets and other spectra.
+			\item \code{self.subtrahenda} - a list of spectra subtracted from this object.
+		\end{enumerate}
+		\item Outputs: \code{None}
+	\end{itemize}
+	
+	\item \code{\_\_add\_\_} - Adds a number (float or int) or another spectrum.  It's unclear at the moment whether this should be \code{raw\_data} or \code{hsg\_data}.  It seems to work currently, though, because of an extra method, \code{image\_normalize}.
+	\begin{itemize}
+		\item Inputs: \code{other} - A number or another spectrum.  Currently adds \code{hsg\_data} if other is a CCD object.
+		\item Internals:
+		\begin{enumerate}
+			\item \code{ret.addenda} - the two addendas are concatenated.
+			\item \code{ret.subtrahenda} - the two subtrahendas are concatenated.
+			\item \code{ret.parameters[`fel\_pulses']} - these are added together as well.
+		\end{enumerate}
+		\item Outputs: a new CCD object that is the sum of self and other.
+	\end{itemize}
+	
+	\item \code{\_\_sub\_\_} - Subtracts a number (float or int) or another spectrum.  It's unclear at the moment whether this should be \code{raw\_data} or \code{hsg\_data}.  It seems to work currently, though, because of an extra method, \code{image\_normalize}.
+	\begin{itemize}
+		\item Inputs: \code{other} - A number or another spectrum.  Currently subtracts \code{hsg\_data} if other is a CCD object.
+		\item Internals:
+		\begin{enumerate}
+			\item \code{ret.addenda} - the old addenda is concatenated with the new subtrahenda.
+			\item \code{ret.subtrahenda} - the old subtrahenda is concatenated with the new addenda.
+		\end{enumerate}
+		\item Outputs: a new CCD object that is the sum of self and other.
+	\end{itemize}
+	
+	\item \code{\_\_str\_\_} - prints the \code{description} of the file.
+		\begin{itemize}
+		\item Inputs: nothing
+		\item Internals: nothing
+		\item Outputs: \code{self.description}.
+	\end{itemize}
+\end{enumerate}
+
+\noindent Normal methods:
+\begin{enumerate}
+	\item \code{add\_std\_error} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+	
+	\item \code{calc\_approx\_sb\_order} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+	
+	\item \code{image\_normalize} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+	
+		\item \code{guess\_better} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+
+	\item \code{guess\_sidebands} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+
+	\item \code{fit\_sidebands} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+		
+	\item \code{fit\_sidebands\_for\_NIR\_freq} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+
+	\item \code{save\_processing} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+	
+	\item \code{stitch\_spectra} - This does nothing.
+\end{enumerate}
+
+\subsection{PMT class}
+\indent \indent This class imports and handles data from the PMT. 
+\subsubsection{Attributes}
+\subsubsection{Methods}
+Magic methods:
+\begin{enumerate}
+	\item \code{\_\_init\_\_(fname)} - Initializes the CCD object. 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+\end{enumerate}
+
+\noindent Normal methods:
+\begin{enumerate}
+	\item \code{fit\_sidebands} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+	
+	\item \code{save\_processing} - 
+	\begin{itemize}
+		\item Inputs:
+		\item Internals:
+		\item Outputs:
+	\end{itemize}
+\end{enumerate}
+
+\subsection{Spectrum class}
+\indent \indent This class takes PMT and CCD class data and combines them. 
+\subsubsection{Attributes}
+\subsubsection{Methods}
+Magic methods:
+\begin{enumerate}
+	\item \code{\_\_init\_\_} - Initializes the Spectrum object. At the moment it requires a PMT and a CCD object.  It would be cool if it could handle two CCD objects (hint hint).
+	\begin{itemize}
+		\item Inputs: 
+		\begin{enumerate}
+			\item \code{PMT\_spectrum}
+			\item \code{CCD\_spectrum}
+		\end{enumerate}
+		\item Internals:
+		\begin{enumerate}
+			\item \code{self.pmt\_results}
+			\item \code{self.ccd\_results}
+			\item \code{self.parameters}
+			\item \code{self.pmt\_dict}
+			\item \code{self.full\_dict}
+		\end{enumerate}
+		\item Outputs: \code{None}
+	\end{itemize}
+\end{enumerate}
+
+\noindent Normal methods:
+\begin{enumerate}
+	\item \code{plot\_prep} - This makes an np.array, \code{self.full\_results}, that is identical to the \code{sb\_results} np.array in other objects.
+	\begin{itemize}
+		\item Inputs: Nothing
+		\item Internals: \code{self.full\_results}
+		\item Outputs: \code{None}
+	\end{itemize}
+	
+	\item \code{add\_sidebands} - This method takes another CCD object and adds \code{sb\_results} to the current \code{self.full\_results} attribute in the dumbest way possible.
+	\begin{itemize}
+		\item Inputs: CCD\_spectrum - a CCD object that is part of the same spectrum making up this object.
+		\item Internals:
+		\begin{enumerate}
+			\item \code{self.ccd2\_results} - copied from \code{CCD\_spectrum.sb\_results}.
+			\item \code{self.ccd2\_dict} - keys are sb order, values are the results from before.
+			\item \code{self.full\_dict} - gets stitched with \code{self.ccd2\_dict} to make a complete thing.  No averaging, no nothing.
+		\end{enumerate}
+		\item Outputs: \code{None}
+	\end{itemize}
+	
+	\item \code{save\_processing} - This saves things like the other save-y things.
+	\begin{itemize}
+		\item Inputs:
+		\begin{enumerate}
+			\item \code{file\_name} - the base of the file name that will be saved.
+			\item \code{folder\_str} - the folder that the file will be saved in.  It will create the folder if necessary.
+			\item \code{marker=`'} - an extra piece of the file name to be saved.  Can be a parameter or something.
+			\item \code{index=`'} - indexer that has to be external because numpy's saving system sucks.
+		\end{enumerate}
+		\item Internals:
+		\begin{enumerate}
+			\item \code{spectra\_fname} - \code{file\_name + `\_' + marker + `\_' + str(index) + `.txt'}
+			\item \code{fit\_fname} - \code{file\_name + `\_' + marker + `\_' + str(index) + `\_fits.txt'}
+			\item \code{parameter\_str} - the json string created from \code{self.parameters}
+			\item \code{origin\_import\_fits} - header created to be read by Origin.
+		\end{enumerate}
+		\item Outputs: \code{None}
+	\end{itemize}
+\end{enumerate}
+\end{document} 
