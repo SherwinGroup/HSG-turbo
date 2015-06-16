@@ -1142,6 +1142,21 @@ def sum_spectra(object_list):
         good_list.append(temp)
     return good_list
 
+def stitch_hsg(object_list):
+    """
+    This will take the list of processed spectra and return a new one that has
+    all hsg spectra that were taken in pieces and have them all stitched together.
+    """
+    good_list = []
+    for index in xrange(len(object_list)):
+        try:
+            temp = object_list.pop(0)
+        except:
+            break
+        
+        for test in list(object_list):
+            if temp.parameters['spec_section'] + 1 = test.parameters['spec_section']:
+                
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit):
     """
     This function will take a fully processed list of spectrum objects and 
@@ -1188,7 +1203,10 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
             if not temp_dict.has_key(sb):
                 print "\nNeed to add sideband order:", sb
                 temp_dict[sb] = blank
-        spec_data = np.array([float(spec.parameters[param_name]), spec.dark_stdev])
+        try:
+            spec_data = np.array([float(spec.parameters[param_name]), spec.dark_stdev])
+        except:
+            spec_data = np.array([float(spec.parameters[param_name][:2]), spec.dark_stdev])
         for key in sorted(temp_dict.keys()):
             print "I am going to hstack this:", temp_dict[key]
             spec_data = np.hstack((spec_data, temp_dict[key]))
