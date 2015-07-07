@@ -17,6 +17,10 @@ class DraggableViewBox(pg.ViewBox):
     """
     # emits (<self>, <drop pos>)
     sigDropEvent = QtCore.pyqtSignal(object, object)
+
+    #emits (<self>, <click pos>)
+    sigClickedEvent = QtCore.pyqtSignal(object, object)
+
     def __init__(self, parent=None, border=None, lockAspect=False, enableMouse=True, invertY=False, enableMenu=True, name=None, invertX=False):
         super(DraggableViewBox, self).__init__(parent, border, lockAspect, enableMouse, invertY, enableMenu, name, invertX)
 
@@ -28,3 +32,10 @@ class DraggableViewBox(pg.ViewBox):
             self.sigDropEvent.emit(self, ev.lastScreenPos())
         else:
             super(DraggableViewBox, self).mouseDragEvent(ev, axis)
+
+    def mouseClickEvent(self, ev):
+        if ev.button() == QtCore.Qt.LeftButton:
+            # ev.accept()
+            self.sigClickedEvent.emit(self, ev.pos())
+        else:
+            super(DraggableViewBox, self).mouseClickEvent(ev)

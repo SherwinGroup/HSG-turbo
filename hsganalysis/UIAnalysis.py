@@ -13,6 +13,7 @@ import os
 import hsganalysis as hsg # local file, not global, no hsg.hsg
 
 from UI.mainWin_ui import Ui_MainWindow
+from draggablePlotWidget import DraggablePlotWidget
 
 fileList = dict()
 combinedWindowList = []
@@ -28,15 +29,20 @@ class MainWindow(QtGui.QMainWindow):
     where you say they are. That's really fucking terrible. I could maybe subclass it
     to add my own features, which could be fun, but  I do not have time right now
     """
+
+    sigClosed = QtCore.pyqtSignal(object)
     def __init__(self, inp = None):
         super(MainWindow, self).__init__()
         self.initUI()
+        # I must have grabbed these from stackoverflow
+        # Sorry, don't really know why they're needed
         self.__class__.dragEnterEvent = self.dragEnterEvent
         self.__class__.dragMoveEvent = self.dragEnterEvent
         self.__class__.dropEvent = self.drop
         self.setAcceptDrops(True)
         self.hsgObj = None
 
+        # Handle being instantiated with various input
         if inp is not None:
             if type(inp) is str: # a filename to open
                 self.openFile(inp)
@@ -44,6 +50,8 @@ class MainWindow(QtGui.QMainWindow):
                 self.processSingleHSG(inp)
             else:
                 print "unknown type, ", type(inp)
+
+        self.sigClosed.connect(updateFileClose)
 
 
 
@@ -195,15 +203,6 @@ class MainWindow(QtGui.QMainWindow):
         self.menuFit.menuAction().setVisible(not isSpec)
         self.menuSpec.menuAction().setVisible(isSpec)
 
-        # if self.ui.tabWidget.currentIndex() == 0:
-        #     self.menuFit.menuAction().setVisible
-        #     # self.ui.menubar.addMenu(self.menuSpec)
-        #     self.ui.menubar.removeAction(self.menuFit)
-        #     self.ui.menubar.addMenu(self.menuSpec)
-        # else:
-        #     self.ui.menubar.removeAction(self.menuSpec)
-        #     self.ui.menubar.addMenu(self.menuFit)
-
     @staticmethod
     def __OPENTHINGS(): pass
 
@@ -346,7 +345,6 @@ class MainWindow(QtGui.QMainWindow):
             x = 1239.84 / x
         elif xType == "wavenumber":
             x = 10000000*x/1239.84
-        print x
         self.ui.gSpectrum.plot(x, data[:,1]/self.uisbDivideBy.value())
 
 
@@ -409,10 +407,12 @@ class MainWindow(QtGui.QMainWindow):
             self.plotFits()
 
     def parseFitXChange(self, val=None):
-        return # I don't care to deal with non SB x-axis right now
         sent = self.sender()
         if not val: # ignore if you uncheck
             sent.setChecked(True)
+            return
+        else:
+            sent.setChecked(False)
             return
         oldName = [str(i.text()) for i in self.menuFitX.actions() if i is not sent and i.isChecked()][0]
         newName = str(sent.text())
@@ -436,64 +436,113 @@ class MainWindow(QtGui.QMainWindow):
 
     def drop(self, event):
         global fileList
+        # Dropped something that isn't a link
         if not event.mimeData().hasUrls():
             event.reject()
             return
 
+        # Only one file was dropped
         if len(event.mimeData().urls()) == 1:
             filename = str(event.mimeData().urls()[0].toLocalFile())
-            if not fileList: # no files have been opened
+            # No files have been opened yet, so I'll open it myself
+            if not fileList:
                 self.openFile(filename)
                 fileList[filename] = self
+            # Otherwise, make sure it's not already open and
+            # if not, make a new window with the file
             else:
                 if filename in fileList.keys():
                     print "Already opened file"
                 else:
                     a = MainWindow(filename)
                     fileList[filename] = a
+        # Multiple files were dropped
         else:
+            # Make a list of all of them, cuttingout the "seriesed" ones
+            # Because we'll use the HSGanalysis methods to handle it
             filelist = [str(i.toLocalFile()) for i in event.mimeData().urls()]
             filelist = [i for i in filelist if "seriesed" not in i.lower()]
+            # Make a CCD obj of each file
             objlist = [hsg.CCD(i) for i in filelist]
+            # Sum them all up
             series = hsg.sum_spectra(objlist)
 
+
             for obj in series:
+                # If there's no series tag, it was a single
+                # spectrum. Setting the window title
+                # to the spectrometer wavelength is kinda random
                 if obj.parameters["series"] == "":
                     fileList[obj.fname] = MainWindow(obj)
                     fileList[obj.fname].setWindowTitle(str(obj.parameters["center_lambda"]))
+                # Won't open if the series is already used. Problematic
+                # if you use the same series tag in different folders
                 elif obj.parameters["series"] in fileList.keys():
                     print "already opened this series,", obj.parameters["series"]
                 else:
                     fileList[obj.parameters["series"]] = MainWindow(obj)
                     fileList[obj.parameters["series"]].setWindowTitle(
                         "Series: {}".format(obj.parameters["series"]))
-        if self.hsgObj is None: # the first window. Get outta here!
+        if self.hsgObj is None: # I'm the first window. Get outta here!
             self.close()
 
 
     def handleFitDragEvent(self, obj, val):
+        """
+        called when the plot of fit results is dragged/dropped
+        :param obj: The thing dragged
+        :param val:  the pyqtgraph coordinate of the drop point
+        :return:
+        """
+        # Get the xy data from the plot directly,
+        # may break if pyqtgraph changes indexing of curves
+        # I think the other indices include axes and things?
+        # could chagne this by making the data a class
+        # member, but this keeps it clear what units are used
         d = [self.ui.gFits.plotItem.curves[1].xData,
              self.ui.gFits.plotItem.curves[1].yData]
         self.createCompWindow(data = d, p = val)
 
     def handleSpecDragEvent(self, obj, val):
+        """
+        See comments on handleFitDragEvent
+        :param obj:
+        :param val:
+        :return:
+        """
         d = [self.ui.gSpectrum.plotItem.curves[-1].xData,
              self.ui.gSpectrum.plotItem.curves[-1].yData]
         self.createCompWindow(data = d, p = val)
 
     def createCompWindow(self, data, p, label=None):
-
+        # If there's already open windows, see if the drop point
+        # is over an already created window. If it is,
+        # add it to that window
         if combinedWindowList:
             inners = [i for i in combinedWindowList if i.containsPoint(p.toQPoint())]
-            if inners:
+            if inners: #tests if it's empty
                 a = inners[-1] # last focused window
-                a.addCurve(data, str(self.windowTitle()))
+                # Data may not be passed if you make a comparision window
+                # Before loading any files, don't throw errors
+                if not None in data:
+                    a.addCurve(data, str(self.windowTitle()))
                 return
 
+        # If there's no window or not dragged on top of something,
+        # create a new window
         a = ComparisonWindow()
+
+        # Connect the signals for when it gets closed or focused
         a.sigClosed.connect(updateCompClose)
         a.sigGotFocus.connect(updateFocusList)
-        a.addCurve(data, str(self.windowTitle()))
+
+        # Data may not be passed if you make a comparision window
+        # Before loading any files, don't throw errors
+        if not None in data:
+            a.addCurve(data, str(self.windowTitle()))
+        # Move the window to the drag point
+        a.move(p.toQPoint() - QtCore.QPoint(a.geometry().width()/2, a.geometry().height()/2))
+        # Add it to the list of opened windows
         combinedWindowList.append(a)
 
 
@@ -536,6 +585,13 @@ class MainWindow(QtGui.QMainWindow):
 
         return np.mean(spacings)
 
+    @staticmethod
+    def __CLEANING_UP(): pass
+
+    def closeEvent(self, event):
+        self.sigClosed.emit(self)
+        super(MainWindow, self).closeEvent(event)
+
 penList = [pg.intColor(i, 20) for i in range(20)]
 
 class ComparisonWindow(QtGui.QMainWindow):
@@ -546,17 +602,27 @@ class ComparisonWindow(QtGui.QMainWindow):
         self.initUI()
         self.curveList = {} # a way to keep track of what's been added
 
+        self.selectedList = [] # List of which lines have been selected
+
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.gPlot.setFocusPolicy(QtCore.Qt.StrongFocus)
 
         self.gPlot.focusInEvent = self.focusInEvent
         self.gPlot.changeEvent = self.changeEvent
 
+        self.gPlot.plotItem.vb.sigClickedEvent.connect(self.handleMouseClick)
+
     def initUI(self):
         self.gPlot= pg.PlotWidget()
+        self.gPlot = DraggablePlotWidget()
         self.setCentralWidget(self.gPlot)
         self.legend = pg.LegendItem()
         self.legend.setParentItem(self.gPlot.plotItem)
+
+        removeItems = QtGui.QAction("Remove Selected Items", self.menuBar())
+        removeItems.triggered.connect(self.removeSelectedLines)
+        self.menuBar().addAction(removeItems)
+
         self.show()
 
     def containsPoint(self, p):
@@ -569,14 +635,26 @@ class ComparisonWindow(QtGui.QMainWindow):
         return self.frameGeometry().contains(p)
 
     def addCurve(self, data, label=None):
-        p = self.gPlot.plotItem.plot(data[0], data[1], pen=pg.intColor(len(self.curveList), hues=20))
+        p = self.gPlot.plotItem.plot(data[0], data[1], pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)))
         if label is not None:
-            self.curveList[label] = p
+            self.curveList[p] = label
             self.legend.addItem(p, label)
+        p.curve.setClickable(True)
+        p.sigClicked.connect(self.handleMouseClick)
 
-    def close(self):
+    def removeSelectedLines(self):
+        for line in self.selectedList:
+            # Want to remove the line from both the internal
+            # curveList and the legend
+            self.legend.removeItem(self.curveList.pop(line))
+            self.gPlot.plotItem.removeItem(line)
+            self.selectedList.remove(line)
+        self.legend.updateSize()
+
+
+    def closeEvent(self, event):
         self.sigClosed.emit(self)
-        super(ComparisonWindow, self).close()
+        super(ComparisonWindow, self).closeEvent(event)
 
     def focusInEvent(self, *args, **kwargs):
         print "got focus", args, kwargs
@@ -588,6 +666,49 @@ class ComparisonWindow(QtGui.QMainWindow):
             if self.isActiveWindow():
                 self.sigGotFocus.emit(self)
 
+    def handleMouseClick(self, obj, pos = None):
+        """
+        Handle highlighting curves when they're clicked
+        :param obj: a PlotCurveitem if a line is selected, else
+                    the ViewBox item of the gPlot
+        :param pos: If line selected, None
+                    Else, the position of the click
+        :return:
+        """
+        # If a line was clicked
+        if pos is None:
+            # Either select or deselect,
+            # adding/removing from the list
+            # and setting the width as appropriate
+            if obj in self.selectedList:
+                width = 1
+                self.selectedList.remove(obj)
+            else:
+                width = 3
+                self.selectedList.append(obj)
+            # Get the pen so that everything is the same
+            # And we just change the width, and set it back
+            pen = obj.opts['pen']
+            pen.setWidth(width)
+            obj.setPen(pen)
+        # Clicked not a curve, so un-bold all the plots
+        else:
+            for obj in self.curveList.keys():
+                pen = obj.opts['pen']
+                pen.setWidth(1)
+                obj.setPen(pen)
+            self.selectedList = []
+        # Force the legend to update to redraw with
+        # the new pen, too
+        self.legend.updateSize()
+
+
+def updateFileClose(obj):
+    for key, val in fileList.iteritems():
+        if val is obj:
+            fileList.pop(key)
+            break
+
 
 def updateCompClose(obj):
     try:
@@ -596,6 +717,8 @@ def updateCompClose(obj):
         print "error removign from list,", e
 
 def updateFocusList(obj):
+    if obj not in combinedWindowList:
+        return # thsi gets called when window is closed
     try:
         combinedWindowList.remove(obj)
         combinedWindowList.append(obj)
@@ -633,6 +756,7 @@ if __name__=="__main__":
     import pyqtgraph.console as pgc
     consoleWindow = pgc.ConsoleWidget(namespace={"fl":fileList,"np": np, "cl":combinedWindowList, "pg":pg})
     consoleWindow.show()
+    consoleWindow.lower()
 
     sys.exit(ex.exec_())
     
