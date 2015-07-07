@@ -291,10 +291,18 @@ class MainWindow(QtGui.QMainWindow):
     def processSingleHSG(self, hsgObj):
         hsgObj = hsg.sum_spectra([hsgObj])[0]
 
+        if "hsg" in hsgObj.fname:
+            hsgObj.guess_better(cutoff = 3.5)
+            hsgObj.fit_sidebands(plot=False)
+            self.plotSBFits(hsgObj)
 
-        hsgObj.guess_better(cutoff = 3.5)
-        hsgObj.fit_sidebands(plot=False)
+            params = self.genFitParams(hsgObj.sb_results)
+            self.fitParams = Parameter.create(name="Fit Results. FEL Freq: {}".format(self.calcFELFreq(hsgObj.sb_results)), type="group", children=params)
+            self.ui.ptFits.setParameters(self.fitParams)
 
+            self.plotFits()
+
+            self.plotSBFits(hsgObj)
 
         self.hsgObj = hsgObj
 
@@ -304,14 +312,7 @@ class MainWindow(QtGui.QMainWindow):
         self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
 
-        self.plotSBFits(hsgObj)
         self.plotSpectrum(hsgObj.hsg_data)
-
-        params = self.genFitParams(hsgObj.sb_results)
-        self.fitParams = Parameter.create(name="Fit Results. FEL Freq: {}".format(self.calcFELFreq(hsgObj.sb_results)), type="group", children=params)
-        self.ui.ptFits.setParameters(self.fitParams)
-
-        self.plotFits()
 
 
 
