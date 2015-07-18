@@ -19,7 +19,7 @@ fileList = dict()
 combinedWindowList = []
 
 
-class MainWindow(QtGui.QMainWindow):
+class BaseWindow(QtGui.QMainWindow):
     """
     A note on parameter trees:
     They're not the most convenient things to navigate. You can't reference by name,
@@ -32,7 +32,7 @@ class MainWindow(QtGui.QMainWindow):
 
     sigClosed = QtCore.pyqtSignal(object)
     def __init__(self, inp = None):
-        super(MainWindow, self).__init__()
+        super(BaseWindow, self).__init__()
         self.initUI()
         # I must have grabbed these from stackoverflow
         # Sorry, don't really know why they're needed
@@ -455,7 +455,7 @@ class MainWindow(QtGui.QMainWindow):
                 if filename in fileList.keys():
                     print "Already opened file"
                 else:
-                    a = MainWindow(filename)
+                    a = BaseWindow(filename)
                     fileList[filename] = a
         # Multiple files were dropped
         else:
@@ -474,14 +474,14 @@ class MainWindow(QtGui.QMainWindow):
                 # spectrum. Setting the window title
                 # to the spectrometer wavelength is kinda random
                 if obj.parameters["series"] == "":
-                    fileList[obj.fname] = MainWindow(obj)
+                    fileList[obj.fname] = BaseWindow(obj)
                     fileList[obj.fname].setWindowTitle(str(obj.parameters["center_lambda"]))
                 # Won't open if the series is already used. Problematic
                 # if you use the same series tag in different folders
                 elif obj.parameters["series"] in fileList.keys():
                     print "already opened this series,", obj.parameters["series"]
                 else:
-                    fileList[obj.parameters["series"]] = MainWindow(obj)
+                    fileList[obj.parameters["series"]] = BaseWindow(obj)
                     fileList[obj.parameters["series"]].setWindowTitle(
                         "Series: {}".format(obj.parameters["series"]))
         if self.hsgObj is None: # I'm the first window. Get outta here!
@@ -591,7 +591,18 @@ class MainWindow(QtGui.QMainWindow):
 
     def closeEvent(self, event):
         self.sigClosed.emit(self)
-        super(MainWindow, self).closeEvent(event)
+        super(BaseWindow, self).closeEvent(event)
+
+
+
+class HSGWindow(BaseWindow):
+    pass
+
+class AbsWindow(BaseWindow):
+    pass
+
+class PLWindow(BaseWindow):
+    pass
 
 penList = [pg.intColor(i, 20) for i in range(20)]
 
@@ -746,7 +757,7 @@ converter = {
 if __name__=="__main__":
     import sys
     ex = QtGui.QApplication(sys.argv)
-    win = MainWindow()
+    win = BaseWindow()
 
 #
 #     a = pg.Point(120, 250)
