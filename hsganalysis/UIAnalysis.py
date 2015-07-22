@@ -51,7 +51,7 @@ class BaseWindow(QtGui.QMainWindow):
             if type(inp) is str: # a filename to open
                 self.openFile(inp)
             elif isinstance(inp, self.dataClass):
-                self.processSingleHSG(inp)
+                self.processSingleData(inp)
             else:
                 print "unknown type, ", type(inp)
 
@@ -289,40 +289,46 @@ class BaseWindow(QtGui.QMainWindow):
         self.specParams = Parameter.create(name=filename, type='group', children=params)
         self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
-        hsgObj = hsg.CCD(filename)
-        self.processSingleHSG(hsgObj)
+        dataObj = self.dataClass(filename)
+        self.processSingleData(dataObj)
 
-    def processSingleHSG(self, hsgObj):
-        print hsgObj
-        hsgObj = hsg.sum_spectra([hsgObj])[0]
+    def processSingleData(self, dataObj):
+        print dataObj
+        dataObj = hsg.sum_spectra([dataObj])[0]
+        self.plotSpectrum(dataObj.hsg_data)
+        self.dataObj = dataObj
+        params = self.genParameters(**dataObj.parameters)
+        self.specParams = Parameter.create(name=dataObj.fname, type='group', children=params)
+        self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
-        if "hsg" in hsgObj.fname:
-            hsgObj.guess_better(cutoff = 3.5)
-            hsgObj.fit_sidebands(plot=False)
-            self.plotSBFits(hsgObj)
+        if "hsg" in dataObj.fname:
+            dataObj.guess_sidebands(cutoff = 3.5)
+            dataObj.fit_sidebands(plot=False)
+            self.plotSBFits(dataObj)
 
-            params = self.genFitParams(hsgObj.sb_results)
-            self.fitParams = Parameter.create(name="Fit Results. FEL Freq: {}".format(self.calcFELFreq(hsgObj.sb_results)), type="group", children=params)
+            params = self.genFitParams(dataObj.sb_results)
+            self.fitParams = Parameter.create(
+                name="Fit Results. FEL Freq: {}".format(self.calcFELFreq(dataObj.sb_results)),
+                type="group", children=params)
             self.ui.ptFits.setParameters(self.fitParams)
 
             self.plotFits()
 
-            self.plotSBFits(hsgObj)
-
-        self.hsgObj = hsgObj
-
-
-        params = self.genParameters(**hsgObj.parameters)
-        self.specParams = Parameter.create(name=hsgObj.fname, type='group', children=params)
-        self.ui.ptFile.setParameters(self.specParams, showTop=True)
-
-
-        self.plotSpectrum(hsgObj.hsg_data)
+            self.plotSBFits(dataObj)
 
 
 
 
-
+    @staticmethod
+    def getWindowClass(fname):
+        if 'hsg' in fname:
+            return HSGWindow
+        elif 'abs' in fname:
+            return AbsWindow
+        elif 'pl' in fname:
+            return PLWindow
+        else:
+            return BaseWindow
 
 
     @staticmethod
@@ -357,7 +363,7 @@ class BaseWindow(QtGui.QMainWindow):
     @staticmethod
     def __PLOTTING_FIT_RESUTLS(): pass
     def plotFits(self):
-        data = self.hsgObj.sb_results
+        data = self.dataObj.sb_results
         want = [str(i.text()) for i in self.menuFitY.actions() if i.isChecked() and str(i.text())!="Log"][0]
         x = data[:,0]
         y = data[:, {"Height":   3,
@@ -450,18 +456,12 @@ class BaseWindow(QtGui.QMainWindow):
         # Only one file was dropped
         if len(event.mimeData().urls()) == 1:
             filename = str(event.mimeData().urls()[0].toLocalFile())
-            # No files have been opened yet, so I'll open it myself
-            if not fileList:
-                self.openFile(filename)
-                fileList[filename] = self
-            # Otherwise, make sure it's not already open and
-            # if not, make a new window with the file
+            if filename in fileList.keys():
+                print "Already opened file"
             else:
-                if filename in fileList.keys():
-                    print "Already opened file"
-                else:
-                    a = BaseWindow(filename)
-                    fileList[filename] = a
+                c = BaseWindow.getWindowClass(filename)
+                a = c(filename)
+                fileList[filename] = a
         # Multiple files were dropped
         else:
             # Make a list of all of them, cuttingout the "seriesed" ones
@@ -469,9 +469,10 @@ class BaseWindow(QtGui.QMainWindow):
             filelist = [str(i.toLocalFile()) for i in event.mimeData().urls()]
             filelist = [i for i in filelist if "seriesed" not in i.lower()]
             # Make a CCD obj of each file
-            objlist = [hsg.CCD(i) for i in filelist]
+            objlist = [self.dataClass(i) for i in filelist]
             # Sum them all up
             series = hsg.sum_spectra(objlist)
+            print "HAVE SUMMED"
 
 
             for obj in series:
@@ -479,17 +480,19 @@ class BaseWindow(QtGui.QMainWindow):
                 # spectrum. Setting the window title
                 # to the spectrometer wavelength is kinda random
                 if obj.parameters["series"] == "":
-                    fileList[obj.fname] = BaseWindow(obj)
+                    c = BaseWindow.getWindowClass(obj.fname)
+                    fileList[obj.fname] = c(obj)
                     fileList[obj.fname].setWindowTitle(str(obj.parameters["center_lambda"]))
                 # Won't open if the series is already used. Problematic
                 # if you use the same series tag in different folders
                 elif obj.parameters["series"] in fileList.keys():
                     print "already opened this series,", obj.parameters["series"]
                 else:
-                    fileList[obj.parameters["series"]] = BaseWindow(obj)
+                    c = BaseWindow.getWindowClass(obj.fname)
+                    fileList[obj.parameters["series"]] = c(obj)
                     fileList[obj.parameters["series"]].setWindowTitle(
                         "Series: {}".format(obj.parameters["series"]))
-        if self.hsgObj is None: # I'm the first window. Get outta here!
+        if self.dataObj is None: # I'm the first window. Get outta here!
             self.close()
 
 
@@ -516,8 +519,8 @@ class BaseWindow(QtGui.QMainWindow):
         :param val:
         :return:
         """
-        d = [self.ui.gSpectrum.plotItem.curves[-1].xData,
-             self.ui.gSpectrum.plotItem.curves[-1].yData]
+        d = [self.ui.gSpectrum.plotItem.curves[1].xData,
+             self.ui.gSpectrum.plotItem.curves[1].yData]
         self.createCompWindow(data = d, p = val)
 
     def createCompWindow(self, data, p, label=None):
@@ -601,13 +604,13 @@ class BaseWindow(QtGui.QMainWindow):
 
 
 class HSGWindow(BaseWindow):
-    pass
+    dataClass = hsg.HighSidebandCCD
 
 class AbsWindow(BaseWindow):
-    pass
+    dataClass = hsg.Absorbance
 
 class PLWindow(BaseWindow):
-    pass
+    dataClass = hsg.Photoluminescence
 
 penList = [pg.intColor(i, 20) for i in range(20)]
 

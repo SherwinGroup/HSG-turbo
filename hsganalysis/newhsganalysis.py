@@ -511,7 +511,7 @@ class HighSidebandCCD(CCD):
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
-                print coeff[1] / coeff[2], " vs. ", np.max(data/temp[:, 1]), "of", self.sb_list[elem]
+                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
                 print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
@@ -934,13 +934,13 @@ def sum_spectra(object_list):
     good_list = []
     for index in xrange(len(object_list)):
         dark_var = 0
-        num_images = 0
+        num_images = 1
         try:
             temp = object_list.pop(0)
             stderr_holder = np.array(temp.hsg_data[:, 1]).reshape((1600, 1))
             # print "Standard error holder shape 1:", stderr_holder.shape
-        except:
-            # print "God damn it, Leroy"
+        except Exception as E:
+            print "God damn it, Leroy", E
             break
         print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
         for spec in list(object_list):
