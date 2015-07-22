@@ -940,7 +940,7 @@ def sum_spectra(object_list):
             stderr_holder = np.array(temp.hsg_data[:, 1]).reshape((1600, 1))
             # print "Standard error holder shape 1:", stderr_holder.shape
         except Exception as E:
-            print "God damn it, Leroy", E
+            # print "God damn it, Leroy", E
             break
         print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
         for spec in list(object_list):

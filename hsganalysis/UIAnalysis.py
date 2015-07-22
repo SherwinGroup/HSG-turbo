@@ -330,6 +330,17 @@ class BaseWindow(QtGui.QMainWindow):
         else:
             return BaseWindow
 
+    @staticmethod
+    def getDataClass(fname):
+        if 'hsg' in fname:
+            return hsg.HighSidebandCCD
+        elif 'abs' in fname:
+            return hsg.Absorbance
+        elif 'pl' in fname:
+            return hsg.Photoluminescence
+        else:
+            return hsg.CCD
+
 
     @staticmethod
     def __PLOT_SPECT_THINGS(): pass
@@ -469,10 +480,9 @@ class BaseWindow(QtGui.QMainWindow):
             filelist = [str(i.toLocalFile()) for i in event.mimeData().urls()]
             filelist = [i for i in filelist if "seriesed" not in i.lower()]
             # Make a CCD obj of each file
-            objlist = [self.dataClass(i) for i in filelist]
+            objlist = [BaseWindow.getDataClass(i)(i) for i in filelist]
             # Sum them all up
             series = hsg.sum_spectra(objlist)
-            print "HAVE SUMMED"
 
 
             for obj in series:
