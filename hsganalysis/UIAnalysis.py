@@ -10,7 +10,8 @@ import pyqtgraph as pg
 import pyqtgraph.parametertree.parameterTypes as pTypes
 from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
 import os
-import hsganalysis as hsg # local file, not global, no hsg.hsg
+# import hsganalysis as hsg # local file, not global, no hsg.hsg
+import newhsganalysis as hsg
 
 from UI.mainWin_ui import Ui_MainWindow
 from draggablePlotWidget import DraggablePlotWidget
@@ -30,6 +31,9 @@ class BaseWindow(QtGui.QMainWindow):
     to add my own features, which could be fun, but  I do not have time right now
     """
 
+    # Class to be instantiated with data
+    dataClass = hsg.CCD
+
     sigClosed = QtCore.pyqtSignal(object)
     def __init__(self, inp = None):
         super(BaseWindow, self).__init__()
@@ -40,13 +44,13 @@ class BaseWindow(QtGui.QMainWindow):
         self.__class__.dragMoveEvent = self.dragEnterEvent
         self.__class__.dropEvent = self.drop
         self.setAcceptDrops(True)
-        self.hsgObj = None
+        self.dataObj = None
 
         # Handle being instantiated with various input
         if inp is not None:
             if type(inp) is str: # a filename to open
                 self.openFile(inp)
-            elif type(inp) is hsg.CCD:
+            elif isinstance(inp, self.dataClass):
                 self.processSingleHSG(inp)
             else:
                 print "unknown type, ", type(inp)
@@ -289,6 +293,7 @@ class BaseWindow(QtGui.QMainWindow):
         self.processSingleHSG(hsgObj)
 
     def processSingleHSG(self, hsgObj):
+        print hsgObj
         hsgObj = hsg.sum_spectra([hsgObj])[0]
 
         if "hsg" in hsgObj.fname:

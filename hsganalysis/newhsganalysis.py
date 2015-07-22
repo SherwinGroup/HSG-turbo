@@ -52,7 +52,7 @@ class CCD(object):
         self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
 
 class Photoluminescence(CCD):
-    def __init__(self):
+    def __init__(self, fname):
         CCD.__init__(self, fname)
 
         self.hsg_data = np.array(self.ccd_data) # Does this work the way I want it to?
@@ -60,10 +60,60 @@ class Photoluminescence(CCD):
 #     def save_processing(self):
         
 class Absorbance(CCD):
-    def __init__(self):
-        CCD.__init__(self, fname)
+    def __init__(self, fname):
+        """
+        There are several ways Absorbance data can be loaded
+        You could try to load the abs data output from data collection directly,
+        which has the wavelength, raw, blank and actual absorbance data itself
 
-        self.abs_data = np.array(self.ccd_data[:, [0, 1, 3]])
+        Alternatively, you could want to load the raw transmission/reference
+        data, ignoring (or maybe not even having) the abs calculated
+        from the data collection software.
+
+        I'm not sure the best way to input the files you want...
+        Maybe either the abs data itself, or a list of the [ref, trans]?
+        :param fname: either an absorbance filename, or a length 2 list of filenames
+        :return:
+        """
+
+        if "abs_" in fname:
+            CCD.__init__(self, fname)
+            # Separate into the separate data sets
+            #   The raw counts of the reference data
+            self.ref_data = np.array(self.ccd_data[:, [0, 1]])
+            #   Raw counts of the sample
+            self.raw_data = np.array(self.ccd_data[:, [0, 2]])
+            #   The calculated absorbance data (-log10(raw/ref))
+            self.abs_data = np.array(self.ccd_data[:, [0, 3]])
+        else:
+            # Should be here if you pass the reference/trans filenames
+            try:
+                super(Absorbance, self).__init__(fname[0])
+                self.ref_data = np.array(self.ccd_data)
+
+                super(Absorbance, self).__init__(fname[1])
+                self.raw_data = np.array(self.ccd_data)
+            except ValueError:
+                # ValueError gets thrown when importing older data
+                # which had more headers than data columns. Enforce
+                # only loading first two columns to avoid
+
+                self.ref_data = np.flipud(np.genfromtxt(fname[0], comments='#',
+                                                        delimiter=',', usecols=(0, 1)))
+
+                self.ref_data = np.array(self.ref_data[:1600,:])
+                self.ref_data[:, 0] = 1239.84 / self.ref_data[:, 0]
+
+                self.raw_data = np.flipud(np.genfromtxt(fname[1], comments='#',
+                                                        delimiter=',', usecols=(0, 1)))
+
+                self.raw_data = np.array(self.raw_data[:1600,:])
+                self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
+            except Exception as e:
+                print "Exception opening,", e
+            self.abs_data = np.empty_like(self.ref_data)
+            self.abs_data[:,0] = self.ref_data[:,0]
+            self.abs_data[:,1] = np.log10(self.raw_data[:,1]/self.ref_data[:,1])
 
     def abs_per_QW(self, qw_number):
         """
