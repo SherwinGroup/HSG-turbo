@@ -15,6 +15,9 @@ import copy
 import json
 import numpy as np
 from scipy.optimize import curve_fit
+import scipy.interpolate as spi
+import scipy.optimize as spo
+import scipy.fftpack as fft
 import matplotlib.pyplot as plt
 
 ####################
@@ -896,6 +899,18 @@ def lorentzian(x, *p):
     mu, A, gamma, y0 = p
     return (A * gamma**2) / ((x - mu)**2 + gamma**2) + y0
 
+def background(x, *p):
+    # Arbitrary model background data for absorbance FFT
+    # for the intention of replacing a peak in the FFT
+    # with the background
+    a, b = p
+    return a * (1/x)**b
+
+def gaussWithBackground(x, *p):
+    pGauss = p[:4]
+    a, b = p[4:]
+    return gauss(x, *pGauss) + background(x, a, b)
+
 ####################
 # Collection functions 
 ####################
@@ -955,6 +970,349 @@ def sum_spectra(object_list):
 
 def stitch_abs_results(main, new):
     raise NotImplementedError
+
+def fft_filter(data, cutoffFrequency = 1520, inspectPlots = False, tryFitting = False,
+               freqSigma = 50, ftol = 1e-4, isInteractive=False):
+    """
+    Performs an FFT, then fits a peak in frequency around the
+    input with the input width.
+
+    If only data is given, it will cut off all frequencies above the default value.
+
+    inspectPlots = True will plot the FFT and the filtering at each step, as well as the results
+
+    tryFitting = True will try to fit the peak in frequency space centered at the cutoffFrequency
+    and with a width of freqSigma, using the background function above. Will replace
+    the peak with the background function. Feature not very well tested
+
+    isInteractive: Will pop up interactive windows to move the cutoff frequency and view the
+    FFT in real time. Requires pyqtgraph and PyQt4 installed (pyqt4 is standard with
+    anaconda/winpython, but pyqtgraph is not)
+    """
+    # Make a copy so we can return the same thing
+    retData = np.array(data)
+    x = np.array(data[:,0])
+    y = np.array(data[:,-1])
+    # Let's you place with zero padding.
+    zeroPadding = len(x)
+    N = len(x)
+
+    if isInteractive:
+        try:
+            import pyqtgraph as pg
+            from PyQt4 import QtCore, QtGui
+        except:
+            raise ImportError("Cannot do interactive plotting without pyqtgraph installed")
+        # Need to make some basic classes fir signals and slots to make things simple
+        class FFTWin(pg.PlotWindow):
+            sigCutoffChanged = QtCore.pyqtSignal(object)
+            sigClosed = QtCore.pyqtSignal()
+            def __init__(self, x, y):
+                super(FFTWin, self).__init__()
+                # Plot the log of the data,
+                # it breaks text boxes to do semilogy
+                self.plotItem.plot(x, np.log10(y))
+                # The line for picking the cutoff
+                # Connect signals so the textbox updates and the
+                # realspace window can recalcualte the FFT
+                self.line = pg.InfiniteLine(cutoffFrequency, movable=True)
+                self.line.sigPositionChanged.connect(lambda x:self.sigCutoffChanged.emit(x.value()))
+                self.line.sigPositionChanged.connect(self.updateText)
+                self.addItem(self.line)
+                # Set up the textbox so user knows the frequency
+                # If this ends up being useful, may need
+                # a way to set the cutoff manually
+                self.text = pg.TextItem("{:.4f}".format(cutoffFrequency))
+                self.addItem(self.text)
+                self.text.setPos(min(x), max(np.log10(y)))
+
+                # Cheap magic to get the close event
+                # of the main window. Need to keep a reference
+                # to the old function so that we can call it
+                # to properly clean up afterwards
+                self.oldCloseEvent = self.win.closeEvent
+                self.win.closeEvent = self.closeEvent
+            def updateText(self, val):
+                self.text.setText("{:.4f}".format(val.value()))
+
+            def closeEvent(self, ev):
+                # Just emit that we've been closed and
+                # pass it along to the window closer
+                self.sigClosed.emit()
+                self.oldCloseEvent(ev)
+
+        class RealWin(pg.PlotWindow):
+            sigClosed = QtCore.pyqtSignal()
+            def __init__(self, data, fftWin):
+                super(RealWin, self).__init__()
+                # To connect signals from it
+                self.fftWin = fftWin
+                self.data = data
+
+                # Start off with the FFT given by the original
+                # inputted cutoff
+                self.updatePlot(cutoffFrequency)
+
+                # See above comments
+                self.oldClose = self.win.closeEvent
+                self.win.closeEvent = self.closeEvent
+                fftWin.sigCutoffChanged.connect(self.updatePlot)
+                # Close self if other window is closed
+                fftWin.sigClosed.connect(self.win.close)
+
+            def updatePlot(self, val):
+                self.plotItem.clear()
+                self.plotItem.plot(*self.data.T, pen=pg.mkPen(width=3))
+                # Recursion! Call this same function to do the FFT
+                newData = fft_filter(self.data, cutoffFrequency=val)
+                self.plotItem.plot(*newData.T, pen=pg.mkPen('r', width=3))
+
+            def closeEvent(self, ev):
+                self.sigClosed.emit()
+                try:
+                    self.fftWin.win.close()
+                except:
+                    pass
+                self.oldClose(ev)
+
+
+        k = fft.fftfreq(zeroPadding, x[1]-x[0])
+        Y = fft.fft(y, n=zeroPadding)
+        # Make the windows
+        fftWin = FFTWin(k, np.abs(Y))
+        realWin = RealWin(np.array(retData), fftWin)
+        realWin.show()
+        # Need to pause the program until the frequency is selected
+        # Done with this qeventloop.
+        loop = QtCore.QEventLoop()
+        realWin.sigClosed.connect(loop.exit)
+        loop.exec_()
+        # Return with the desired output value
+        return fft_filter(retData, fftWin.line.value())
+
+
+    if inspectPlots:
+        plt.figure("Real Space")
+        plt.plot(x, y, label="Input Data")
+
+
+    # Replicate origin directy
+    # http://www.originlab.com/doc/Origin-Help/Smooth-Algorithm
+    # "rotate" the data set so it ends at 0,
+    # enforcing a periodicity in the data. Otherwise
+    # oscillatory artifacts result at the ends
+    onePerc = int(0.01*N)
+    x1 = np.mean(x[:onePerc])
+    x2 = np.mean(x[-onePerc:])
+    y1 = np.mean(y[:onePerc])
+    y2 = np.mean(y[-onePerc:])
+
+    m = (y1-y2)/(x1-x2)
+    b = y1 - m * x1
+
+    flattenLine = m * x + b
+    y -= flattenLine
+
+    if inspectPlots:
+        plt.plot(x, y, label="Rotated Data")
+
+    # Perform the FFT and find the appropriate frequency spacing
+    k = fft.fftfreq(zeroPadding, x[1]-x[0])
+    Y = fft.fft(y, n=zeroPadding)
+    if inspectPlots:
+        plt.figure("Frequency Space")
+        plt.semilogy(k, np.abs(Y), label="Raw FFT")
+
+    if tryFitting:
+        try:
+            # take +/- 4 sigma points around peak to fit to
+            sl = np.abs(k-cutoffFrequency).argmin() + np.array([-1, 1]) * 10 * freqSigma / np.abs(k[0]-k[1])
+            sl = slice(*[int(j) for j in sl])
+            p0 = [cutoffFrequency,
+                  np.abs(Y)[sl].max() * freqSigma, # estimate the height baased on the max in the set
+                  freqSigma,
+                  0.14, 2e3, 1.1] # magic test numbers, they fit the background well
+
+
+            if inspectPlots:
+                plt.semilogy(k[sl], gaussWithBackground(k[sl], *p0), label="Peak with initial values")
+            p, _ = curve_fit(gaussWithBackground, k[sl], np.abs(Y)[sl], p0=p0, ftol=ftol)
+            if inspectPlots:
+                plt.semilogy(k[sl], gaussWithBackground(k[sl], *p), label="Fitted Peak")
+
+
+            # Want to remove data within 5 sigma ( arb value... )
+            st = int(p[0] - 5*p[2])
+            en = int(p[0] + 5*p[2])
+
+            # Find get the indices to remove.
+            refitRangeIdx = np.argwhere((k>st) & (k<en))
+            refitRangeIdxNeg = np.argwhere((k<-st) & (k>-en))
+
+            # Replace the data with the backgroudn
+            # Note: abuses the symmetry of the FFT of a real function
+            # to get the negative side of the data
+            Y[refitRangeIdx] = background(k[refitRangeIdx], *p[-2:])
+            Y[refitRangeIdxNeg] = background(k[refitRangeIdx], *p[-2:])[::-1]
+        except:
+            print "ERROR: Trouble fitting the peak in frequency space.\n\t Defaulting to cutting off"
+
+            # Assume cutoffFrequency was the peak, not the actual cutoff
+            # Leaving it alone means half the peak would remain and the data
+            # wouldn't really be smoothed
+            cutoffFrequency -= 5 * freqSigma
+
+            # Reset this so the next part gets called
+            tryFitting = False
+
+    # "if not" instead of "else" because if the above
+    # fitting fails, we can default to the sharp cutoff
+    if not tryFitting:
+        # Define where to remove the data
+        st = cutoffFrequency
+        en = int(max(k))+1
+
+        # Find the indices to remove the data
+        refitRangeIdx = np.argwhere((k>st) & (k<en))
+        refitRangeIdxNeg = np.argwhere((k<-st) & (k>-en))
+
+        # Kill it all after the cutoff
+        Y[refitRangeIdx] = 0
+        Y[refitRangeIdxNeg] = 0
+
+        smoothIdx = np.argwhere((-st<k) & (k< st))
+        smoothr = -1./cutoffFrequency**2 * k[smoothIdx]**2 + 1
+
+        Y[smoothIdx] *= smoothr
+
+    if inspectPlots:
+        plt.plot(k, np.abs(Y), label="FFT with removed parts")
+        a = plt.legend()
+        a.draggable(True)
+
+    # invert the FFT
+    y = fft.ifft(Y, n=zeroPadding)
+
+    # unshift the data
+    y += flattenLine
+
+    # using fft, not rfft, so data may have some
+    # complex parts. But we can assume they'll be negligible and
+    # remove them
+    # ( Safer to use np.real, not np.abs? )
+    # Need the [:len] to remove zero-padded stuff
+    y = np.abs(y)[:len(x)]
+
+    if inspectPlots:
+        plt.figure("Real Space")
+        print x.size, y.size
+        plt.plot(x, y, label="Smoothed Data")
+        a = plt.legend()
+        a.draggable(True)
+
+    retData[:,0] = x
+    retData[:,-1] = y
+    return retData
+
+
+
+
+def stitchData(dataList, plot=False):
+    """
+    Attempt to stitch together absorbance data. Will translate the second data set
+    to minimize leastsq between the two data sets.
+    :param dataList: Iterable of the data sets to be fit. Currently
+            it only takes the first two elements of the list, but should be fairly
+            straightforward to recursivly handle a list>2. Shifts the second
+            data set to overlap the first
+
+             elements of dataList can be either np.arrays or Absorbance class,
+              where it will take the abs_data itself
+    :param plot: bool whether or not you want the fit iterations to be plotted
+            (for debugging)
+    :return: a, a (2,) np.array of the shift
+    """
+
+    # Data coercsion, make sure we know what we're working wtih
+    first = dataList[0]
+    if isinstance(first, Absorbance):
+        first = first.abs_data
+    second = dataList[1]
+    if isinstance(second, Absorbance):
+        second = second.abs_data
+    if plot:
+        # Keep a reference to whatever plot is open at call-time
+        # Useful if the calling script has plots before and after, as
+        # omitting this will cause future plots to be added to figures here
+        firstFig = plt.gcf()
+        plt.figure("Stitcher")
+        # Plot the raw input data
+        plt.plot(*first.T)
+        plt.plot(*second.T)
+
+    # Algorithm is set up such that the "second" data set spans the
+    # higher domain than first. Need to enforce this, and remember it
+    # so the correct shift is applied
+    flipped = False
+    if max(first[:,0])>max(second[:,0]):
+        flipped = True
+        first, second = second, first
+
+    def fitter(p, shiftable, immutable):
+        # Function for leastsq to minimize
+
+        # Get the shifts
+        dx = p[0]
+        dy = p[1]
+
+        # Don't want pass-by-reference nonsense, recast our own refs
+        shiftable = np.array(shiftable)
+        immutable = np.array(immutable)
+
+        # Shift the data set
+        shiftable[:,1]+=dy
+        shiftable[:,0]+=dx
+
+        # Create an interpolator. We want a
+        # direct comparision for subtracting the two functions
+        # Different spec grating positions have different wavelengths
+        # so they're not directly comparable.
+        shiftF = spi.interp1d(*shiftable.T)
+
+        # Find the bounds of where the two data sets overlap
+        overlap = (min(shiftable[:,0]), max(immutable[:,0]))
+#        print "overlap", overlap
+
+        # Determine the indices of the immutable function
+        # where it overlaps. argwhere returns 2-d thing,
+        # requiring the [0] at the end of each call
+        fOlIdx = (min(np.argwhere(immutable[:,0]>=overlap[0]))[0],
+                   max(np.argwhere(immutable[:,0]<=overlap[1]))[0])
+
+        # Get the interpolated values of the shiftable function at the same
+        # x-coordinates as the immutable case
+        newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1],0])
+
+        if plot:
+            plt.plot(*immutable[fOlIdx[0]:fOlIdx[1],:].T, marker='o', label="imm", markersize=10)
+            plt.plot(immutable[fOlIdx[0]:fOlIdx[1], 0], newShift, marker='o', label="shift")
+
+        imm = immutable[fOlIdx[0]:fOlIdx[1],1]
+        shift = newShift
+        return imm-shift
+
+    a, _, _, msg, err= spo.leastsq(fitter, [0.0001, 0.01*max(first[:,1])], args=(second, first), full_output = 1)
+    # print "a", a
+    if plot:
+        # Revert back to the original figure, as per top comments
+        plt.figure(firstFig.number)
+
+    # Need to invert the shift if we flipped which
+    # model we're supposed to move
+    if flipped: a*=-1
+
+
+    return a
 
 def stitch_hsg_dicts(main, new, bad_order=5):
     """
