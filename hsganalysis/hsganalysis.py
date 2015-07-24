@@ -308,7 +308,7 @@ class CCD(object):
                     consecutive_null_odd = 0
             else:
                 print "I could not find sideband with order", order
-                last_sb = last_sb + thz_freq
+                last_sb = last_sb - thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1

@@ -328,7 +328,7 @@ class HighSidebandCCD(CCD):
         
         
         # Look for lower order sidebands
-        
+        print "Now I'll look for sidebands with frequency less than", sb_freq_guess
         last_sb = sb_freq_guess[0]
         index_guess = global_max
         consecutive_null_sb = 0
@@ -338,12 +338,16 @@ class HighSidebandCCD(CCD):
         for order in xrange(order_init - 1, min_sb - 1, -1):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb - thz_freq
+                print "I skipped", order
                 continue
             lo_freq_bound = last_sb - thz_freq * (1 + 0.22) # Not sure what to do about these
             hi_freq_bound = last_sb - thz_freq * (1 - 0.22)
+
             start_index = False
             end_index = False
-            print "\nSideband", order, "\n"            
+            print "\nSideband", order, "\n"
+            print "The low frequency bound is", lo_freq_bound
+            print "The high frequency bound is", hi_freq_bound
             for i in xrange(index_guess, 0, -1):
                 if end_index == False and i == 1:
                     break_condition = True
@@ -393,7 +397,7 @@ class HighSidebandCCD(CCD):
                     consecutive_null_odd = 0
             else:
                 print "I could not find sideband with order", order
-                last_sb = last_sb + thz_freq
+                last_sb = last_sb - thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
@@ -511,7 +515,8 @@ class HighSidebandCCD(CCD):
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 #print "coeffs:", coeff
-                print coeff[1] / coeff[2], " vs. ", np.max(data/temp[:, 1]), "of", self.sb_list[elem]
+                #print "The max is ", np.max(data_temp[:, 1])
+                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
                 print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
