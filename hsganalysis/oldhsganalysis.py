@@ -579,15 +579,17 @@ class CCD(object):
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
             data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
-            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.0005, 1.0]
+            print "\nTrying to fit sieband ",elem
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 20000, 0.0005, 1.0]
             #print "Let's fit this shit!"
             try:
+                print "p0 into fit: ", p0
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-                #print "coeffs:", coeff
-#                print coeff[1] / coeff[2], " vs. ", np.max(data/temp[:, 1]), "of", self.sb_list[elem]
-#                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
+#                print "coeffs:", coeff
+                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
+                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
@@ -613,12 +615,12 @@ class CCD(object):
         # Going to label the appropriate row with the sideband
         self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
-#        print "sb_names:", sb_names
-#        print "sb_fits:", sb_fits
+        print "sb_names:", sb_names
+        print "sb_fits:", sb_fits
         sorter = np.argsort(sb_fits[:, 0])
         
         self.sb_results = np.array(sb_fits[sorter, :7])
-#        print "sb_results:", self.sb_results
+        print "sb_results:", self.sb_results
 
     def fit_sidebands_for_NIR_freq(self, sensitivity=2.5, plot=False):
         """

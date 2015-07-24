@@ -16,7 +16,8 @@ import newhsganalysis as hsg
 from UI.mainWin_ui import Ui_MainWindow
 from draggablePlotWidget import DraggablePlotWidget
 
-fileList = dict()
+# fileList = dict()
+fileList = []
 combinedWindowList = []
 
 
@@ -219,6 +220,7 @@ class BaseWindow(QtGui.QMainWindow):
             {"name": "CCD Temp (C)", "type": "str", "value": kwargs.get("ccd_temperature", 0)},
             {"name": "Spec Grating", "type": "int", "value": kwargs.get("grating", 0)},
             {"name": "Series", "type": "str", "value": kwargs.get("series", 0)},
+            {"name": "Spec Sweep", "type": "int", "value": kwargs.get("spec_step", 0)},
             ]},
         {"name":"Laser Settings", "type":"group", "children":[
             {"name":"NIR Power (W)", "type":"float", "value":kwargs.get("nir_power", 0)},
@@ -348,7 +350,7 @@ class BaseWindow(QtGui.QMainWindow):
 
     def plotSBFits(self, hsgObj):
         for fit in hsgObj.sb_results:
-            x = np.linspace(fit[1]*0.9995, fit[1]*1.0005, num=300)
+            x = np.linspace(fit[1]*0.9997, fit[1]*1.0003, num=300)
             args = list(fit[1::2])
             args.append(0)
             y = hsg.gauss(x, *args)
@@ -467,12 +469,15 @@ class BaseWindow(QtGui.QMainWindow):
         # Only one file was dropped
         if len(event.mimeData().urls()) == 1:
             filename = str(event.mimeData().urls()[0].toLocalFile())
-            if filename in fileList.keys():
-                print "Already opened file"
-            else:
-                c = BaseWindow.getWindowClass(filename)
-                a = c(filename)
-                fileList[filename] = a
+            # if filename in fileList.keys():
+            #     print "Already opened file"
+            # else:
+            #     c = BaseWindow.getWindowClass(filename)
+            #     a = c(filename)
+            #     fileList[filename] = a
+            c = BaseWindow.getWindowClass(filename)
+            a = c(filename)
+            fileList.append(a)
         # Multiple files were dropped
         else:
             # Make a list of all of them, cuttingout the "seriesed" ones
@@ -495,13 +500,18 @@ class BaseWindow(QtGui.QMainWindow):
                     fileList[obj.fname].setWindowTitle(str(obj.parameters["center_lambda"]))
                 # Won't open if the series is already used. Problematic
                 # if you use the same series tag in different folders
-                elif obj.parameters["series"] in fileList.keys():
-                    print "already opened this series,", obj.parameters["series"]
+                # elif obj.parameters["series"] in fileList.keys():
+                #     print "already opened this series,", obj.parameters["series"]
+                # else:
+                #     c = BaseWindow.getWindowClass(obj.fname)
+                #     fileList[obj.parameters["series"]] = c(obj)
+                #     fileList[obj.parameters["series"]].setWindowTitle(
+                #         "Series: {}".format(obj.parameters["series"]))
                 else:
                     c = BaseWindow.getWindowClass(obj.fname)
-                    fileList[obj.parameters["series"]] = c(obj)
-                    fileList[obj.parameters["series"]].setWindowTitle(
-                        "Series: {}".format(obj.parameters["series"]))
+                    a = c(obj)
+                    fileList.append(a)
+                    a.setWindowTitle("Series: {}".format(obj.parameters["series"]))
         if self.dataObj is None: # I'm the first window. Get outta here!
             self.close()
 
@@ -734,10 +744,14 @@ class ComparisonWindow(QtGui.QMainWindow):
 
 
 def updateFileClose(obj):
-    for key, val in fileList.iteritems():
-        if val is obj:
-            fileList.pop(key)
-            break
+    # for key, val in fileList.iteritems():
+    #     if val is obj:
+    #         fileList.pop(key)
+    #         break
+    try:
+        fileList.remove(obj)
+    except Exception as e:
+        print "Error removing file from fileList:", e, obj
 
 
 def updateCompClose(obj):

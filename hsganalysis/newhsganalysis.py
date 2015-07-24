@@ -292,6 +292,8 @@ class HighSidebandCCD(CCD):
         """
         This method will replace the previous one for guessing sidebands.
         """
+        print np
+        print type(np)
         x_axis = np.array(self.hsg_data[:, 0])
         y_axis = np.array(self.hsg_data[:, 1])
         error = np.array(self.hsg_data[:, 2])
@@ -393,7 +395,7 @@ class HighSidebandCCD(CCD):
                     consecutive_null_odd = 0
             else:
                 print "I could not find sideband with order", order
-                last_sb = last_sb + thz_freq
+                last_sb = last_sb - thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
@@ -504,9 +506,11 @@ class HighSidebandCCD(CCD):
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
             data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
-            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.0005, 1.0]
+            print "\nTrying to fit sieband ",elem
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 20000, 0.0005, 1.0]
             #print "Let's fit this shit!"
             try:
+                print "p0 into fit: ", p0
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
@@ -942,9 +946,9 @@ def sum_spectra(object_list):
         except Exception as E:
             # print "God damn it, Leroy", E
             break
-        print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
+#        print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
         for spec in list(object_list):
-            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
+#            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
             #print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
             if temp.parameters['series'] == spec.parameters['series']:
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
@@ -953,8 +957,8 @@ def sum_spectra(object_list):
                     stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))
                     print "Individual dark_stdev:", spec.dark_stdev
                     dark_var += (spec.dark_stdev)**2
-                    print "Standard error holder shape 2:", stderr_holder.shape
-                    print "\t\tadded"
+#                    print "Standard error holder shape 2:", stderr_holder.shape
+#                    print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
         spec_number = stderr_holder.shape[1]
