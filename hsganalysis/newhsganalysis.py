@@ -508,7 +508,8 @@ class HighSidebandCCD(CCD):
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
             data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
-            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] / 30000, 0.0005, 1.0]
+            width_guess = 0.0005
+            p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 1.0]
             #print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
