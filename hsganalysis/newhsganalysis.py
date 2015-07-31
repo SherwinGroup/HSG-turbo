@@ -29,6 +29,15 @@ class CCD(object):
         """
         This will read the appropriate file and make a basic CCD object.  Fancier
         things will be handled with the sub classes.
+
+        input:
+        fname = file name where the data is saved
+
+        creates:
+        self.parameters
+        self.description
+        self.raw_data = data output by measurement software
+        self.ccd_data = unprocessed array of photon energy vs. data
         """
         self.fname = fname
         
@@ -56,10 +65,16 @@ class CCD(object):
 
 class Photoluminescence(CCD):
     def __init__(self, fname):
-        CCD.__init__(self, fname)
+        """
+        This object handles PL-type data.
 
-        self.hsg_data = np.array(self.ccd_data) # Does this work the way I want it to?
-        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['exposure']
+        self.proc_data = self.ccd_data divided by the exposure time
+                         units: PL counts / second
+        """
+        super(Photoluminescence, self).__init__(self, fname)
+
+        self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
+        self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['exposure']
 #     def save_processing(self):
         
 class Absorbance(CCD):
@@ -87,7 +102,7 @@ class Absorbance(CCD):
             #   Raw counts of the sample
             self.raw_data = np.array(self.ccd_data[:, [0, 2]])
             #   The calculated absorbance data (-log10(raw/ref))
-            self.abs_data = np.array(self.ccd_data[:, [0, 3]])
+            self.proc_data = np.array(self.ccd_data[:, [0, 3]])
         else:
             # Should be here if you pass the reference/trans filenames
             try:
@@ -114,9 +129,9 @@ class Absorbance(CCD):
                 self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
             except Exception as e:
                 print "Exception opening,", e
-            self.abs_data = np.empty_like(self.ref_data)
-            self.abs_data[:,0] = self.ref_data[:,0]
-            self.abs_data[:,1] = np.log10(self.raw_data[:,1]/self.ref_data[:,1])
+            self.proc_data = np.empty_like(self.ref_data)
+            self.proc_data[:,0] = self.ref_data[:,0]
+            self.proc_data[:,1] = np.log10(self.raw_data[:,1]/self.ref_data[:,1])
 
     def abs_per_QW(self, qw_number):
         """
@@ -125,8 +140,8 @@ class Absorbance(CCD):
 
         Also, I'm not sure if columns 1 and 2 are correct.
         """
-        temp_abs = -np.log(self.abs_data[:, 1] / self.abs_data[:, 2]) / qw_number
-        self.abs_data = np.hstack((self.abs_data, temp_abs))
+        temp_abs = -np.log(self.proc_data[:, 1] / self.proc_data[:, 2]) / qw_number
+        self.proc_data = np.hstack((self.proc_data, temp_abs))
 
     def save_processing(self, file_name, folder_str, marker='', index=''):
         try:
@@ -150,7 +165,7 @@ class Absorbance(CCD):
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
-        np.savetxt(os.path.join(folder_str, spectra_fname), self.abs_data, delimiter=',',
+        np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
@@ -172,8 +187,7 @@ class HighSidebandCCD(CCD):
         self.parameters = string with all the relevant experimental perameters
         self.description = the description we added to the file as the data
                            was being taken
-        self.raw_data = the unprocessed data that is wavelength vs signal
-        self.hsg_data = processed data that has gone is frequency vs signal/pulse
+        self.proc_data = processed data that has gone is frequency vs counts/pulse
         self.dark_stdev = the standard deviation of the dark noise using the
                           last 200 pixels since they probably(?) don't have 
                           strong signal
@@ -184,20 +198,20 @@ class HighSidebandCCD(CCD):
                            the file.  Constant subtraction is dealt with with
                            self.addenda
         """
-        CCD.__init__(self, fname)
+        super(HighSidebandCCD, self).__init__(self, fname)
 
-        self.hsg_data = np.array(self.ccd_data) # Does this work the way I want it to?
-        self.hsg_data[:, 1] = self.hsg_data[:, 1] / self.parameters['fel_pulses']
+        self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
+        self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['fel_pulses']
 
-        self.parameters["NIR_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
-        self.parameters["THz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
+        self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
+        self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
         self.parameters["thz_power"] = float(self.parameters["fel_power"])
 
         # Need to do this next line AFTER adding all the spectra together
 
         
-        self.dark_stdev = self.parameters["background_darkcount_std"] / self.parameters['fel_pulses'] # What do I do with this now that hsg_data is not normalized?
+        self.dark_stdev = self.parameters["background_darkcount_std"] / self.parameters['fel_pulses'] # What do I do with this now that proc_data is not normalized?
         self.std_error = None
         # These will keep track of what operations have been performed
         
@@ -207,20 +221,20 @@ class HighSidebandCCD(CCD):
 
     def __add__(self, other):
         """
-        Add together the image data from self.hsg_data, or add a constant to 
+        Add together the image data from self.proc_data, or add a constant to 
         that np.array.  
         """
         ret = copy.deepcopy(self)
 
         # Add a constant offset to the data
         if type(other) in (int, float):
-            ret.hsg_data[:, 1] = self.hsg_data[:, 1] + other # What shall the name be?
+            ret.proc_data[:, 1] = self.proc_data[:, 1] + other # What shall the name be?
             ret.addenda[0] = ret.addenda[0] + other
         
         # or add the data of two hsg_spectra together
         else:
             if np.isclose(ret.parameters['center_lambda'], other.parameters['center_lambda']):
-                ret.hsg_data[:, 1] = self.hsg_data[:, 1] + other.hsg_data[:, 1] # Again, need to choose a name
+                ret.proc_data[:, 1] = self.proc_data[:, 1] + other.proc_data[:, 1] # Again, need to choose a name
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
@@ -231,7 +245,7 @@ class HighSidebandCCD(CCD):
 
     def __sub__(self, other):
         """
-        This subtracts constants or other data sets between self.hsg_data.  I 
+        This subtracts constants or other data sets between self.proc_data.  I 
         think it even keeps track of what data sets are in the file and how 
         they got there.
 
@@ -241,13 +255,13 @@ class HighSidebandCCD(CCD):
         
         # Subtract a constant offset to the data
         if type(other) in (int, float):
-            ret.hsg_data[:,1] = self.hsg_data[:,1] - other # Need to choose a name
+            ret.proc_data[:,1] = self.proc_data[:,1] - other # Need to choose a name
             ret.addenda[0] = ret.addenda[0] - other
             
         # Subtract the data of two hsg_spectra from each other
         else:
-            if np.isclose(ret.hsg_data[0,0], other.hsg_data[0,0]):
-                ret.hsg_data[:,1] = self.hsg_data[:,1] - other.hsg_data[:,1]
+            if np.isclose(ret.proc_data[0,0], other.proc_data[0,0]):
+                ret.proc_data[:,1] = self.proc_data[:,1] - other.proc_data[:,1]
                 ret.subtrahenda.extend(other.addenda[1:])
                 ret.addenda.extend(other.subtrahenda)
             else:
@@ -259,13 +273,12 @@ class HighSidebandCCD(CCD):
 
     def add_std_error(self, std_errors):
         """
-        This adds a numpy array of standard errors to the self.hsg_data array.
+        This adds a numpy array of standard errors to the self.proc_data array.
         It's actually just an append_column method, but there's no reason for 
         that (I think)
         """
         try:
-            
-            self.hsg_data = np.hstack((self.hsg_data, std_errors.reshape((1600, 1))))
+            self.proc_data = np.hstack((self.proc_data, std_errors.reshape((1600, 1))))
         except:
             print "Spectrum.add_std_error fucked up.  What's wrong?"
             print std_errors.shape
@@ -275,32 +288,32 @@ class HighSidebandCCD(CCD):
         This simple method will simply return a float approximating the order
         of the frequency input.
         """
-        nir_freq = self.parameters['NIR_freq']
-        thz_freq = self.parameters['THz_freq']
+        nir_freq = self.parameters['nir_freq']
+        thz_freq = self.parameters['thz_freq']
         approx_order = (freq - nir_freq) / thz_freq
         return approx_order
     
     def image_normalize(self, num_images):
         """
-        This method will divide the hsg_data by the number of images that were
-        used in the sum_spectra function.
+        This method will divide the proc_data by the number of images that were
+        used in the hsg_sum_spectra function.
         """
-        self.hsg_data[:, 1] = self.hsg_data[:, 1] / num_images
-        self.hsg_data[:, 2] = self.hsg_data[:, 2] / num_images
+        self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
+        self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
     
     def guess_sidebands(self, cutoff=4.5):
         """
         This method will replace the previous one for guessing sidebands.
         """
-        x_axis = np.array(self.hsg_data[:, 0])
-        y_axis = np.array(self.hsg_data[:, 1])
-        error = np.array(self.hsg_data[:, 2])
+        x_axis = np.array(self.proc_data[:, 0])
+        y_axis = np.array(self.proc_data[:, 1])
+        error = np.array(self.proc_data[:, 2])
         
         min_sb = int(self.calc_approx_sb_order(x_axis[0])) + 1
         max_sb = int(self.calc_approx_sb_order(x_axis[-1]))
         
-        nir_freq = self.parameters["NIR_freq"]
-        thz_freq = self.parameters["THz_freq"]
+        nir_freq = self.parameters["nir_freq"]
+        thz_freq = self.parameters["thz_freq"]
         
         # Find max strength sideband and it's order
         global_max = np.argmax(y_axis)
@@ -503,11 +516,14 @@ class HighSidebandCCD(CCD):
         
         Attributes created:
         self.sb_results = the money maker
+        self.full_dict = a dictionary similar to sb_results, but now the keys 
+                         are the sideband orders
         """
         print "Trying to fit these"
         sb_fits = []
-        for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands doesn't out put data in the most optimized way
-            data_temp = self.hsg_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
+        for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands 
+                                                   # doesn't out put data in the most optimized way
+            data_temp = self.proc_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
             width_guess = 0.0005
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 1.0]
             #print "Let's fit this shit!"
@@ -550,10 +566,13 @@ class HighSidebandCCD(CCD):
         
         self.sb_results = np.array(sb_fits[sorter, :7])
         print "sb_results:", self.sb_results
+        self.full_dict = {}
+        for sb in self.sb_results:
+            self.full_dict[sb[0]] = np.asarray(sb[1:])
         
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
-        This will save all of the self.hsg_data and the results from the 
+        This will save all of the self.proc_data and the results from the 
         fitting of this individual file.
         
         Inputs:
@@ -565,7 +584,7 @@ class HighSidebandCCD(CCD):
                 list
         
         Outputs:
-        Two files, one that is self.hsg_data, the other is self.sb_results
+        Two files, one that is self.proc_data, the other is self.sb_results
         """
         try:
             os.mkdir(folder_str)
@@ -596,7 +615,7 @@ class HighSidebandCCD(CCD):
         origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error\norder,eV,,arb. u.,,meV,,arb. u.,\n' + marker
         fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
         
-        np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
+        np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
@@ -745,6 +764,7 @@ class HighSidebandPMT(PMT):
         attributes:
         self.sb_results: the numpy array that contains all of the fit info just
                          like it does in the CCD class.
+        self.full_dict = A dictionary version of self.sb_results
         """
         sb_fits = {}
         for sideband in self.sb_dict.items():
@@ -752,7 +772,7 @@ class HighSidebandPMT(PMT):
             index = np.argmax(sideband[1][:, 1])
             nir_frequency = sideband[1][index, 0]
             peak = sideband[1][index, 1]
-            p0 = [nir_frequency, peak / 3000, 0.00006, 0.00001]
+            p0 = [nir_frequency, peak / 3000, 0.0003, 0.00001]
             print "p0:", p0
             try: 
                 coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0)#, sigma=10*sideband[1][:, 2], absolute_sigma=True)
@@ -781,11 +801,15 @@ class HighSidebandPMT(PMT):
         
         self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
         self.sb_results = self.sb_results[:, :7]
-        print "And the results, please:", self.sb_results 
+        print "And the results, please:", self.sb_results
+
+        self.full_dict = {}
+        for sb in self.sb_results:
+            self.full_dict[sb[0]] = np.asarray(sb[1:])
     
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
-        This will save all of the self.hsg_data and the results from the 
+        This will save all of the self.proc_data and the results from the 
         fitting of this individual file.
         
         Inputs:
@@ -797,7 +821,7 @@ class HighSidebandPMT(PMT):
                 list
         
         Outputs:
-        Two files, one that is self.hsg_data, the other is self.sb_results
+        Two files, one that is self.proc_data, the other is self.sb_results
         """
         try:
             os.mkdir(folder_str)
@@ -841,13 +865,7 @@ class HighSidebandPMT(PMT):
 
 class FullSpectrum(object):
     def __init__(self):
-
-        self.ccd_results = CCD_spectrum.sb_results
-        self.parameters = CCD_spectrum.parameters
-
-        self.full_dict = {}
-        for sb in self.ccd_results:
-            self.full_dict[sb[0]] = np.asarray(sb[1:])
+        pass
 
 class FullAbsorbance(FullSpectrum):
     """
@@ -863,16 +881,17 @@ class FullHighSideband(FullSpectrum):
     other spectra that belong with it, then grabs the PMT object to normalize
     everything, assuming that PMT object exists.
     """
-    def __init__(self):
+    def __init__(self, initial_CCD_piece):
         """
         Initialize a full HSG spectrum.  Starts with a single CCD image, then
         adds more on to itself using stitch_hsg_dicts.
         """
-        self.ccd_results = CCD_spectrum.sb_results
-        self.parameters = CCD_spectrum.parameters
+
+        self.sb_results = initial_CCD_piece.sb_results
+        self.parameters = initial_CCD_piece.parameters
 
         self.full_dict = {}
-        for sb in self.ccd_results:
+        for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
 
     def add_CCD(self, ccd_object):
@@ -880,14 +899,14 @@ class FullHighSideband(FullSpectrum):
         This method will be called by the stitch_hsg_results function to add another
         CCD image to the spectrum.
         """
-        pass
+        self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object)
 
     def add_PMT(self, pmt_object):
         """
         This method will be called by the stitch_hsg_results function to add the PMT
         data to the spectrum.
         """
-        pass
+        self.full_dict = stitch_hsg_dicts(pmt_object.full_dict, self.full_dict)
 
 ####################
 # Fitting functions 
@@ -921,14 +940,14 @@ def gaussWithBackground(x, *p):
 # Collection functions 
 ####################
 
-def sum_spectra(object_list):
+def hsg_sum_spectra(object_list):
     """
     This function will add all the things that should be added.  Obvs.  It will
     also calculate the standard error of the mean for every NIR frequency.  The
     standard error is the sum of the dark noise and the "shot" noise.
 
     Also, remember, we're adding together and averaging the counts per pulse.  
-    Hence why we use self.hsg_data after it has been divided by the number of 
+    Hence why we use self.proc_data after it has been divided by the number of 
     fel pulses.  
 
     object_list: A list of spectrum objects
@@ -943,7 +962,7 @@ def sum_spectra(object_list):
         num_images = 0
         try:
             temp = object_list.pop(0)
-            stderr_holder = np.array(temp.hsg_data[:, 1]).reshape((1600, 1))
+            stderr_holder = np.array(temp.proc_data[:, 1]).reshape((1600, 1))
             # print "Standard error holder shape 1:", stderr_holder.shape
         except:
             # print "God damn it, Leroy"
@@ -956,7 +975,7 @@ def sum_spectra(object_list):
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     num_images += 1
-                    stderr_holder = np.hstack((stderr_holder, temp.hsg_data[:, 1].reshape((1600,1))))
+                    stderr_holder = np.hstack((stderr_holder, temp.proc_data[:, 1].reshape((1600,1))))
                     print "Individual dark_stdev:", spec.dark_stdev
                     dark_var += (spec.dark_stdev)**2
                     print "Standard error holder shape 2:", stderr_holder.shape
@@ -974,11 +993,39 @@ def sum_spectra(object_list):
         good_list.append(temp)
     return good_list
 
+def hsg_combine_spectra(spectra_list):
+    """
+    This function is all about smooshing different parts of the same hsg spectrum together
+    """
+    good_list = []
+    spectra_list.sort(key=lambda x: x.parameters[spec_step])
+    for index in xrange(len(spectra_list)):
+        try:
+            temp = spectra_list.pop(0)
+        except:
+            break
+
+        good_list.append(FullHighSideband(temp))
+
+        counter = temp.parameters[spec_step] + 1
+
+        for piece in spectra_list:
+            if temp.parameters[series] == piece.parameters[series]:
+                if piece.parameters[spec_step] == counter:
+                    good_list[-1].add_CCD(piece)
+                    spectra_list.remove(piece)
+                    counter += 1
+
+    return good_list
+
 def stitch_abs_results(main, new):
     raise NotImplementedError
 
-def fft_filter(data, cutoffFrequency = 1520, inspectPlots = False, tryFitting = False,
-               freqSigma = 50, ftol = 1e-4, isInteractive=False):
+####################
+# Helper functions 
+####################
+
+def fft_filter(data, cutoffFrequency = 1520, inspectPlots = False, tryFitting = False, freqSigma = 50, ftol = 1e-4, isInteractive=False):
     """
     Performs an FFT, then fits a peak in frequency around the
     input with the input width.
@@ -1220,9 +1267,6 @@ def fft_filter(data, cutoffFrequency = 1520, inspectPlots = False, tryFitting = 
     retData[:,-1] = y
     return retData
 
-
-
-
 def stitchData(dataList, plot=False):
     """
     Attempt to stitch together absorbance data. Will translate the second data set
@@ -1233,7 +1277,7 @@ def stitchData(dataList, plot=False):
             data set to overlap the first
 
              elements of dataList can be either np.arrays or Absorbance class,
-              where it will take the abs_data itself
+              where it will take the proc_data itself
     :param plot: bool whether or not you want the fit iterations to be plotted
             (for debugging)
     :return: a, a (2,) np.array of the shift
@@ -1242,10 +1286,10 @@ def stitchData(dataList, plot=False):
     # Data coercsion, make sure we know what we're working wtih
     first = dataList[0]
     if isinstance(first, Absorbance):
-        first = first.abs_data
-    second = dataList[1]
+        first = first.proc_data
+        second = dataList[1]
     if isinstance(second, Absorbance):
-        second = second.abs_data
+        second = second.proc_data
     if plot:
         # Keep a reference to whatever plot is open at call-time
         # Useful if the calling script has plots before and after, as
@@ -1264,48 +1308,47 @@ def stitchData(dataList, plot=False):
         flipped = True
         first, second = second, first
 
-    def fitter(p, shiftable, immutable):
-        # Function for leastsq to minimize
+def fitter(p, shiftable, immutable):
+    # Function for leastsq to minimize
 
-        # Get the shifts
-        dx = p[0]
-        dy = p[1]
+    # Get the shifts
+    dx = p[0]
+    dy = p[1]
 
-        # Don't want pass-by-reference nonsense, recast our own refs
-        shiftable = np.array(shiftable)
-        immutable = np.array(immutable)
+    # Don't want pass-by-reference nonsense, recast our own refs
+    shiftable = np.array(shiftable)
+    immutable = np.array(immutable)
 
-        # Shift the data set
-        shiftable[:,1]+=dy
-        shiftable[:,0]+=dx
+    # Shift the data set
+    shiftable[:,1]+=dy
+    shiftable[:,0]+=dx
 
-        # Create an interpolator. We want a
-        # direct comparision for subtracting the two functions
-        # Different spec grating positions have different wavelengths
-        # so they're not directly comparable.
-        shiftF = spi.interp1d(*shiftable.T)
+    # Create an interpolator. We want a
+    # direct comparision for subtracting the two functions
+    # Different spec grating positions have different wavelengths
+    # so they're not directly comparable.
+    shiftF = spi.interp1d(*shiftable.T)
 
-        # Find the bounds of where the two data sets overlap
-        overlap = (min(shiftable[:,0]), max(immutable[:,0]))
-#        print "overlap", overlap
+    # Find the bounds of where the two data sets overlap
+    overlap = (min(shiftable[:,0]), max(immutable[:,0]))
+        #print "overlap", overlap
 
-        # Determine the indices of the immutable function
-        # where it overlaps. argwhere returns 2-d thing,
-        # requiring the [0] at the end of each call
-        fOlIdx = (min(np.argwhere(immutable[:,0]>=overlap[0]))[0],
-                   max(np.argwhere(immutable[:,0]<=overlap[1]))[0])
+    # Determine the indices of the immutable function
+    # where it overlaps. argwhere returns 2-d thing,
+    # requiring the [0] at the end of each call
+    fOlIdx = (min(np.argwhere(immutable[:,0]>=overlap[0]))[0],
+              max(np.argwhere(immutable[:,0]<=overlap[1]))[0])
 
-        # Get the interpolated values of the shiftable function at the same
-        # x-coordinates as the immutable case
-        newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1],0])
+    # Get the interpolated values of the shiftable function at the same
+    # x-coordinates as the immutable case
+    newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1],0])
 
-        if plot:
-            plt.plot(*immutable[fOlIdx[0]:fOlIdx[1],:].T, marker='o', label="imm", markersize=10)
-            plt.plot(immutable[fOlIdx[0]:fOlIdx[1], 0], newShift, marker='o', label="shift")
-
-        imm = immutable[fOlIdx[0]:fOlIdx[1],1]
-        shift = newShift
-        return imm-shift
+    if plot:
+        plt.plot(*immutable[fOlIdx[0]:fOlIdx[1],:].T, marker='o', label="imm", markersize=10)
+        plt.plot(immutable[fOlIdx[0]:fOlIdx[1], 0], newShift, marker='o', label="shift")
+    imm = immutable[fOlIdx[0]:fOlIdx[1],1]
+    shift = newShift
+    return imm-shift
 
     a, _, _, msg, err= spo.leastsq(fitter, [0.0001, 0.01*max(first[:,1])], args=(second, first), full_output = 1)
     # print "a", a
@@ -1317,50 +1360,45 @@ def stitchData(dataList, plot=False):
     # model we're supposed to move
     if flipped: a*=-1
 
-
     return a
 
-def stitch_hsg_dicts(main, new, bad_order=5):
+def stitch_hsg_dicts(full, new_dict):
     """
-    This function will make the Spectrum class more readable.
+    This function takes a FullHighSideband.full_dict attribute and a sideband 
+    object, either CCD or PMT and smushes the new sb_results into the full_dict.
+
+    If there's a PMT set of data involved, it should be in the full variable to
+    keep the laser normalization intact.
     """
     overlap = []
-    for new_sb in sorted(new.keys()):
-        if new_sb in main.keys():
+    for new_sb in sorted(new_dict.keys()):
+        if new_sb in full.keys():
             overlap.append(new_sb)
+
     print "overlap:", overlap
-    # Cut out the likely-bad ones from the CCD data
-    overlap = [x for x in overlap if x > (bad_order + 0.5)]
-    # overlap = overlap[-2:]
-        
-    # Calculate the ratio of the signals
+    overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap))
+
+    # Calculate the appropriate ratio to multiply the new sidebands by.
+    # I'm not entirely sure what to do with the error of this guy.
     ratio_list = []
     for sb in overlap:
-        ratio_list.append(main[sb][2] / new[sb][2])
-    print "ratio_list:", ratio_list
+        ratio_list.append(full[sb][2] / new_dict[sb][2])
     ratio = np.mean(ratio_list)
-    ratio_err = np.std(ratio_list) / np.sqrt(len(ratio_list))
-    print "ratio:", ratio
-    print "ratio error:", ratio_err
-    print "New data:", new
-        
-    # Scale up PMT data and add it to the full_dict, and propagate errors
-    for sb in sorted(new.keys()):
-        old = new[sb][2]
-        # print "sideband:", sb
-        # print "data relative error:", new[sb][3] / old
-        # print "ratio relative error:", ratio_err / ratio
-        new[sb][2] = ratio * new[sb][2]
-        new[sb][3] = new[sb][2] * np.sqrt((ratio_err / ratio)**2 + (new[sb][3] / old)**2)
-        if sb not in overlap: # Because I want to get rid of the lowest order guys attenuated by SP filter
-            main[sb] = new[sb]
-    return main
+    error = np.std(ratio_list) / np.sqrt(len(ratio_list))
 
-def stitch_hsg_results():
-    """
-    This will make FullSpectrum objects out of a list of processed spectra.
-    """
-    pass
+    # Adding the new sidebands to the full set and moving errors around.
+    # I don't know exactly what to do about the other aspecs of the sidebands
+    # besides the strength and its error.
+    for sb in sorted(new_dict.keys()):
+        new_strength = ratio * new_dict[sb][2]
+        new_dict[sb][3] = new_strength * np.sqrt((error / ratio)**2 + (new_dict[sb][3] / new_dict[sb][2])**2)
+        new_dict[sb][2] = new_strength
+        if sb in overlap:
+            full[sb][2] = np.mean((full[sb][2], new_dict[sb][2]))
+            full[sb][3] = np.sqrt(full[sb][3]**2 + new_dict[sb][3]**2) / 2
+        else:
+            full[sb] = new_dict[sb]
+    return full
 
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit):
     """
@@ -1452,4 +1490,4 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
                header=header, comments='', fmt='%f')
 
-    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
+    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)
