@@ -55,6 +55,7 @@ class CCD(object):
                 read_description = False
 
         f.close()
+        self.parameters["spec_step"] = int(self.parameters["spec_step"])
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
         # I used flipup so that the x-axis is an increasing function of frequency
         
@@ -71,7 +72,7 @@ class Photoluminescence(CCD):
         self.proc_data = self.ccd_data divided by the exposure time
                          units: PL counts / second
         """
-        super(Photoluminescence, self).__init__(self, fname)
+        super(Photoluminescence, self).__init__(fname)
 
         self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
         self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['exposure']
@@ -198,7 +199,7 @@ class HighSidebandCCD(CCD):
                            the file.  Constant subtraction is dealt with with
                            self.addenda
         """
-        super(HighSidebandCCD, self).__init__(self, fname)
+        super(HighSidebandCCD, self).__init__(fname)
 
         self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
         self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['fel_pulses']
@@ -526,14 +527,14 @@ class HighSidebandCCD(CCD):
             data_temp = self.proc_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
             width_guess = 0.0005
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 1.0]
-            #print "Let's fit this shit!"
+            print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-                #print "coeffs:", coeff
+                print "coeffs:", coeff
                 #print "The max is ", np.max(data_temp[:, 1])
-                print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
+                #print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
                 print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
@@ -541,11 +542,11 @@ class HighSidebandCCD(CCD):
                     # And had to scale by the area?
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    plt.plot(x_vals, gauss(x_vals, *coeff), 
-                             plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
+                    plt.plot(x_vals, gauss(x_vals, *coeff))#, 
+                             #plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
                                                          # just looked around at what functions
                                                          # matplotlib has...
-                             , linewidth = 3)
+                             #, linewidth = 3)
             except:
                 print "I couldn't fit", elem
                 self.sb_list[elem] = None
@@ -899,7 +900,7 @@ class FullHighSideband(FullSpectrum):
         This method will be called by the stitch_hsg_results function to add another
         CCD image to the spectrum.
         """
-        self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object)
+        self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict)
 
     def add_PMT(self, pmt_object):
         """
@@ -907,6 +908,22 @@ class FullHighSideband(FullSpectrum):
         data to the spectrum.
         """
         self.full_dict = stitch_hsg_dicts(pmt_object.full_dict, self.full_dict)
+
+    def make_results_array(self):
+        """
+        The idea behind this method is to create the sb_results array from the 
+        finished full_dict dictionary.
+        """
+        self.sb_results = None
+        #print "I'm making the results array:", sorted(self.full_dict.keys())
+        for sb in sorted(self.full_dict.keys()):
+            #print "Going to add this", sb
+            try:
+                self.sb_results = np.vstack((self.sb_results, np.hstack((sb, self.full_dict[sb]))))
+            except ValueError:
+                #print "It didn't exist yet!"
+                self.sb_results = np.hstack((sb, self.full_dict[sb]))
+        #print "and I made this array:", self.sb_results[:, 0]
 
 ####################
 # Fitting functions 
@@ -998,7 +1015,7 @@ def hsg_combine_spectra(spectra_list):
     This function is all about smooshing different parts of the same hsg spectrum together
     """
     good_list = []
-    spectra_list.sort(key=lambda x: x.parameters[spec_step])
+    spectra_list.sort(key=lambda x: x.parameters["spec_step"])
     for index in xrange(len(spectra_list)):
         try:
             temp = spectra_list.pop(0)
@@ -1007,15 +1024,15 @@ def hsg_combine_spectra(spectra_list):
 
         good_list.append(FullHighSideband(temp))
 
-        counter = temp.parameters[spec_step] + 1
+        counter = temp.parameters["spec_step"] + 1
 
         for piece in spectra_list:
-            if temp.parameters[series] == piece.parameters[series]:
-                if piece.parameters[spec_step] == counter:
+            if temp.parameters["series"] == piece.parameters["series"]:
+                if piece.parameters["spec_step"] == counter:
                     good_list[-1].add_CCD(piece)
                     spectra_list.remove(piece)
                     counter += 1
-
+        good_list[-1].make_results_array()
     return good_list
 
 def stitch_abs_results(main, new):
@@ -1370,13 +1387,14 @@ def stitch_hsg_dicts(full, new_dict):
     If there's a PMT set of data involved, it should be in the full variable to
     keep the laser normalization intact.
     """
+    #print "I'm adding these sidebands", sorted(new_dict.keys())
     overlap = []
     for new_sb in sorted(new_dict.keys()):
         if new_sb in full.keys():
             overlap.append(new_sb)
 
     print "overlap:", overlap
-    overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap))
+    overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap))]
 
     # Calculate the appropriate ratio to multiply the new sidebands by.
     # I'm not entirely sure what to do with the error of this guy.
@@ -1398,6 +1416,7 @@ def stitch_hsg_dicts(full, new_dict):
             full[sb][3] = np.sqrt(full[sb][3]**2 + new_dict[sb][3]**2) / 2
         else:
             full[sb] = new_dict[sb]
+    #print "I made this dictionary", sorted(full.keys())
     return full
 
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit):
@@ -1490,4 +1509,4 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
                header=header, comments='', fmt='%f')
 
-    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)
+    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
