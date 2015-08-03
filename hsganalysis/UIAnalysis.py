@@ -21,6 +21,27 @@ fileList = []
 combinedWindowList = []
 
 
+class ComboParameter(pTypes.WidgetParameterItem):
+    sigTreeStateChanged = QtCore.pyqtSignal(object, object)
+    def __init__(self, param, depth, itemList, name=None):
+        self.itemList = itemList
+        if self.name is None:
+            name = ""
+        self._name = name
+        super(ComboParameter, self).__init__(param, depth)
+    def makeWidget(self):
+        w = QtGui.QComboBox()
+        [w.addItem(str(i)) for i in self.itemList]
+        w.sigChanged = w.currentIndexChanged
+        w.value = lambda: w.currentText()
+        w.setValue = lambda x: w.setCurrentIndex(w.findText(str(x)))
+        return w
+    def name(self):
+        return self._name
+    def parentChanged(self, parent):
+        pass
+
+
 class BaseWindow(QtGui.QMainWindow):
     """
     A note on parameter trees:
@@ -65,8 +86,11 @@ class BaseWindow(QtGui.QMainWindow):
         self.ui.setupUi(self)
         self.spectrumPlot = self.ui.gSpectrum.plot()
 
-        params = self.genParameters()
-        p = Parameter.create(name='Open a File', type='group', children=params)
+        # params = self.genParameters()
+        # p = Parameter.create(name='Open a File', type='group', children=params)
+        p = Parameter.create(name='Open a File', type='group')
+        params = self.genParameters(parent=p)
+        p.addChildren(params)
         self.ui.ptFile.setParameters(p, showTop=True)
 
         self.sbLine = pg.InfiniteLine(pos = 750, movable=True)
@@ -223,8 +247,14 @@ class BaseWindow(QtGui.QMainWindow):
             {"name": "Spec Sweep", "type": "int", "value": kwargs.get("spec_step", 0)},
             ]},
         {"name":"Laser Settings", "type":"group", "children":[
-            {"name":"NIR Power (W)", "type":"float", "value":kwargs.get("nir_power", 0)},
+            {"name":"NIR Power (mW)", "type":"float", "value":kwargs.get("nir_power", 0)},
             {"name":"NIR Frequency (nm)", "type":"float", "value":kwargs.get("nir_lambda", 0)},
+            # {"name:":"NIR", "type":"action","value": ComboParameter(param=kwargs["parent"], depth=0, name="NIR Frequency", itemList=[
+            #     kwargs.get("nir_lambda", 0), 10000000./kwargs.get("nir_lambda", 1)
+            # ])},
+            ComboParameter(param=kwargs["parent"], depth=0, name="NIR Frequency", itemList=[
+                kwargs.get("nir_lambda", 0), 10000000./kwargs.get("nir_lambda", 1)
+            ]),
             {"name":"Center Lambda (nm)", "type":"float", "value":kwargs.get("center_lambda", 0)}
             ]},
         {"name":"FEL Settings", "type":"group", "children":[
