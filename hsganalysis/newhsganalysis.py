@@ -34,10 +34,12 @@ class CCD(object):
         fname = file name where the data is saved
 
         creates:
-        self.parameters
-        self.description
-        self.raw_data = data output by measurement software
-        self.ccd_data = unprocessed array of photon energy vs. data
+        self.parameters = JSON dictionary holding all of the information from the
+                          data file.
+        self.description = string that is the text box from data taking GUI
+        self.raw_data = raw data output by measurement software, wavelength vs.
+                        data.  It may not entirely be numbers?
+        self.ccd_data = semi-processed 1600 x 2 array of photon energy vs. data
         """
         self.fname = fname
         
@@ -55,7 +57,10 @@ class CCD(object):
                 read_description = False
 
         f.close()
-        self.parameters["spec_step"] = int(self.parameters["spec_step"])
+        try:
+            self.parameters["spec_step"] = int(self.parameters["spec_step"])
+        except KeyError:
+            pass
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
         # I used flipup so that the x-axis is an increasing function of frequency
         
@@ -64,11 +69,15 @@ class CCD(object):
                                                          # header
         self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
 
+    def __str__(self):
+        return self.description
+
 class Photoluminescence(CCD):
     def __init__(self, fname):
         """
         This object handles PL-type data.
 
+        creates:
         self.proc_data = self.ccd_data divided by the exposure time
                          units: PL counts / second
         """
@@ -181,7 +190,7 @@ class HighSidebandCCD(CCD):
         from nm (NIR ones) or cm-1 (THz ones) into eV.
         
         Input:
-        fname = file name of the hsg spectrum
+        fname = file name of the hsg spectrum from CCD superclass
         
         Internal:
         self.fname = the filename
@@ -189,10 +198,9 @@ class HighSidebandCCD(CCD):
         self.description = the description we added to the file as the data
                            was being taken
         self.proc_data = processed data that has gone is frequency vs counts/pulse
-        self.dark_stdev = the standard deviation of the dark noise using the
-                          last 200 pixels since they probably(?) don't have 
-                          strong signal
-        self.std_error = Nothing yet, maybe this isn't useful
+        self.dark_stdev = the standard deviation of the dark noise taken from
+                          the background file when data was taken (I hope).  It
+                          is divided by the number of FEL pulses
         self.addenda = the list of things that have been added to the file, in
                        form of [constant, *spectra_added]
         self.subtrahenda = the list of spectra that have been subtracted from
@@ -212,9 +220,9 @@ class HighSidebandCCD(CCD):
         # Need to do this next line AFTER adding all the spectra together
 
         
-        self.dark_stdev = self.parameters["background_darkcount_std"] / self.parameters['fel_pulses'] # What do I do with this now that proc_data is not normalized?
-        self.std_error = None
-        # These will keep track of what operations have been performed
+        self.dark_stdev = self.parameters["background_darkcount_std"] / self.parameters['fel_pulses'] 
+        # I think this error stuff is working now
+
         
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
@@ -223,19 +231,28 @@ class HighSidebandCCD(CCD):
     def __add__(self, other):
         """
         Add together the image data from self.proc_data, or add a constant to 
-        that np.array.  
+        that np.array.  It will then combine the addenda and subtrahenda lists,
+        as well as add the fel_pulses together.
+
+        Input:
+        self = CCD-like object
+        other = int, float or CCD object
+
+        Internal:
+        ret.proc_data = the self.proc_data + other(.proc_data)
+        ret.addenda = combination of two input addenda lists
         """
         ret = copy.deepcopy(self)
 
         # Add a constant offset to the data
         if type(other) in (int, float):
-            ret.proc_data[:, 1] = self.proc_data[:, 1] + other # What shall the name be?
+            ret.proc_data[:, 1] = self.proc_data[:, 1] + other 
             ret.addenda[0] = ret.addenda[0] + other
         
         # or add the data of two hsg_spectra together
         else:
             if np.isclose(ret.parameters['center_lambda'], other.parameters['center_lambda']):
-                ret.proc_data[:, 1] = self.proc_data[:, 1] + other.proc_data[:, 1] # Again, need to choose a name
+                ret.proc_data[:, 1] = self.proc_data[:, 1] + other.proc_data[:, 1] 
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
@@ -250,7 +267,7 @@ class HighSidebandCCD(CCD):
         think it even keeps track of what data sets are in the file and how 
         they got there.
 
-        I have no idea if this is something that will be useful?
+        See how __add__ works for more information.
         """
         ret = copy.deepcopy(self)
         
@@ -269,14 +286,18 @@ class HighSidebandCCD(CCD):
                 raise Exception('Source: Spectrum.__sub__:\nThese are not from the same grating settings')
         return ret
 
-    def __str__(self):
-        return self.description
-
     def add_std_error(self, std_errors):
         """
         This adds a numpy array of standard errors to the self.proc_data array.
         It's actually just an append_column method, but there's no reason for 
         that (I think)
+
+        Input:
+        std_errors = 1600x1 array that includes the standard error for every 
+                     individual point
+
+        Internal:
+        self.proc_data = 1600x3 array that has [photon energy, signal, error]
         """
         try:
             self.proc_data = np.hstack((self.proc_data, std_errors.reshape((1600, 1))))
@@ -284,27 +305,57 @@ class HighSidebandCCD(CCD):
             print "Spectrum.add_std_error fucked up.  What's wrong?"
             print std_errors.shape
     
-    def calc_approx_sb_order(self, freq):
+    def calc_approx_sb_order(self, test_nir_freq):
         """
         This simple method will simply return a float approximating the order
-        of the frequency input.
+        of the frequency input.  We need this because the CCD wavelength 
+        calibration is not even close to perfect.  And it shifts by half a nm 
+        sometimes.
+
+        Input: 
+        test_nir_freq = NIR frequency that we're guessing the order for
+
+        Returns:
+        approx_order = the approximate sideband order of the test frequency
         """
         nir_freq = self.parameters['nir_freq']
         thz_freq = self.parameters['thz_freq']
-        approx_order = (freq - nir_freq) / thz_freq
+        approx_order = (test_nir_freq - nir_freq) / thz_freq
         return approx_order
     
     def image_normalize(self, num_images):
         """
         This method will divide the proc_data by the number of images that were
-        used in the hsg_sum_spectra function.
+        used in the hsg_sum_spectra function.  The proc_data array contains CCD
+        signal per FEL pulse already.  
+
+        Input:
+        num_images = number of images proc_data came from
+
+        Internal:
+        self.proc_data = normalizes the data and error columns to be signal/pulse
+                         again
         """
         self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
         self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
     
-    def guess_sidebands(self, cutoff=4.5):
+    def guess_sidebands(self, cutoff=4, verbose=False):
         """
-        This method will replace the previous one for guessing sidebands.
+        Finds the locations of all the sidebands in the proc_data array to be 
+        able to seed the fitting method.  This works by finding the maximum data
+        value in the array and guessing what sideband it is.  It creates an array
+        that includes this information.  It will then step down, initially by one
+        THz frequency, then by twos after it hasn't found any odd ones.  It then
+        goes up from the max and finds everything above in much the same way.
+
+        Input:
+        cutoff = signal-to-noise threshold to count a sideband candidate.
+
+        Internal:
+        self.sb_list = List of all of the orders the method found
+        self.sb_index = index of all of the peaks of the sidebands
+        self.sb_guess = three-part list including the frequency, amplitude and
+                        error guesses for each sideband
         """
         x_axis = np.array(self.proc_data[:, 0])
         y_axis = np.array(self.proc_data[:, 1])
@@ -321,15 +372,20 @@ class HighSidebandCCD(CCD):
         order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
 
         check_y = y_axis[global_max - 15:global_max + 15]
-        print "Global max checking:", check_y
         check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
         check_ave = np.mean(check_y)
         check_stdev = np.std(check_y)
-        print "\ncheck_max_area is", check_max_area
-        print "check_ave is", check_ave
-        print "check_stdev is", check_stdev
+
         check_ratio = (check_max_area - 3 * check_ave) / check_stdev
-        print "check_ratio is", check_ratio
+        
+        
+        if verbose:
+            print "Global max checking:", check_y
+            print "\ncheck_max_area is", check_max_area
+            print "check_ave is", check_ave
+            print "check_stdev is", check_stdev
+            print "check_ratio is", check_ratio
+
         if check_ratio > cutoff:
             self.sb_list = [order_init]
             self.sb_index = [global_max]
@@ -342,7 +398,8 @@ class HighSidebandCCD(CCD):
         
         
         # Look for lower order sidebands
-        print "Now I'll look for sidebands with frequency less than", sb_freq_guess
+        if verbose:
+            print "Now I'll look for sidebands with frequency less than", sb_freq_guess
         last_sb = sb_freq_guess[0]
         index_guess = global_max
         consecutive_null_sb = 0
@@ -352,36 +409,38 @@ class HighSidebandCCD(CCD):
         for order in xrange(order_init - 1, min_sb - 1, -1):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb - thz_freq
-                print "I skipped", order
+                if verbose:
+                    print "I skipped", order
                 continue
             lo_freq_bound = last_sb - thz_freq * (1 + 0.22) # Not sure what to do about these
             hi_freq_bound = last_sb - thz_freq * (1 - 0.22)
 
             start_index = False
             end_index = False
-            print "\nSideband", order, "\n"
-            print "The low frequency bound is", lo_freq_bound
-            print "The high frequency bound is", hi_freq_bound
+            if verbose:
+                print "\nSideband", order, "\n"
+                print "The low frequency bound is", lo_freq_bound
+                print "The high frequency bound is", hi_freq_bound
             for i in xrange(index_guess, 0, -1):
                 if end_index == False and i == 1:
                     break_condition = True
                     break
                 if end_index == False and x_axis[i] < hi_freq_bound:
-                    print "end_index is", i
+                    #print "end_index is", i
                     end_index = i
                 elif i == 1:
                     start_index = 0
-                    print "hit end of data, start_index is 0"
+                    #print "hit end of data, start_index is 0"
                 elif start_index == False and x_axis[i] < lo_freq_bound:
                     start_index = i
-                    print "start_index is", i
+                    #print "start_index is", i
                     index_guess = i
                     break
             
             if break_condition:
                 break
             check_y = y_axis[start_index:end_index]
-            print "check_y is", check_y
+
             #check_max = check_y.max()
             #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
@@ -389,37 +448,43 @@ class HighSidebandCCD(CCD):
             check_ave = np.mean(check_y)
             check_stdev = np.std(check_y)
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
-            print "\ncheck_max_area is", check_max_area
-            print "check_ave is", check_ave
-            print "check_stdev is", check_stdev
-            print "check_ratio is", check_ratio
+
+            if verbose:
+                print "check_y is", check_y
+                print "\ncheck_max_area is", check_max_area
+                print "check_ave is", check_ave
+                print "check_stdev is", check_stdev
+                print "check_ratio is", check_ratio
             
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
-                print "I just found", last_sb
+                
+                if verbose:
+                    print "I just found", last_sb
                 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
                 error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
-                print "My error estimate is:", error_est
+                if verbose:
+                    print "My error estimate is:", error_est
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
                 if order % 2 == 1:
                     consecutive_null_odd = 0
             else:
-                print "I could not find sideband with order", order
+                #print "I could not find sideband with order", order
                 last_sb = last_sb - thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
             if consecutive_null_odd == 1 and no_more_odds == False:
-                print "I'm done looking for odd sidebands"
+                #print "I'm done looking for odd sidebands"
                 no_more_odds = True
             if consecutive_null_sb == 2:
-                print "I can't find any more sidebands"
+                #print "I can't find any more sidebands"
                 break  
         
         # Look for higher sidebands
@@ -438,27 +503,29 @@ class HighSidebandCCD(CCD):
             hi_freq_bound = last_sb + thz_freq * (1 + 0.22)
             start_index = False
             end_index = False
-            print "\nSideband", order, "\n"            
+
+            if verbose:
+                print "\nSideband", order, "\n"            
             for i in xrange(index_guess, 1600):
                 if start_index == False and i == 1599:
-                    print "I'm all out of space, captain!"
+                    #print "I'm all out of space, captain!"
                     break_condition = True
                     break
                 elif start_index == False and x_axis[i] > lo_freq_bound:
-                    print "start_index is", i
+                    #print "start_index is", i
                     start_index = i
                 elif i == 1599:
                     end_index = 1599
-                    print "hit end of data, end_index is 1599"
+                    #print "hit end of data, end_index is 1599"
                 elif end_index == False and x_axis[i] > hi_freq_bound:
                     end_index = i
-                    print "end_index is", i
+                    #print "end_index is", i
                     index_guess = i
                     break
             if break_condition:
                 break
             check_y = y_axis[start_index:end_index]
-            print "check_y is", check_y
+
             #check_max = check_y.max()
             #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
@@ -466,43 +533,50 @@ class HighSidebandCCD(CCD):
             check_ave = np.mean(check_y)
             check_stdev = np.std(check_y)
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
-            print "\ncheck_max_area is", check_max_area
-            print "check_ave is", check_ave
-            print "check_stdev is", check_stdev
-            print "check_ratio is", check_ratio
+
+            if verbose:
+                print "check_y is", check_y
+                print "\ncheck_max_area is", check_max_area
+                print "check_ave is", check_ave
+                print "check_stdev is", check_stdev
+                print "check_ratio is", check_ratio
             
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
-                print "I just found", last_sb
+                
+                if verbose:
+                    print "I just found", last_sb
                 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
                 error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
-                print "My error estimate is:", error_est
+                if verbose:
+                    print "My error estimate is:", error_est
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
                 if order % 2 == 1:
                     consecutive_null_odd = 0
             else:
-                print "I could not find sideband with order", order
+                #print "I could not find sideband with order", order
                 last_sb = last_sb + thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
             if consecutive_null_odd == 1 and no_more_odds == False:
-                print "I'm done looking for odd sidebands"
+                #print "I'm done looking for odd sidebands"
                 no_more_odds = True
             if consecutive_null_sb == 2:
-                print "I can't find any more sidebands"
+                #print "I can't find any more sidebands"
                 break  
         
-        print "I found these sidebands:", self.sb_list
+        if verbose:
+            print "I found these sidebands:", self.sb_list
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_est)]).T
 
-    def fit_sidebands(self, plot=False):
+    def fit_sidebands(self, plot=False, verbose=False):
         """
         This takes self.sb_guess and fits to each maxima to get the details of
         each sideband.  It's really ugly, but it works.  The error of the 
@@ -520,22 +594,21 @@ class HighSidebandCCD(CCD):
         self.full_dict = a dictionary similar to sb_results, but now the keys 
                          are the sideband orders
         """
-        print "Trying to fit these"
+        #print "Trying to fit these"
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands 
                                                    # doesn't out put data in the most optimized way
             data_temp = self.proc_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
             width_guess = 0.0005
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 1.0]
-            print "Let's fit this shit!"
+            #print "Let's fit this shit!"
             try:
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
-                print "coeffs:", coeff
-                #print "The max is ", np.max(data_temp[:, 1])
-                #print coeff[1] / coeff[2], " vs. ", np.max(data_temp[:, 1]), "of", self.sb_list[elem]
-                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
+                if verbose:
+                    print "coeffs:", coeff
+                    print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
@@ -549,6 +622,7 @@ class HighSidebandCCD(CCD):
                              #, linewidth = 3)
             except:
                 print "I couldn't fit", elem
+                print "In file", self.fname
                 self.sb_list[elem] = None
         sb_fits_temp = np.asarray(sb_fits)
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
@@ -561,12 +635,14 @@ class HighSidebandCCD(CCD):
         # Going to label the appropriate row with the sideband
         self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
-        print "sb_names:", sb_names
-        print "sb_fits:", sb_fits
+
         sorter = np.argsort(sb_fits[:, 0])
         
         self.sb_results = np.array(sb_fits[sorter, :7])
-        print "sb_results:", self.sb_results
+        if verbose:
+            print "sb_names:", sb_names
+            print "sb_fits:", sb_fits
+            print "sb_results:", self.sb_results
         self.full_dict = {}
         for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
@@ -662,7 +738,10 @@ class PMT(object):
             raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
             # Hopefully saving will be comma delimited soon!
             frequencies = set(raw_temp[:, 0])
-            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the cavity dump signal is more than half the mean of the cavity dump signal
+            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the 
+                                                         # cavity dump signal is
+                                                         # more than half the mean 
+                                                         # of the cavity dump signal
             print "The fire condition is", fire_condition
             temp = None
             for freq in frequencies:
@@ -722,7 +801,10 @@ class HighSidebandPMT(PMT):
             raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
             # Hopefully saving will be comma delimited soon!
             frequencies = set(raw_temp[:, 0])
-            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the cavity dump signal is more than half the mean of the cavity dump signal
+            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the 
+                                                         # cavity dump signal is
+                                                         # more than half the mean 
+                                                         #of the cavity dump signal
             print "The fire condition is", fire_condition
             temp = None
             for freq in frequencies:
@@ -730,7 +812,8 @@ class HighSidebandPMT(PMT):
                 for raw_point in raw_temp:
                     if raw_point[0] == freq and raw_point[2] > fire_condition:
                         #print "I'm going to add this", raw_point[0], raw_point[3]
-                        data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
+                        data_temp = np.hstack((data_temp, raw_point[3])) 
+                                    # I don't know why hstack works here and not concatenate
                 print "The data temp is", data_temp
                 print len(data_temp)
                 try:
@@ -754,7 +837,7 @@ class HighSidebandPMT(PMT):
         else:
             return
 
-    def fit_sidebands(self, plot=False):
+    def fit_sidebands(self, plot=False, verbose=False):
         """
         This method will fit a gaussian to each of the sidebands provided in 
         the self.sb_dict and make a list just like in the EMCCD version.  It 
@@ -769,22 +852,27 @@ class HighSidebandPMT(PMT):
         """
         sb_fits = {}
         for sideband in self.sb_dict.items():
-            print "Sideband number", sideband[0]
+            if verbose:
+                print "Sideband number", sideband[0]
             index = np.argmax(sideband[1][:, 1])
             nir_frequency = sideband[1][index, 0]
             peak = sideband[1][index, 1]
-            p0 = [nir_frequency, peak / 3000, 0.0003, 0.00001]
-            print "p0:", p0
+            width_guess = 0.0003 # Yep, another magic number
+            p0 = [nir_frequency, peak * width_guess, width_guess, 0.00001]
+            if verbose:
+                print "p0:", p0
             try: 
-                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0)#, sigma=10*sideband[1][:, 2], absolute_sigma=True)
+                coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2])
-                print "coeffs:", coeff
+                if verbose:
+                    print "coeffs:", coeff
                 if np.sqrt(np.diag(var_list))[0] < 0.001: # The error on where the sideband is should be small
                     sb_fits[sideband[0]] = np.concatenate((np.array([sideband[0]]), coeff, np.sqrt(np.diag(var_list))))
                     #print "error then:", sb_fits[sideband[0]][6]
                     relative_error = np.sqrt(sum([x**2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(sideband[1][index - 1:index + 2, 1])
-                    print "relative error:", relative_error
+                    if verbose:
+                        print "relative error:", relative_error
                     sb_fits[sideband[0]][6] = coeff[1] * relative_error
                     #print "error now:", sb_fits[sideband[0]][6]                
                     if plot:
@@ -802,7 +890,8 @@ class HighSidebandPMT(PMT):
         
         self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
         self.sb_results = self.sb_results[:, :7]
-        print "And the results, please:", self.sb_results
+        if verbose:
+            print "And the results, please:", self.sb_results
 
         self.full_dict = {}
         for sb in self.sb_results:
@@ -887,10 +976,10 @@ class FullHighSideband(FullSpectrum):
         Initialize a full HSG spectrum.  Starts with a single CCD image, then
         adds more on to itself using stitch_hsg_dicts.
         """
-
+        self.fname = initial_CCD_piece.fname
         self.sb_results = initial_CCD_piece.sb_results
         self.parameters = initial_CCD_piece.parameters
-
+        self.parameters['files_here'] = [initial_CCD_piece.fname.split('/')[-1]]
         self.full_dict = {}
         for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
@@ -901,6 +990,7 @@ class FullHighSideband(FullSpectrum):
         CCD image to the spectrum.
         """
         self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict)
+        self.parameters['files_here'].append(ccd_object.fname.split('/')[-1])
 
     def add_PMT(self, pmt_object):
         """
@@ -908,6 +998,7 @@ class FullHighSideband(FullSpectrum):
         data to the spectrum.
         """
         self.full_dict = stitch_hsg_dicts(pmt_object.full_dict, self.full_dict)
+        self.parameters['files_here'].append(pmt_object.fname.split('/')[-1])
 
     def make_results_array(self):
         """
@@ -942,9 +1033,11 @@ def lorentzian(x, *p):
     return (A * gamma**2) / ((x - mu)**2 + gamma**2) + y0
 
 def background(x, *p):
-    # Arbitrary model background data for absorbance FFT
-    # for the intention of replacing a peak in the FFT
-    # with the background
+    """
+    Arbitrary model background data for absorbance FFT
+    for the intention of replacing a peak in the FFT
+    with the background
+    """
     a, b = p
     return a * (1/x)**b
 
@@ -968,8 +1061,6 @@ def hsg_sum_spectra(object_list):
     fel pulses.  
 
     object_list: A list of spectrum objects
-    :param object_list:
-    :return:
     """
     print "I'm trying!"
     
@@ -984,19 +1075,19 @@ def hsg_sum_spectra(object_list):
         except:
             # print "God damn it, Leroy"
             break
-        print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
+        #print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
         for spec in list(object_list):
-            print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
+            #print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
             #print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
             if temp.parameters['series'] == spec.parameters['series']:
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     num_images += 1
                     stderr_holder = np.hstack((stderr_holder, temp.proc_data[:, 1].reshape((1600,1))))
-                    print "Individual dark_stdev:", spec.dark_stdev
+                    #print "Individual dark_stdev:", spec.dark_stdev
                     dark_var += (spec.dark_stdev)**2
-                    print "Standard error holder shape 2:", stderr_holder.shape
-                    print "\t\tadded"
+                    #print "Standard error holder shape 2:", stderr_holder.shape
+                    #print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
         spec_number = stderr_holder.shape[1]
@@ -1004,7 +1095,7 @@ def hsg_sum_spectra(object_list):
         # This standard error is for every point.  I think it actually overestimates
         # the error at places with no signal because we add the dark variance
         # effectively twice.
-        print "final dark_stdev:", np.sqrt(dark_var)
+        #print "final dark_stdev:", np.sqrt(dark_var)
         temp.add_std_error(std_error)
         temp.image_normalize(num_images)
         good_list.append(temp)
@@ -1012,7 +1103,18 @@ def hsg_sum_spectra(object_list):
 
 def hsg_combine_spectra(spectra_list):
     """
-    This function is all about smooshing different parts of the same hsg spectrum together
+    This function is all about smooshing different parts of the same hsg 
+    spectrum together.  It takes a list of HighSidebandCCD spectra and turns the
+    zeroth spec_step into a FullHighSideband object.  It then uses the function
+    stitch_hsg_dicts over and over again for the smooshing.  
+
+    Input:
+    spectra_list = list of HighSidebandCCD objects that have sideband spectra
+                   larger than the spectrometer can see.
+
+    Returns:
+    good_list = A list of FullHighSideband objects that have been combined as 
+                much as can be.  
     """
     good_list = []
     spectra_list.sort(key=lambda x: x.parameters["spec_step"])
@@ -1379,21 +1481,30 @@ def fitter(p, shiftable, immutable):
 
     return a
 
-def stitch_hsg_dicts(full, new_dict):
+def stitch_hsg_dicts(full, new_dict, verbose=False):
     """
-    This function takes a FullHighSideband.full_dict attribute and a sideband 
+    This helper function takes a FullHighSideband.full_dict attribute and a sideband 
     object, either CCD or PMT and smushes the new sb_results into the full_dict.
 
-    If there's a PMT set of data involved, it should be in the full variable to
-    keep the laser normalization intact.
+    The first input doesn't change, so f there's a PMT set of data involved, it 
+    should be in the full variable to keep the laser normalization intact.
+
+    Inputs:
+    full = full_dict from FullHighSideband, or HighSidebandPMT.  It's important 
+           that it contains lower orders than the new_dict.
+    new_dict = another full_dict.
+
+    Returns:
+    full = extended version of the input full.  Overlapping sidebands are 
+           averaged because that makes sense?
     """
     #print "I'm adding these sidebands", sorted(new_dict.keys())
     overlap = []
     for new_sb in sorted(new_dict.keys()):
         if new_sb in full.keys():
             overlap.append(new_sb)
-
-    print "overlap:", overlap
+    if verbose:
+        print "overlap:", overlap
     overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap))]
 
     # Calculate the appropriate ratio to multiply the new sidebands by.
@@ -1419,7 +1530,7 @@ def stitch_hsg_dicts(full, new_dict):
     #print "I made this dictionary", sorted(full.keys())
     return full
 
-def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit):
+def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit, verbose=False):
     """
     This function will take a fully processed list of spectrum objects and 
     slice Spectrum.sb_fits appropriately to get an output like:
@@ -1434,50 +1545,57 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
     Currently I'm thinking fuck the offset y0
     After constructing this large matrix, it will save it somewhere.
     """
+    spectrum_list.sort(key=lambda x: x.parameters[param_name])
     included_spectra = dict()
     param_array = None
     sb_included = []
     
     for spec in spectrum_list:
-
-        sb_included = sorted(list(set(sb_included + spec.sb_list)))
+        sb_included = sorted(list(set(sb_included + spec.full_dict.keys())))
         included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
-    print "full name:", spectrum_list[0].fname
-    print "included names:", included_spectra
-    print "sb_included:", sb_included
+    if verbose:
+        #print "full name:", spectrum_list[0].fname
+        print "included names:", included_spectra
+        print "sb_included:", sb_included
     
     
     for spec in spectrum_list:
-        temp_dict = {}
-        print "the sb_results:", spec.sb_results
+        temp_dict = {} # This is different from full_dict in that the list has the
+                       # sideband order as the zeroth element.
+        if verbose:
+            print "the sb_results:", spec.sb_results
         for index in xrange(len(spec.sb_results[:, 0])):
-            print "my array slice:", spec.sb_results[index, :]
+            if verbose:
+                print "my array slice:", spec.sb_results[index, :]
             temp_dict[int(round(spec.sb_results[index, 0]))] = np.array(spec.sb_results[index, :])
-        print temp_dict
+        
+        if verbose:
+            print temp_dict
         
         for sb in sb_included:
             blank = np.zeros(7)
             blank[0] = float(sb)
-            print "checking sideband order:", sb
-            print "blank", blank
+            #print "checking sideband order:", sb
+            #print "blank", blank
             if not temp_dict.has_key(sb):
-                print "\nNeed to add sideband order:", sb
+                #print "\nNeed to add sideband order:", sb
                 temp_dict[sb] = blank
-        try:
-            spec_data = np.array([float(spec.parameters[param_name]), spec.dark_stdev])
+        try: # Why is this try-except here?
+            spec_data = np.array([float(spec.parameters[param_name])])
         except:
-            spec_data = np.array([float(spec.parameters[param_name][:2]), spec.dark_stdev])
+            spec_data = np.array([float(spec.parameters[param_name][:2])])
         for key in sorted(temp_dict.keys()):
-            print "I am going to hstack this:", temp_dict[key]
+            #print "I am going to hstack this:", temp_dict[key]
             spec_data = np.hstack((spec_data, temp_dict[key]))
             
         try:
             param_array = np.vstack((param_array, spec_data))
         except:
             param_array = np.array(spec_data)
-        print "The shape of the param_array is:", param_array.shape
+        if verbose:
+            print "The shape of the param_array is:", param_array.shape
         #print "The param_array itself is:", param_array
     
     try:
@@ -1510,3 +1628,6 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit)
                header=header, comments='', fmt='%f')
 
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
+
+
+
