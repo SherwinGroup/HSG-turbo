@@ -499,8 +499,9 @@ class HighSidebandCCD(CCD):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
                 continue
-            lo_freq_bound = last_sb + thz_freq * (1 - 0.22) # Not sure what to do about these
-            hi_freq_bound = last_sb + thz_freq * (1 + 0.22)
+            window_size = 0.22 + 0.0006 * last_sb
+            lo_freq_bound = last_sb + thz_freq * (1 - window_size) # Not sure what to do about these
+            hi_freq_bound = last_sb + thz_freq * (1 + window_size)
             start_index = False
             end_index = False
 
@@ -599,7 +600,7 @@ class HighSidebandCCD(CCD):
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands 
                                                    # doesn't out put data in the most optimized way
             data_temp = self.proc_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
-            width_guess = 0.0005
+            width_guess = 0.0001 + 0.000001*num # so the width guess gets wider as order goes up
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 1.0]
             #print "Let's fit this shit!"
             try:
@@ -615,11 +616,11 @@ class HighSidebandCCD(CCD):
                     # And had to scale by the area?
                 if plot:
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    plt.plot(x_vals, gauss(x_vals, *coeff))#, 
-                             #plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
+                    plt.plot(x_vals, gauss(x_vals, *coeff), 
+                             plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
                                                          # just looked around at what functions
                                                          # matplotlib has...
-                             #, linewidth = 3)
+                             , linewidth = 5)
             except:
                 print "I couldn't fit", elem
                 print "In file", self.fname
