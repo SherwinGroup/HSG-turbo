@@ -615,12 +615,20 @@ class HighSidebandCCD(CCD):
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     # And had to scale by the area?
                 if plot:
+                    linewidth = 5
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    plt.plot(x_vals, gauss(x_vals, *coeff), 
-                             plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
-                                                         # just looked around at what functions
-                                                         # matplotlib has...
-                             , linewidth = 5)
+                    if elem!=0:
+                        try:
+                            plt.plot(x_vals, gauss(x_vals, *coeff), 
+                                     plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
+                                                                 # just looked around at what functions
+                                                                 # matplotlib has...
+                                     , linewidth = linewidth)
+                        except: # to prevent weird mac issues with the matplotlib things?
+                            plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
+                                         
+                    else:
+                        plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
             except:
                 print "I couldn't fit", elem
                 print "In file", self.fname
