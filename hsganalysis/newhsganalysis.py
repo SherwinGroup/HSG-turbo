@@ -1622,9 +1622,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     except:
         print "Source: save_parameter_sweep\nJSON FAILED"
         return
-    origin_import1 = param_name + ",dark_stdev"
-    origin_import2 = unit + ",post shot norm"
-    origin_import3 = ","
+    origin_import1 = param_name
+    origin_import2 = unit
+    origin_import3 = ""
     for order in sb_included:
         origin_import1 += ",Sideband,Frequency,error,Sideband strength,error,Linewidth,error"
         origin_import2 += ",order,eV,,arb. u.,,eV,"
