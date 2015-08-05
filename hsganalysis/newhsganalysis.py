@@ -176,7 +176,7 @@ class Absorbance(CCD):
         spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
-                   header=spec_header, comments='', fmt='%f')
+                   header=spec_header, comments='', fmt='%0.6e')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
@@ -706,9 +706,9 @@ class HighSidebandCCD(CCD):
         fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
-                   header=spec_header, comments='', fmt='%f')
+                   header=spec_header, comments='', fmt='%0.6e')
         np.savetxt(os.path.join(folder_str, fit_fname), save_results, delimiter=',',
-                   header=fits_header, comments='', fmt='%f')
+                   header=fits_header, comments='', fmt='%0.6e')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
@@ -960,9 +960,9 @@ class HighSidebandPMT(PMT):
                 complete = np.array([self.sb_dict[sideband]])
         
         np.savetxt(os.path.join(folder_str, spectra_fname), complete, delimiter=',',
-                   header=spec_header, comments='', fmt='%f')
+                   header=spec_header, comments='', fmt='%0.6e')
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
-                   header=fits_header, comments='', fmt='%f')
+                   header=fits_header, comments='', fmt='%0.6e')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
@@ -1090,7 +1090,7 @@ class FullHighSideband(FullSpectrum):
         #np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
         #           header=spec_header, comments='', fmt='%f')
         np.savetxt(os.path.join(folder_str, fit_fname), save_results, delimiter=',',
-                   header=fits_header, comments='', fmt='%f')
+                   header=fits_header, comments='', fmt='%0.6e')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname))
 
@@ -1737,9 +1737,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     #print "Spec header: ", spec_header
     print "the param_array is:", param_array
     np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
-               header=header, comments='', fmt='%f')
+               header=header, comments='', fmt='%0.6e')
     np.savetxt(os.path.join(folder_str, norm_name), param_array_norm, delimiter=',', 
-               header=header, comments='', fmt='%f')
+               header=header, comments='', fmt='%0.6e')
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
 
 
