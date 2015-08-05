@@ -679,8 +679,12 @@ class HighSidebandCCD(CCD):
                 pass
             else:
                 raise
+        self.sb_results[:, 5:7] = self.sb_results[:, 5:7] * 1000 # For meV linewidths
+        area = np.array([self.sb_results[:, 3] / self.sb_results[:, 5]])
+        print "sb_results", self.sb_results.shape
+        print "area", area.shape
+        save_results = np.hstack((self.sb_results, area.T))
         
-        self.sb_results[:, 5:] = self.sb_results[:, 5:] * 1000 # For meV linewidths
         
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
@@ -698,12 +702,12 @@ class HighSidebandCCD(CCD):
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
-        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error\norder,eV,,arb. u.,,meV,,arb. u.,\n' + marker
+        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Area\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
         fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
-        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
+        np.savetxt(os.path.join(folder_str, fit_fname), save_results, delimiter=',',
                    header=fits_header, comments='', fmt='%f')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
@@ -986,6 +990,7 @@ class FullHighSideband(FullSpectrum):
         adds more on to itself using stitch_hsg_dicts.
         """
         self.fname = initial_CCD_piece.fname
+        self.description = initial_CCD_piece.description
         self.sb_results = initial_CCD_piece.sb_results
         self.parameters = initial_CCD_piece.parameters
         self.parameters['files_here'] = [initial_CCD_piece.fname.split('/')[-1]]
@@ -998,7 +1003,15 @@ class FullHighSideband(FullSpectrum):
         This method will be called by the stitch_hsg_results function to add another
         CCD image to the spectrum.
         """
-        self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict)
+        if self.parameters["gain"] == ccd_object.parameters["gain"]:
+            calc = False
+        else:
+            print "!!!"
+            print "What happened"
+            print "!!!"
+
+            calc = True
+        self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict, need_ratio=calc)
         self.parameters['files_here'].append(ccd_object.fname.split('/')[-1])
 
     def add_PMT(self, pmt_object):
@@ -1024,6 +1037,62 @@ class FullHighSideband(FullSpectrum):
                 #print "It didn't exist yet!"
                 self.sb_results = np.hstack((sb, self.full_dict[sb]))
         #print "and I made this array:", self.sb_results[:, 0]
+
+    def save_processing(self, file_name, folder_str, marker='', index=''):
+        """
+        This will save all of the self.proc_data and the results from the 
+        fitting of this individual file.
+        
+        Inputs:
+        file_name = the beginning of the file name to be saved
+        folder_str = the location of the folder where the file will be saved, 
+                     will create the folder, if necessary.
+        marker = I...I don't know what this was originally for
+        index = used to keep these files from overwriting themselves when in a
+                list
+        
+        Outputs:
+        Two files, one that is self.proc_data, the other is self.sb_results
+        """
+        try:
+            os.mkdir(folder_str)
+        except OSError, e:
+            if e.errno == errno.EEXIST:
+                pass
+            else:
+                raise
+        
+        area = np.array([self.sb_results[:, 3] / self.sb_results[:, 5]]) * 1000
+        print "sb_results", self.sb_results.shape
+        print "area", area.shape
+        save_results = np.hstack((self.sb_results, area.T))
+        
+        
+        #spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_full.txt'
+        #self.save_name = spectra_fname
+        
+        #self.parameters['addenda'] = self.addenda
+        #self.parameters['subtrahenda'] = self.subtrahenda
+        try:
+            parameter_str = json.dumps(self.parameters, sort_keys=True)
+        except:
+            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print "Here is the dictionary that broke JSON:\n", self.parameters
+            return
+
+        #origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
+        #spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+        
+        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Area\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
+        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
+        
+        #np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
+        #           header=spec_header, comments='', fmt='%f')
+        np.savetxt(os.path.join(folder_str, fit_fname), save_results, delimiter=',',
+                   header=fits_header, comments='', fmt='%f')
+
+        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname))
 
 ####################
 # Fitting functions 
@@ -1490,7 +1559,7 @@ def fitter(p, shiftable, immutable):
 
     return a
 
-def stitch_hsg_dicts(full, new_dict, verbose=False):
+def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     """
     This helper function takes a FullHighSideband.full_dict attribute and a sideband 
     object, either CCD or PMT and smushes the new sb_results into the full_dict.
@@ -1502,6 +1571,10 @@ def stitch_hsg_dicts(full, new_dict, verbose=False):
     full = full_dict from FullHighSideband, or HighSidebandPMT.  It's important 
            that it contains lower orders than the new_dict.
     new_dict = another full_dict.
+    need_ratio = If gain or other parameters aren't equal and must resort to 
+                 calculating the ratio instead of the measurements being equivalent.
+                 Changing integration time still means N photons made M counts, 
+                 but changing gain or using PMT or whatever does affect things.
 
     Returns:
     full = extended version of the input full.  Overlapping sidebands are 
@@ -1514,28 +1587,48 @@ def stitch_hsg_dicts(full, new_dict, verbose=False):
             overlap.append(new_sb)
     if verbose:
         print "overlap:", overlap
-    overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap))]
 
+    new_starter = overlap[-1]
+    overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
+
+    if need_ratio:
     # Calculate the appropriate ratio to multiply the new sidebands by.
     # I'm not entirely sure what to do with the error of this guy.
-    ratio_list = []
-    for sb in overlap:
-        ratio_list.append(full[sb][2] / new_dict[sb][2])
-    ratio = np.mean(ratio_list)
-    error = np.std(ratio_list) / np.sqrt(len(ratio_list))
-
+        ratio_list = []
+        for sb in overlap:
+            ratio_list.append(full[sb][2] / new_dict[sb][2])
+        ratio = np.mean(ratio_list)
+        error = np.std(ratio_list) / np.sqrt(len(ratio_list))
+        print "Ratio list", ratio_list
+        print "Ratio", ratio
+        print "Error", error
     # Adding the new sidebands to the full set and moving errors around.
     # I don't know exactly what to do about the other aspecs of the sidebands
     # besides the strength and its error.
-    for sb in sorted(new_dict.keys()):
-        new_strength = ratio * new_dict[sb][2]
-        new_dict[sb][3] = new_strength * np.sqrt((error / ratio)**2 + (new_dict[sb][3] / new_dict[sb][2])**2)
-        new_dict[sb][2] = new_strength
-        if sb in overlap:
-            full[sb][2] = np.mean((full[sb][2], new_dict[sb][2]))
-            full[sb][3] = np.sqrt(full[sb][3]**2 + new_dict[sb][3]**2) / 2
-        else:
-            full[sb] = new_dict[sb]
+        for sb in overlap:
+            full[sb][2] = ratio * new_dict[sb][2]
+            full[sb][3] = full[sb][2] * np.sqrt((error / ratio)**2 + (new_dict[3] / new_dict[2])**2)
+            
+            # Now for linewidths
+            lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
+            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][3]**(-2))
+            full[sb][4] = lw_avg
+            full[sb][5] = lw_error
+
+    else:
+        for sb in overlap:
+            error = np.sqrt(full[sb][3]**(-2) + new_dict[sb][3]**(-2))**(-1)
+            avg = (full[sb][2] / (full[sb][3]**2) + new_dict[sb][2] / (new_dict[sb][3]**2)) / (full[sb][3]**(-2) + new_dict[sb][3]**(-2))
+            full[sb][2] = avg
+            full[sb][3] = error
+
+            lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
+            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][3]**(-2))
+            full[sb][4] = lw_avg
+            full[sb][5] = lw_error
+
+    for sb in [x for x in new_dict.keys() if (x >= new_starter)]:
+        full[sb] = new_dict[sb]
     #print "I made this dictionary", sorted(full.keys())
     return full
 
@@ -1607,6 +1700,16 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
             print "The shape of the param_array is:", param_array.shape
         #print "The param_array itself is:", param_array
     
+    param_array_norm = np.array(param_array).T # python iterates over rows
+    for elem in [x for x in xrange(len(param_array_norm)) if (x-1)%7 == 3]:
+        temp_max = np.max(param_array_norm[elem])
+        param_array_norm[elem] = param_array_norm[elem] / temp_max
+        param_array_norm[elem + 1] = param_array_norm[elem + 1] / temp_max
+
+
+    param_array_norm = np.array(param_array_norm.T)
+
+
     try:
         os.mkdir(folder_str)
     except OSError, e:
@@ -1614,7 +1717,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
             pass
         else:
             raise
-
+    norm_name = file_name + '_norm.txt'
     file_name = file_name + '.txt'
     
     try:
@@ -1635,7 +1738,8 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     print "the param_array is:", param_array
     np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
                header=header, comments='', fmt='%f')
-
+    np.savetxt(os.path.join(folder_str, norm_name), param_array_norm, delimiter=',', 
+               header=header, comments='', fmt='%f')
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
 
 
