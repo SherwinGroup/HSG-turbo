@@ -599,12 +599,16 @@ class HighSidebandCCD(CCD):
         sb_fits = []
         for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands 
                                                    # doesn't out put data in the most optimized way
-            data_temp = self.proc_data[self.sb_index[elem] - 25:self.sb_index[elem] + 25, :]
-            width_guess = 0.0001 + 0.000001*num # so the width guess gets wider as order goes up
+            data_temp = self.proc_data[self.sb_index[elem] - 30:self.sb_index[elem] + 30, :]
+            width_guess = 0.0001 + 0.00001*self.sb_list[elem] # so the width guess gets wider as order goes up
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 1.0]
             #print "Let's fit this shit!"
             try:
+                if verbose:
+                    print "I'm going to try to fit", self.sb_list[elem]
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
+                if verbose:
+                    print "the fit worked"
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 if verbose:
@@ -631,6 +635,7 @@ class HighSidebandCCD(CCD):
                         plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
             except:
                 print "I couldn't fit", elem
+                print "It's sideband", num
                 print "In file", self.fname
                 self.sb_list[elem] = None
         sb_fits_temp = np.asarray(sb_fits)
@@ -679,11 +684,13 @@ class HighSidebandCCD(CCD):
                 pass
             else:
                 raise
-        self.sb_results[:, 5:7] = self.sb_results[:, 5:7] * 1000 # For meV linewidths
-        area = np.array([self.sb_results[:, 3] / self.sb_results[:, 5]])
+        temp = np.array(self.sb_results)
+        
+        area = np.array([temp[:, 3] / temp[:, 5]])
+        temp[:, 5:7] = temp[:, 5:7] * 1000 # For meV linewidths
         print "sb_results", self.sb_results.shape
         print "area", area.shape
-        save_results = np.hstack((self.sb_results, area.T))
+        save_results = np.hstack((temp, area.T))
         
         
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
@@ -1061,12 +1068,14 @@ class FullHighSideband(FullSpectrum):
                 pass
             else:
                 raise
+
+        temp = np.array(self.sb_results)
         
-        area = np.array([self.sb_results[:, 3] / self.sb_results[:, 5]]) * 1000
+        area = np.array([temp[:, 3] / temp[:, 5]])
+        temp[:, 5:7] = temp[:, 5:7] * 1000 # For meV linewidths
         print "sb_results", self.sb_results.shape
         print "area", area.shape
-        save_results = np.hstack((self.sb_results, area.T))
-        
+        save_results = np.hstack((temp, area.T))
         
         #spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_full.txt'
@@ -1209,6 +1218,7 @@ def hsg_combine_spectra(spectra_list):
         for piece in spectra_list:
             if temp.parameters["series"] == piece.parameters["series"]:
                 if piece.parameters["spec_step"] == counter:
+                    print "I am working on", temp.parameters["series"]
                     good_list[-1].add_CCD(piece)
                     spectra_list.remove(piece)
                     counter += 1
@@ -1617,15 +1627,19 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
 
     else:
         for sb in overlap:
+            print "The sideband", sb
+            print "Old value", full[sb][4]*1000
+            print "Add value", new_dict[sb][4]*1000
             error = np.sqrt(full[sb][3]**(-2) + new_dict[sb][3]**(-2))**(-1)
             avg = (full[sb][2] / (full[sb][3]**2) + new_dict[sb][2] / (new_dict[sb][3]**2)) / (full[sb][3]**(-2) + new_dict[sb][3]**(-2))
             full[sb][2] = avg
             full[sb][3] = error
-
+            
             lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
-            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][3]**(-2))
+            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
             full[sb][4] = lw_avg
-            full[sb][5] = lw_error
+            full[sb][5] = lw_error # This may not be the exactly right way to calculate the error
+            print "New value", lw_avg * 1000
 
     for sb in [x for x in new_dict.keys() if (x >= new_starter)]:
         full[sb] = new_dict[sb]
