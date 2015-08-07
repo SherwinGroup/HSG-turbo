@@ -1154,12 +1154,12 @@ def hsg_sum_spectra(object_list):
     good_list = []
     for index in xrange(len(object_list)):
         dark_var = 0
-        num_images = 0
+        num_images = 1
         try:
             temp = object_list.pop(0)
             stderr_holder = np.array(temp.proc_data[:, 1]).reshape((1600, 1))
             # print "Standard error holder shape 1:", stderr_holder.shape
-        except:
+        except Exception as E:
             # print "God damn it, Leroy"
             break
         #print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
