@@ -474,6 +474,8 @@ class BaseWindow(QtGui.QMainWindow):
             actions = QtGui.QMenu("Set Window Title")
             a = actions.addAction("Filename")
             a.triggered.connect(self.updateTitle)
+            a = actions.addAction("Other...")
+            a.triggered.connect(self.updateTitle)
 
 
         for ch in group.children():
@@ -499,6 +501,14 @@ class BaseWindow(QtGui.QMainWindow):
             if child.parentWidget().title() == "Set Window Title":
                 if child.text() == "Filename" and self.dataObj is not None:
                     self.setWindowTitle(os.path.basename(self.dataObj.fname))
+                elif child.text() == "Other...":
+                    text, ok = QtGui.QInputDialog.getText(self,
+                                                      "Enter Window Name",
+                                                      "Title:",
+                                                      QtGui.QLineEdit.Normal,
+                                                      self.windowTitle())
+                    if ok: self.setWindowTitle(text)
+                self.path=None
                 return
             path = [str(child.parentWidget().title()), str(child.text())]
 
@@ -594,8 +604,8 @@ class BaseWindow(QtGui.QMainWindow):
         # I think the other indices include axes and things?
         # could chagne this by making the data a class
         # member, but this keeps it clear what units are used
-        d = [self.ui.gFits.plotItem.curves[0].xData,
-             self.ui.gFits.plotItem.curves[0].yData]
+        d = [self.ui.gFits.plotItem.curves[1].xData,
+             self.ui.gFits.plotItem.curves[1].yData]
         self.createCompWindow(data = d, p = val)
 
     def handleSpecDragEvent(self, obj, val):
@@ -822,6 +832,8 @@ class ComparisonWindow(QtGui.QMainWindow):
 
         self.gPlot.plotItem.vb.sigClickedEvent.connect(self.handleMouseClick)
 
+        line = pg.LineSegmentROI()
+
     def initUI(self):
         self.gPlot= pg.PlotWidget()
         self.gPlot = DraggablePlotWidget()
@@ -849,7 +861,12 @@ class ComparisonWindow(QtGui.QMainWindow):
         return self.frameGeometry().contains(p)
 
     def addCurve(self, data, label=None):
-        p = self.gPlot.plotItem.plot(data[0], data[1], pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)))
+        symbol = None
+        if len(data[0])>100:
+            symbol = 'o'
+        p = self.gPlot.plotItem.plot(data[0], data[1],
+                                     pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)),
+                                     symbol=symbol)
         if label is not None:
             self.curveList[p] = label
             self.legend.addItem(p, label)
