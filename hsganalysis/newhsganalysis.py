@@ -58,7 +58,9 @@ class CCD(object):
 
         f.close()
         try:
-            self.parameters["spec_step"] = int(self.parameters["spec_step"])
+            self.parameters["spec_step"] = int(self.parameters["spec_step"]) 
+        except ValueError:
+            self.parameters["spec_step"] = 0
         except KeyError:
             pass
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
