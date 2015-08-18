@@ -604,8 +604,21 @@ class BaseWindow(QtGui.QMainWindow):
         # I think the other indices include axes and things?
         # could chagne this by making the data a class
         # member, but this keeps it clear what units are used
-        d = [self.ui.gFits.plotItem.curves[1].xData,
-             self.ui.gFits.plotItem.curves[1].yData]
+		
+        if self.dataObj is None:
+            return
+        data = self.dataObj.sb_results
+        want = [str(i.text()) for i in self.menuFitY.actions() if i.isChecked() and str(i.text())!="Log"][0]
+        x = data[:,0]
+        y = data[:, {"Height":   3,
+                     "Sigma":    5,
+                     "Position": 1}[want]]
+
+        #self.ui.gFits.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen("w"), symbol="o")
+		
+        #d = [self.ui.gFits.plotItem.curves[2].xData,
+        #     self.ui.gFits.plotItem.curves[2].yData]
+        d = [x, y/self.uisbDivideBy.value()]
         self.createCompWindow(data = d, p = val)
 
     def handleSpecDragEvent(self, obj, val):
@@ -832,7 +845,7 @@ class ComparisonWindow(QtGui.QMainWindow):
 
         self.gPlot.plotItem.vb.sigClickedEvent.connect(self.handleMouseClick)
 
-        line = pg.LineSegmentROI()
+        #line = pg.LineSegmentROI()
 
     def initUI(self):
         self.gPlot= pg.PlotWidget()
@@ -862,7 +875,7 @@ class ComparisonWindow(QtGui.QMainWindow):
 
     def addCurve(self, data, label=None):
         symbol = None
-        if len(data[0])>100:
+        if len(data[0])<100:
             symbol = 'o'
         p = self.gPlot.plotItem.plot(data[0], data[1],
                                      pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)),
