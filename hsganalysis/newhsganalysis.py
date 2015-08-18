@@ -59,6 +59,8 @@ class CCD(object):
         f.close()
         try:
             self.parameters["spec_step"] = int(self.parameters["spec_step"])
+        except ValueError:
+            self.parameters["spec_step"] = 0
         except KeyError:
             pass
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
@@ -380,7 +382,8 @@ class HighSidebandCCD(CCD):
         
         
         if verbose:
-            print "Global max checking:", check_y
+            print "\nI'm checking", self.fname, "\n"
+            print "Global max checking:", global_max, check_y
             print "\ncheck_max_area is", check_max_area
             print "check_ave is", check_ave
             print "check_stdev is", check_stdev
