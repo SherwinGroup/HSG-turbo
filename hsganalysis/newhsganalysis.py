@@ -974,8 +974,6 @@ class HighSidebandPMT(PMT):
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
         
-        self.parameters['addenda'] = self.addenda
-        self.parameters['subtrahenda'] = self.subtrahenda
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
@@ -994,13 +992,14 @@ class HighSidebandPMT(PMT):
                 complete = np.vstack((complete, self.sb_dict[sideband]))
             except:
                 complete = np.array([self.sb_dict[sideband]])
-        
+        print "THIS IS BROKEN"
+        '''
         np.savetxt(os.path.join(folder_str, spectra_fname), complete, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%0.6e')
-
-        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
+        '''
+        print "Saved PMT spectrum.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
 class FullSpectrum(object):
     def __init__(self):
@@ -1853,30 +1852,35 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 # Complete functions 
 ####################
 
-def proc_n_plotPMT(folder_path, plot=False, verbose=False):
+def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     """
     This function will take a pmt object, process it completely.
     """
     pmt_data = HighSidebandPMT(folder_path)
     pmt_data.integrate_sidebands()
     pmt_data.laser_line()
+    index = 0
     if plot:
         plt.figure('PMT data')
         for elem in pmt_data.sb_dict.values():
             plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
         plt.figure('Sideband strengths')
         plt.errorbar(pmt_data.sb_results[:, 0], pmt_data.sb_results[:, 3], pmt_data.sb_results[:, 4], label='PMT data', marker='o')
+    if type(save) is tuple:
+        pmt_data.save_processing(save[0], save[1], index=index)
 
     return pmt_data
 
-def proc_n_plotCCD(file_list, cutoff=3, offset=None, plot=False, verbose=False):
+def proc_n_plotCCD(file_list, cutoff=3, offset=None, plot=False, save=None, verbose=False):
     """
     This function will take a list of ccd files and process it completely.
+    save_name is a tuple (file_base, folder_path)
     """
     raw_list = []
     for fname in file_list:
         raw_list.append(HighSidebandCCD(fname, spectrometer_offset=offset))
 
+    index = 0
     spectra_list = hsg_sum_spectra(raw_list)
     for spectrum in spectra_list:
         spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
@@ -1889,5 +1893,8 @@ def proc_n_plotCCD(file_list, cutoff=3, offset=None, plot=False, verbose=False):
             plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4], label=spectrum.parameters['series'], marker='o')
             plt.legend()    
             plt.yscale('log')
-
+        if type(save) is tuple:
+            spectrum.save_processing(save[0], save[1], marker=spectrum.parameters["series"] + '_' + str(spectrum.parameters["spec_step"]), index=index)
+            index += 1
     return spectra_list
+
