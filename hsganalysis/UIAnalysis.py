@@ -781,6 +781,7 @@ class HSGWindow(BaseWindow):
             {"name":"Pulses", "type":"int", "value":kwargs.get("fel_pulses", 0)},
             {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0)}
             ]})
+        return params
         if "fieldInt" in kwargs:
             ptreelist = []
             for i, inten in enumerate(kwargs["fieldInt"]):
