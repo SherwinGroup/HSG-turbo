@@ -770,7 +770,7 @@ class PMT(object):
         """
         print "This started"
         self.folder_path = folder_path
-        self.file_list = glob.glob(os.path.join(folder_path, '*ata.txt'))
+        self.file_list = glob.glob(os.path.join(folder_path, '*ata0.txt'))
         
         # in __main__.py, look for the method "genSaveHeader"
         #                 look for method "initSettings" to see what parameters are saved
