@@ -380,7 +380,13 @@ class HighSidebandCCD(CCD):
         global_max = np.argmax(y_axis)
         order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
 
-        check_y = y_axis[global_max - 15:global_max + 15]
+        if global_max < 15:
+            check_y = y_axis[:global_max + 15]
+        elif global_max > 1585:
+            check_y = y_axis[global_max - 15:]
+        else:
+            check_y = y_axis[global_max - 15:global_max + 15]
+        
         check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
         check_ave = np.mean(check_y)
         check_stdev = np.std(check_y)
@@ -509,14 +515,16 @@ class HighSidebandCCD(CCD):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
                 continue
-            window_size = 0.22 + 0.0006 * last_sb
+            window_size = 0.25 + 0.0004 * order # used to be last_sb?
             lo_freq_bound = last_sb + thz_freq * (1 - window_size) # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
             start_index = False
             end_index = False
 
             if verbose:
-                print "\nSideband", order, "\n"            
+                print "\nSideband", order, "\n"
+                print "lower bound", lo_freq_bound
+                print "upper bound", hi_freq_bound ,"\n"        
             for i in xrange(index_guess, 1600):
                 if start_index == False and i == 1599:
                     #print "I'm all out of space, captain!"
@@ -620,7 +628,7 @@ class HighSidebandCCD(CCD):
             #print "Let's fit this shit!"
             if verbose:
                 print "number:", elem, num
-                print "data_temp:", data_temp
+                #print "data_temp:", data_temp
                 print "p0:", p0
             if plot:
                 plt.figure('CCD data')
@@ -722,11 +730,13 @@ class HighSidebandCCD(CCD):
                 raise
         temp = np.array(self.sb_results)
         
-        area = np.array([temp[:, 3] / temp[:, 5]])
+        ampli = np.array([temp[:, 3] / temp[:, 5]]) # But [:, 3] is already area?
+                                                    # (The old name was area)
+                                                    # I think it must be amplitude
         temp[:, 5:7] = temp[:, 5:7] * 1000 # For meV linewidths
         print "sb_results", self.sb_results.shape
-        print "area", area.shape
-        save_results = np.hstack((temp, area.T))
+        print "ampli", ampli.shape
+        save_results = np.hstack((temp, ampli.T))
         
         
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
@@ -745,7 +755,7 @@ class HighSidebandCCD(CCD):
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
-        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Area\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
+        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
         fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
@@ -810,7 +820,8 @@ class HighSidebandPMT(PMT):
             f.close()
             raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
             # Hopefully saving will be comma delimited soon!
-            frequencies = set(raw_temp[:, 0])
+            frequencies = sorted(list(set(raw_temp[:, 0])))
+            self.spacing = abs((frequencies[1] - frequencies[0]))
             fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the 
                                                          # cavity dump signal is
                                                          # more than half the mean 
@@ -842,16 +853,30 @@ class HighSidebandPMT(PMT):
         efficiency based on our measurement of the laser line with a fixed 
         attenuation.
         """
+        three_sisters = 0.0004 # approximate measured attenuation at 12525 cm-1
         if 0 not in self.sb_list:
             self.parameters['normalized?'] = False
             return
         else:
             self.parameters['normalized?'] = True
+            # The following is a temporary fix
+            self.full_dict[0][2:4] = self.full_dict[0][2:4] / three_sisters
+            laser_index = int(np.where(self.sb_results[:, 0] == 0)[0])
+            self.sb_results[laser_index, 3:5] = self.sb_results[laser_index, 3:5] / three_sisters
+            # End temporary fix
             print "\n!!!\nTHIS DOES NOT HANDLE ERROR CORRECTLY\n!!!\n"
-            laser_factor = self.full_dict[0][3] / (3.4e-6)
+            #print "laser line", self.full_dict[0]
+            #print "laser line results", self.sb_results[10]
+            laser_factor = self.full_dict[0][2]
+            print "Laser factor", laser_factor
             for sideband in self.full_dict.values():
+                sideband[2] = sideband[2] / laser_factor
+                sideband[3] = sideband[3] / laser_factor
+            for sideband in self.sb_results:
                 sideband[3] = sideband[3] / laser_factor
                 sideband[4] = sideband[4] / laser_factor
+            print "laser line", self.full_dict[0]
+            print "laser line results", self.sb_results[10]
 
     def integrate_sidebands(self, verbose=False):
         """
@@ -863,8 +888,9 @@ class HighSidebandPMT(PMT):
         for sideband in self.sb_dict.items():
             index = np.argmax(sideband[1][:, 1])
             nir_frequency = sideband[1][index, 0]
-            area = np.trapz(sideband[1][:, 1], sideband[1][:, 0])
-            error = np.sqrt(np.sum(sideband[1][:, 2]**2)) / 8065.6 # Divide by the step size?
+            area = np.trapz(np.nan_to_num(sideband[1][:, 1]), sideband[1][:, 0])
+            error = np.sqrt(np.sum(np.nan_to_num(sideband[1][:, 2])**2)) / 8065.6 # Divide by the step size?
+            print "order", sideband[0]
             print "area", area
             print "error", error
             details = np.array([sideband[0], nir_frequency, 1/8065.6, area, error, 2/8065.6, 1/8065.6])
@@ -895,6 +921,7 @@ class HighSidebandPMT(PMT):
         for sideband in self.sb_dict.items():
             if verbose:
                 print "Sideband number", sideband[0]
+                print "Sideband data:\n", sideband[1]
             index = np.argmax(sideband[1][:, 1])
             nir_frequency = sideband[1][index, 0]
             peak = sideband[1][index, 1]
@@ -936,7 +963,7 @@ class HighSidebandPMT(PMT):
                 self.sb_results = np.vstack((self.sb_results, sb_fits[result]))
             except:
                 self.sb_results = np.array(sb_fits[result])
-        
+
         self.sb_results = self.sb_results[:, [0, 1, 5, 2, 6, 3, 7, 4, 8]]
         self.sb_results = self.sb_results[:, :7]
         if verbose:
@@ -977,7 +1004,7 @@ class HighSidebandPMT(PMT):
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
-            print "Source: EMCCD_image.save_images\nJSON FAILED"
+            print "Source: PMT.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
 
@@ -991,14 +1018,14 @@ class HighSidebandPMT(PMT):
             try:
                 complete = np.vstack((complete, self.sb_dict[sideband]))
             except:
-                complete = np.array([self.sb_dict[sideband]])
-        print "THIS IS BROKEN"
-        '''
+                complete = np.array(self.sb_dict[sideband])
+        
         np.savetxt(os.path.join(folder_str, spectra_fname), complete, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
+        
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%0.6e')
-        '''
+        
         print "Saved PMT spectrum.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
 class FullSpectrum(object):
@@ -1100,11 +1127,12 @@ class FullHighSideband(FullSpectrum):
 
         temp = np.array(self.sb_results)
         
-        area = np.array([temp[:, 3] / temp[:, 5]])
+        ampli = np.array([temp[:, 3] / temp[:, 5]]) # I'm pretty sure this is
+                                                    # amplitude, not area
         temp[:, 5:7] = temp[:, 5:7] * 1000 # For meV linewidths
         print "sb_results", self.sb_results.shape
-        print "area", area.shape
-        save_results = np.hstack((temp, area.T))
+        print "ampli", ampli.shape
+        save_results = np.hstack((temp, ampli.T))
         
         #spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_full.txt'
@@ -1122,7 +1150,7 @@ class FullHighSideband(FullSpectrum):
         #origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         #spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
-        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Area\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
+        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
         fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
         
         #np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
@@ -1671,7 +1699,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             
             # Now for linewidths
             lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
-            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][3]**(-2))
+            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
             full[sb][4] = lw_avg
             full[sb][5] = lw_error
 
@@ -1857,8 +1885,14 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     This function will take a pmt object, process it completely.
     """
     pmt_data = HighSidebandPMT(folder_path)
+    '''
+    if pmt_data.spacing < 0.1:
+        pmt_data.fit_sidebands(plot=False)
+    else:
+    '''
     pmt_data.integrate_sidebands()
     pmt_data.laser_line()
+    print pmt_data.full_dict
     index = 0
     if plot:
         plt.figure('PMT data')
