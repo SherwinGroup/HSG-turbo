@@ -72,7 +72,13 @@ class CCD(object):
                                                          # we cut out the text 
                                                          # header
         if spectrometer_offset is not None:
-            self.ccd_data[:, 0] += spectrometer_offset
+            try:
+                # print "Doing offset", self.parameters["offset"]
+                self.ccd_data[:, 0] += float(self.parameters["offset"])
+                # print "it worked"
+            except:
+                self.ccd_data[:, 0] += spectrometer_offset
+                # print "it didn't work"
         self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
 
     def __str__(self):
@@ -213,7 +219,7 @@ class HighSidebandCCD(CCD):
                            the file.  Constant subtraction is dealt with with
                            self.addenda
         """
-        super(HighSidebandCCD, self).__init__(fname, spectrometer_offset=None)
+        super(HighSidebandCCD, self).__init__(fname, spectrometer_offset=spectrometer_offset)
 
         self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
         self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['fel_pulses']
@@ -380,7 +386,12 @@ class HighSidebandCCD(CCD):
         global_max = np.argmax(y_axis)
         order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
 
-        check_y = y_axis[global_max - 15:global_max + 15]
+        if (global_max > 15) and (global_max < 1585):
+            check_y = y_axis[global_max - 15:global_max + 15]
+        elif global_max < 15:
+            check_y = y_axis[:global_max + 15]
+        elif global_max > 1585:
+            check_y = y_axis[global_max - 15:]
         check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
         check_ave = np.mean(check_y)
         check_stdev = np.std(check_y)
@@ -620,7 +631,7 @@ class HighSidebandCCD(CCD):
             #print "Let's fit this shit!"
             if verbose:
                 print "number:", elem, num
-                print "data_temp:", data_temp
+                #print "data_temp:", data_temp
                 print "p0:", p0
             if plot:
                 plt.figure('CCD data')
@@ -1889,6 +1900,7 @@ def proc_n_plotCCD(file_list, cutoff=3, offset=None, plot=False, save=None, verb
             plt.figure('CCD data')
             plt.errorbar(spectrum.proc_data[:, 0], spectrum.proc_data[:, 1], spectrum.proc_data[:, 2], label=spectrum.parameters['series'])
             plt.legend()
+            #plt.yscale('log')
             plt.figure('Sideband strengths')
             plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4], label=spectrum.parameters['series'], marker='o')
             plt.legend()    
