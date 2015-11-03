@@ -772,25 +772,32 @@ class HighSidebandCCD(CCD):
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
 class PMT(object):
-    def __init__(self, folder_path):
+    def __init__(self, file_path):
         """
-        Initializes a SPEX spectrum.  It'll open a folder, and bring in all of
-        the individual sidebands into this object. To work, all the individual
-        sidebands need to be in that folder, not in separate folders
+        Initializes a SPEX spectrum.  It'll open a file, and bring in the details
+        of a sideband spectrum into the object.  There isn't currently any reason
+        to use inheritance here, but it could be extended later to include PLE or
+        something of the sort.
         
         attributes:
             self.parameters - dictionary of important experimental parameters
+                              this will not necessarily be the same for each
+                              file in the object
             self.description - string of the description of the file(s)
             self.sb_dict - keys are sideband order, values are PMT data arrays
-            self.sb_list - sorted
+            self.sb_list - sorted list of included sidebands
+            self.files - included file paths
         """
         print "This started"
+        '''
         self.folder_path = folder_path
-        self.file_list = glob.glob(os.path.join(folder_path, '*ata0.txt'))
+        self.file_list = glob.glob(os.path.join(folder_path, '*[0-9].txt'))
+        '''
+        self.files = [file_path]
         
         # in __main__.py, look for the method "genSaveHeader"
         #                 look for method "initSettings" to see what parameters are saved
-        f = open(self.file_list[0],'rU')
+        f = open(file_path,'rU')
         throw_away = f.readline() # Just need to get things down to the next line
         parameters_str = f.readline()
         self.parameters = json.loads(parameters_str[1:])
@@ -802,20 +809,55 @@ class PMT(object):
                 self.description += line[1:]
             else:
                 read_description = False
-    
+
+def make_pmt_spectrum(folder_path):
+    """
+    We're goign to make a collection function that makes PMT spectra with 
+    different things in it?  It does the work of a PMT spectrum?  It's 
+    kind of like a collection function of a given parameter sweep or some
+    sort of series collection.
+    """
+    file_list = glob.glob(os.path.join(folder_path, '*[0-9].txt'))
+
+    pmt_list = []
+    for sb_file in file_list:
+        f = open(sb_file, 'rU')
+        sb_num = int(f.readline().split(' ')[-1])
+        parameters_str = f.readline()
+        parameters = json.loads(parameters_str[1:])
+        try:
+            for pmt_spectrum in pmt_list: # pmt_spectrum is a pmt object?
+                if parameters['series'] == pmt_spectrum.parameters['series']:
+                    pmt_spectrum.add_sideband(sb_file)
+                    break
+            else: # this will execute IF the break was NOT called
+                pmt_list.append(HighSidebandPMT(sb_file))
+        except:
+            pmt_list.append(HighSidebandPMT(sb_file))
+
+    for pmt_spectrum in pmt_list:
+        pmt_spectrum.process_sidebands()
+    return pmt_list
+
 class HighSidebandPMT(PMT):
-    def __init__(self, folder_path, verbose=False):
+    def __init__(self, file_path, verbose=False):
         """
-        Initializes a SPEX spectrum.  It'll open a folder, and bring in all of
-        the individual sidebands into this object. To work, all the individual
-        sidebands need to be in that folder, not in separate folders
+        Initializes a SPEX spectrum.  It'll open a single file, then read
+        the data from that file using .add_sideband().  The super's init will handle the parameters
+        and the description.  
         
         attributes:
             self.parameters - dictionary of important experimental parameters
             self.description - string of the description of the file(s)
             self.sb_dict - keys are sideband order, values are PMT data arrays
-            self.sb_list - sorted
+            self.sb_list - sorted list of included sidebands
         """
+        super(HighSidebandPMT, self).__init__(file_path)
+        self.sb_dict = {}
+        self.sb_list = []
+        self.add_sideband(file_path)
+
+        '''
         super(HighSidebandPMT, self).__init__(folder_path)
         self.sb_dict = {}
         for sb_file in self.file_list:
@@ -852,6 +894,88 @@ class HighSidebandPMT(PMT):
             self.sb_dict[sb_num] = np.array(temp)
         
         self.sb_list = sorted(self.sb_dict.keys())
+        '''
+
+    def add_sideband(self, file_name):
+        """
+        This bad boy will add a sideband to the sideband spectrum of this object
+        """
+        self.files.append(file_name)
+        f = open(file_name, 'rU')
+        sb_num = int(f.readline().split(' ')[-1])
+        f.close()
+        raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',')
+        # Make things comma delimited?
+        try:
+            self.sb_dict[sb_num].vstack((raw_temp))
+        except:
+            self.sb_dict[sb_num] = np.array(raw_temp)
+
+    def process_sidebands(self, verbose=False):
+        """
+        This bad boy will clean up the garbled mess that is the object before hand, 
+        including clearing out misfired shots and doing the averaging.
+
+        """
+        for sb_deets in list(self.sb_dict.items()):
+            sb_num, sb = sb_deets[0], sb_deets[1]
+            frequencies = sorted(list(set(sb[:, 0])))
+            fire_condition = np.mean(sb[:, 2]) / 2 # Say FEL fired if the 
+                                                   # cavity dump signal is
+                                                   # more than half the mean 
+                                                   # of the cavity dump signal
+            temp = None
+            for freq in frequencies:
+                data_temp = np.array([])
+                for point in sb:
+                    if point[0] == freq and point[2] > fire_condition:
+                        data_temp = np.hstack((data_temp, point[3]))
+                try:
+                    temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
+                except:
+                    temp = np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])
+            temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
+            temp = temp[temp[:, 0].argsort()]
+            self.sb_dict[sb_num] = np.array(temp)
+        self.sb_list = sorted(self.sb_dict.keys())
+        if verbose:
+            print "Sidebands included", self.sb_list
+        '''
+        for sb_file in self.file_list:
+            f = open(sb_file, 'rU')
+            sb_num = int(f.readline().split(' ')[-1])
+            if verbose:
+                print "Sideband number is", sb_num
+            f.close()
+            raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
+            # Hopefully saving will be comma delimited soon!
+            frequencies = sorted(list(set(raw_temp[:, 0])))
+            self.spacing = abs((frequencies[1] - frequencies[0]))
+            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the 
+                                                         # cavity dump signal is
+                                                         # more than half the mean 
+                                                         # of the cavity dump signal
+            if verbose:
+                print "The fire condition is", fire_condition
+            temp = None
+            for freq in frequencies:
+                data_temp = np.array([])
+                for raw_point in raw_temp:
+                    if raw_point[0] == freq and raw_point[2] > fire_condition:
+                        #print "I'm going to add this", raw_point[0], raw_point[3]
+                        data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
+                if verbose:
+                    print "The data temp is", data_temp
+                try:
+                    temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
+                except:
+                    temp = np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])
+            temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
+            temp = temp[temp[:, 0].argsort()]
+            self.sb_dict[sb_num] = np.array(temp)
+        
+        self.sb_list = sorted(self.sb_dict.keys())
+        '''
     
     def laser_line(self):
         """
@@ -1006,7 +1130,7 @@ class HighSidebandPMT(PMT):
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
-        
+        self.parameters['included_files'] = list(self.files)
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
         except:
