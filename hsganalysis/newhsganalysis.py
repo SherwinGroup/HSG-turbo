@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 ####################
 # Objects 
 ####################
-
+ 
 class CCD(object):
     def __init__(self, fname, spectrometer_offset=None):
         """
