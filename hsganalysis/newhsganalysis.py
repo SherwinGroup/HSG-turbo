@@ -45,20 +45,19 @@ class CCD(object):
         """
         self.fname = fname
         
-        f = open(fname,'rU')
-
-        parameters_str = f.readline()
-        self.parameters = json.loads(parameters_str[1:])
-        self.description = ''
-        read_description = True
-        while read_description:
-            line = f.readline()
-            if line[0] == '#':
-                self.description += line[1:]
-            else:
-                read_description = False
-
-        f.close()
+        print "I'm going to open", fname
+        #f = open(fname,'rU')
+        with open(fname,'rU') as f:
+            parameters_str = f.readline()
+            self.parameters = json.loads(parameters_str[1:])
+            self.description = ''
+            read_description = True
+            while read_description:
+                line = f.readline()
+                if line[0] == '#':
+                    self.description += line[1:]
+                else:
+                    read_description = False
         try:
             self.parameters["spec_step"] = int(self.parameters["spec_step"])
         except ValueError:
@@ -799,47 +798,19 @@ class PMT(object):
         
         # in __main__.py, look for the method "genSaveHeader"
         #                 look for method "initSettings" to see what parameters are saved
-        f = open(file_path,'rU')
-        throw_away = f.readline() # Just need to get things down to the next line
-        parameters_str = f.readline()
-        self.parameters = json.loads(parameters_str[1:])
-        self.description = ''
-        read_description = True
-        while read_description:
-            line = f.readline()
-            if line[0] == '#':
-                self.description += line[1:]
-            else:
-                read_description = False
-
-def make_pmt_spectrum(folder_path):
-    """
-    We're goign to make a collection function that makes PMT spectra with 
-    different things in it?  It does the work of a PMT spectrum?  It's 
-    kind of like a collection function of a given parameter sweep or some
-    sort of series collection.
-    """
-    file_list = glob.glob(os.path.join(folder_path, '*[0-9].txt'))
-
-    pmt_list = []
-    for sb_file in file_list:
-        f = open(sb_file, 'rU')
-        sb_num = int(f.readline().split(' ')[-1])
-        parameters_str = f.readline()
-        parameters = json.loads(parameters_str[1:])
-        try:
-            for pmt_spectrum in pmt_list: # pmt_spectrum is a pmt object?
-                if parameters['series'] == pmt_spectrum.parameters['series']:
-                    pmt_spectrum.add_sideband(sb_file)
-                    break
-            else: # this will execute IF the break was NOT called
-                pmt_list.append(HighSidebandPMT(sb_file))
-        except:
-            pmt_list.append(HighSidebandPMT(sb_file))
-
-    for pmt_spectrum in pmt_list:
-        pmt_spectrum.process_sidebands()
-    return pmt_list
+        with open(file_path, 'rU') as f:
+        #f = open(file_path,'rU')
+            throw_away = f.readline() # Just need to get things down to the next line
+            parameters_str = f.readline()
+            self.parameters = json.loads(parameters_str[1:])
+            self.description = ''
+            read_description = True
+            while read_description:
+                line = f.readline()
+                if line[0] == '#':
+                    self.description += line[1:]
+                else:
+                    read_description = False
 
 class HighSidebandPMT(PMT):
     def __init__(self, file_path, verbose=False):
@@ -903,10 +874,9 @@ class HighSidebandPMT(PMT):
         This bad boy will add a sideband to the sideband spectrum of this object
         """
         self.files.append(file_name)
-        f = open(file_name, 'rU')
-        sb_num = int(f.readline().split(' ')[-1])
-        f.close()
-        raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',')
+        with open(file_name, 'rU') as f:
+            sb_num = int(f.readline().split(' ')[-1])
+        raw_temp = np.genfromtxt(file_name, comments='#')#, delimiter=',')
         # Make things comma delimited?
         try:
             self.sb_dict[sb_num].vstack((raw_temp))
@@ -985,6 +955,23 @@ class HighSidebandPMT(PMT):
         efficiency based on our measurement of the laser line with a fixed 
         attenuation.
         """
+
+        if 0 not in self.sb_list:
+            self.parameters['normalized?'] = False
+            return
+        else:
+            laser_index = np.where(self.sb_results[:, 0] == 0)[0][0]
+            print "sb_results", self.sb_results[:, 0]
+            print "laser_index", laser_index
+
+            laser_strength = np.array(self.sb_results[laser_index, 3:5])
+            
+            for sb in self.sb_results:
+                print "Laser_strength", laser_strength
+                sb[4] = (sb[3] / laser_strength[0]) * np.sqrt((sb[4] / sb[3])**2 + (laser_strength[1] / laser_strength[0])**2)
+                sb[3] = sb[3] / laser_strength[0]
+            self.parameters['normalized?'] = True
+        '''
         three_sisters = 0.0004 # approximate measured attenuation at 12525 cm-1
         if 0 not in self.sb_list:
             self.parameters['normalized?'] = False
@@ -1009,6 +996,7 @@ class HighSidebandPMT(PMT):
                 sideband[4] = sideband[4] / laser_factor
             print "laser line", self.full_dict[0]
             print "laser line results", self.sb_results[10]
+        '''
 
     def integrate_sidebands(self, verbose=False):
         """
@@ -1433,6 +1421,36 @@ def hsg_combine_spectra(spectra_list):
                     spectra_list.remove(piece)                    
         good_list[-1].make_results_array()
     return good_list
+
+def pmt_sorter(folder_path):
+    """
+    This function will be fed a folder with a bunch of PMT data files in it.  
+    The folder should contain a bunch of spectra with at least one sideband in
+    them, each differing by the series entry in the parameters dictionary.  
+
+    This function will return a list of HighSidebandPMT objects.  
+    """
+    file_list = glob.glob(os.path.join(folder_path, '*[0-9].txt'))
+
+    pmt_list = []
+    for sb_file in file_list:
+        with open(sb_file, 'rU') as f:
+            sb_num = int(f.readline().split(' ')[-1])
+            parameters_str = f.readline()
+            parameters = json.loads(parameters_str[1:])
+        try:
+            for pmt_spectrum in pmt_list: # pmt_spectrum is a pmt object?
+                if parameters['series'] == pmt_spectrum.parameters['series']:
+                    pmt_spectrum.add_sideband(sb_file)
+                    break
+            else: # this will execute IF the break was NOT called
+                pmt_list.append(HighSidebandPMT(sb_file))
+        except:
+            pmt_list.append(HighSidebandPMT(sb_file))
+
+    for pmt_spectrum in pmt_list:
+        pmt_spectrum.process_sidebands()
+    return pmt_list
 
 def stitch_abs_results(main, new):
     raise NotImplementedError
@@ -2016,32 +2034,34 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     """
     This function will take a pmt object, process it completely.
     """
-    pmt_data = HighSidebandPMT(folder_path)
+    pmt_data = pmt_sorter(folder_path)
     '''
     if pmt_data.spacing < 0.1:
         pmt_data.fit_sidebands(plot=False)
     else:
     '''
-    pmt_data.integrate_sidebands()
-    pmt_data.laser_line()
-    print pmt_data.full_dict
-    index = 0
-    if plot:
-        plt.figure('PMT data')
-        for elem in pmt_data.sb_dict.values():
-            plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
-        plt.figure('Sideband strengths')
-        plt.errorbar(pmt_data.sb_results[:, 0], pmt_data.sb_results[:, 3], pmt_data.sb_results[:, 4], label='PMT data', marker='o')
-    if type(save) is tuple:
-        pmt_data.save_processing(save[0], save[1], index=index)
-
+    for spectrum in pmt_data:
+        spectrum.integrate_sidebands()
+        spectrum.laser_line()
+        print spectrum.full_dict
+        index = 0
+        if plot:
+            plt.figure('PMT data')
+            for elem in spectrum.sb_dict.values():
+                plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
+            plt.figure('Sideband strengths')
+            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4], label=spectrum.parameters['series'], marker='o')
+        if type(save) is tuple:
+            spectrum.save_processing(save[0], save[1], index=index)
+    plt.legend()
     return pmt_data
 
-def proc_n_plotCCD(file_list, cutoff=3, offset=None, plot=False, save=None, verbose=False):
+def proc_n_plotCCD(folder_path, cutoff=3, offset=None, plot=False, save=None, verbose=False):
     """
     This function will take a list of ccd files and process it completely.
     save_name is a tuple (file_base, folder_path)
     """
+    file_list = glob.glob(os.path.join(folder_path, '*[0-9]_spectrum.txt'))
     raw_list = []
     for fname in file_list:
         raw_list.append(HighSidebandCCD(fname, spectrometer_offset=offset))
