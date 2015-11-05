@@ -2,3 +2,5 @@
 "Brevity required, prurience preferred."
 '''
 __author__ = 'dreadnought'
+
+from newhsganalysis import * # This allows for easier imports later

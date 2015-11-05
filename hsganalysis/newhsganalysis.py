@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 ####################
 # Objects 
 ####################
- 
+
 class CCD(object):
     def __init__(self, fname, spectrometer_offset=None):
         """
@@ -83,6 +83,8 @@ class CCD(object):
 
     def __str__(self):
         return self.description
+
+
 
 class Photoluminescence(CCD):
     def __init__(self, fname):
