@@ -19,6 +19,7 @@ import scipy.interpolate as spi
 import scipy.optimize as spo
 import scipy.fftpack as fft
 import matplotlib.pyplot as plt
+import scipy.ndimage as ndimage
 
 ####################
 # Objects 
@@ -1326,7 +1327,7 @@ def gaussWithBackground(x, *p):
 # Collection functions 
 ####################
 
-def hsg_sum_spectra(object_list):
+def hsg_sum_spectra(object_list, do_fvb_crr=False):
     """
     This function will add all the things that should be added.  Obvs.  It will
     also calculate the standard error of the mean for every NIR frequency.  The
@@ -1359,13 +1360,17 @@ def hsg_sum_spectra(object_list):
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     num_images += 1
-                    stderr_holder = np.hstack((stderr_holder, temp.proc_data[:, 1].reshape((1600,1))))
+                    stderr_holder = np.hstack((stderr_holder, spec.proc_data[:, 1].reshape((1600,1))))
                     #print "Individual dark_stdev:", spec.dark_stdev
                     dark_var += (spec.dark_stdev)**2
                     #print "Standard error holder shape 2:", stderr_holder.shape
                     #print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
+        if do_fvb_crr:
+            stderr_holder = fvb_crr(stderr_holder, debugging=True)
+            temp.proc_data[:,1] = np.mean(stderr_holder, axis=1)
+
         spec_number = stderr_holder.shape[1]
         std_error = np.sqrt(np.var(stderr_holder, axis=1, dtype=np.float64) + dark_var) / np.sqrt(spec_number) # Checking some sigma stuff from curve_fit
         # This standard error is for every point.  I think it actually overestimates
@@ -1458,6 +1463,149 @@ def stitch_abs_results(main, new):
 ####################
 # Helper functions 
 ####################
+
+
+def fvb_crr(raw_array, offset = 0, medianRatio = 1, noiseCoeff = 5, debugging = False):
+    """
+
+        Remove cosmic rays from a sequency of identical exposures
+        :param raw_array: The array to be cleaned. Successive spectra should
+                be the columns (i.e. 1600 x n) of the raw_array
+        :param offset: baseline to add to raw_array.
+               Not used, but here if it's needed in the future
+        :param medianRatio: Multiplier to the median when deciding a cutoff
+        :param noiseCoeff: Multiplier to the noise on the median
+                    May need changing for noisy data
+        :return:
+    """
+
+    d = np.array(raw_array)
+
+    med = ndimage.filters.median_filter(d, size=(1, d.shape[1]), mode='wrap')
+    med = np.median(d, axis=1).reshape(d.shape[0], 1)
+    if debugging:
+        print "shape of median filter:", med.shape
+    meanMedian  = med.mean(axis=1)
+    # meanMedian = med.copy()
+    if debugging:
+        print "shape of meaned median filter:", meanMedian.shape
+    # Construct a cutoff for each pixel. It was kind of guess and
+    # check
+    cutoff = meanMedian * medianRatio + noiseCoeff * np.std(meanMedian[-100:])
+    if debugging:
+        print "shape of cutoff criteria:", cutoff.shape
+        import pyqtgraph as pg
+
+        winlist = []
+        app = pg.QtGui.QApplication([])
+
+        win = pg.GraphicsLayoutWidget()
+        win.setWindowTitle("Raw Image")
+        p1 = win.addPlot()
+
+        img = pg.ImageItem()
+        img.setImage(d.copy().T)
+        p1.addItem(img)
+
+        hist = pg.HistogramLUTItem()
+        hist.setImageItem(img)
+        win.addItem(hist)
+
+        win.nextRow()
+        p2 = win.addPlot(colspan=2)
+        p2.setMaximumHeight(250)
+        p2.addLegend()
+        for i, v in enumerate(d.T):
+            p2.plot(v, pen=(i, d.shape[1]), name=str(i))
+        p2.plot(np.sum(d, axis=1), pen=pg.mkPen('w', width=3))
+        win.show()
+        winlist.append(win)
+
+        win2 = pg.GraphicsLayoutWidget()
+        win2.setWindowTitle("Median Image")
+        p1 = win2.addPlot()
+
+        img = pg.ImageItem()
+        img.setImage(med.T)
+        p1.addItem(img)
+
+        hist = pg.HistogramLUTItem()
+        hist.setImageItem(img)
+        win2.addItem(hist)
+
+        win2.nextRow()
+        p2 = win2.addPlot(colspan=2)
+        p2.setMaximumHeight(250)
+
+        p2.plot(np.sum(med, axis=1)/d.shape[1])
+        win2.show()
+        winlist.append(win2)
+
+
+
+        win2 = pg.GraphicsLayoutWidget()
+        win2.setWindowTitle("d-m")
+        p1 = win2.addPlot()
+
+        img = pg.ImageItem()
+        img.setImage((d - med).T)
+        p1.addItem(img)
+
+        hist = pg.HistogramLUTItem()
+        hist.setImageItem(img)
+        win2.addItem(hist)
+
+        win2.nextRow()
+        p2 = win2.addPlot(colspan=2)
+        p2.setMaximumHeight(250)
+        p2.addLegend()
+        for i, v in enumerate((d-med).T):
+            p2.plot(v, pen=(i, d.shape[1]), name=str(i))
+        p2.plot(cutoff, pen=pg.mkPen('w', width=3))
+        win2.show()
+        winlist.append(win2)
+
+
+
+    # Find the bad pixel positions
+    # Note the [:, None] - needed to cast the correct shapes
+    badPixs = np.argwhere((d - med)>(cutoff.reshape(len(cutoff), 1)))
+
+    for pix in badPixs:
+        # get the other pixels in the row which aren't the cosmic
+        if debugging:
+            print "cleaning pixel", pix
+        p = d[pix[0], [i for i in range(d.shape[1]) if not i==pix[1]]]
+        if debugging:
+            print "\tRemaining pixels in row are", p
+        # Replace the cosmic by the average of the others
+        # Could get hairy if more than one cosmic per row.
+        # Maybe when doing many exposures?
+        d[pix[0], pix[1]] = np.mean(p)
+
+    if debugging:
+        win = pg.GraphicsLayoutWidget()
+        win.setWindowTitle("Clean Image")
+        p1 = win.addPlot()
+
+        img = pg.ImageItem()
+        img.setImage(d.copy().T)
+        p1.addItem(img)
+
+        hist = pg.HistogramLUTItem()
+        hist.setImageItem(img)
+        win.addItem(hist)
+
+        win.nextRow()
+        p2 = win.addPlot(colspan=2)
+        p2.setMaximumHeight(250)
+        p2.plot(np.sum(d, axis=1))
+        win.show()
+        winlist.append(win)
+        app.exec_()
+
+    return np.array(d)
+
 
 def fft_filter(data, cutoffFrequency = 1520, inspectPlots = False, tryFitting = False, freqSigma = 50, ftol = 1e-4, isInteractive=False):
     """
