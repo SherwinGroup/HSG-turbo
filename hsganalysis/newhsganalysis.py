@@ -971,6 +971,9 @@ class HighSidebandPMT(PMT):
                 print "Laser_strength", laser_strength
                 sb[4] = (sb[3] / laser_strength[0]) * np.sqrt((sb[4] / sb[3])**2 + (laser_strength[1] / laser_strength[0])**2)
                 sb[3] = sb[3] / laser_strength[0]
+            for sb in self.full_dict.values():
+                sb[3] = (sb[2] / laser_strength[0]) * np.sqrt((sb[3] / sb[2])**2 + (laser_strength[1] / laser_strength[0])**2)
+                sb[2] = sb[2] / laser_strength[0]
             self.parameters['normalized?'] = True
         '''
         three_sisters = 0.0004 # approximate measured attenuation at 12525 cm-1
@@ -1202,8 +1205,8 @@ class FullHighSideband(FullSpectrum):
         This method will be called by the stitch_hsg_results function to add the PMT
         data to the spectrum.
         """
-        self.full_dict = stitch_hsg_dicts(pmt_object.full_dict, self.full_dict, need_ratio=True)
-        self.parameters['files_here'].append(pmt_object.folder_path.split('/')[-1])
+        self.full_dict = stitch_hsg_dicts(pmt_object.full_dict, self.full_dict, need_ratio=True, verbose=True)
+        self.parameters['files_here'].append(pmt_object.files)
         self.make_results_array()
 
     def make_results_array(self):
@@ -1362,13 +1365,13 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
                     num_images += 1
                     stderr_holder = np.hstack((stderr_holder, spec.proc_data[:, 1].reshape((1600,1))))
                     #print "Individual dark_stdev:", spec.dark_stdev
-                    dark_var += (spec.dark_stdev)**2
+                    dark_var += 0.0 * (spec.dark_stdev)**2
                     #print "Standard error holder shape 2:", stderr_holder.shape
                     #print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
         if do_fvb_crr:
-            stderr_holder = fvb_crr(stderr_holder, debugging=True)
+            stderr_holder = fvb_crr(stderr_holder, debugging=False)
             temp.proc_data[:,1] = np.mean(stderr_holder, axis=1)
 
         spec_number = stderr_holder.shape[1]
@@ -1972,12 +1975,11 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             overlap.append(new_sb)
     if verbose:
         print "overlap:", overlap
-
     if need_ratio:
     # Calculate the appropriate ratio to multiply the new sidebands by.
     # I'm not entirely sure what to do with the error of this guy.
         ratio_list = []
-
+        print '\n1979\nfull[2]', full[0][2]
         new_starter = overlap[-1]
         if len(overlap) > 2:
             overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
@@ -1988,19 +1990,20 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
         print "Ratio list", ratio_list
         print "Ratio", ratio
         print "Error", error
+        print '\n1990\nfull[2]', full[0][2]
     # Adding the new sidebands to the full set and moving errors around.
     # I don't know exactly what to do about the other aspecs of the sidebands
     # besides the strength and its error.
         for sb in overlap:
             full[sb][2] = ratio * new_dict[sb][2]
             full[sb][3] = full[sb][2] * np.sqrt((error / ratio)**2 + (new_dict[sb][3] / new_dict[sb][2])**2)
-            
+            print '\n1997\nfull[2]', full[0][3]
             # Now for linewidths
             lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
             lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
             full[sb][4] = lw_avg
             full[sb][5] = lw_error
-
+        print '\n2003\nfull[2]', full[0][2]
     else:
         new_starter = overlap[-1]
         overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
@@ -2020,12 +2023,14 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             full[sb][5] = lw_error # This may not be the exactly right way to calculate the error
             if verbose:
                 print "New value", lw_avg * 1000
-
+    if need_ratio:
+        print '\n2024\nfull[2]', full[0][2]
     for sb in [x for x in new_dict.keys() if (x >= new_starter)]:
         full[sb] = new_dict[sb]
         if need_ratio:
             full[sb][2] = ratio * full[sb][2]
             full[sb][3] = full[sb][2] * np.sqrt((error / ratio)**2 + (ratio * full[sb][3] / full[sb][2])**2)
+            print '\n2030\nfull[2]', full[0][2]
     #print "I made this dictionary", sorted(full.keys())
     return full
 
@@ -2215,7 +2220,7 @@ def proc_n_plotCCD(folder_path, cutoff=3, offset=None, plot=False, save=None, ve
         raw_list.append(HighSidebandCCD(fname, spectrometer_offset=offset))
 
     index = 0
-    spectra_list = hsg_sum_spectra(raw_list)
+    spectra_list = hsg_sum_spectra(raw_list, do_fvb_crr=True)
     for spectrum in spectra_list:
         spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
