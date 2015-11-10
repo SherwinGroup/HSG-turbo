@@ -84,8 +84,6 @@ class CCD(object):
     def __str__(self):
         return self.description
 
-
-
 class Photoluminescence(CCD):
     def __init__(self, fname):
         """
@@ -224,7 +222,6 @@ class HighSidebandCCD(CCD):
         super(HighSidebandCCD, self).__init__(fname, spectrometer_offset=spectrometer_offset)
 
         self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
-        self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['fel_pulses']
 
         self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
@@ -234,12 +231,12 @@ class HighSidebandCCD(CCD):
         # Need to do this next line AFTER adding all the spectra together
 
         
-        self.dark_stdev = np.sqrt(2) * self.parameters["background_darkcount_std"] / self.parameters['fel_pulses'] 
+        #self.dark_stdev = np.sqrt(2) * self.parameters["background_darkcount_std"] / self.parameters['fel_pulses'] 
         # The square root of two is there to deal with the fact that the darkcount_std
         # comes from only the background image, whereas the data is signal - bg, 
         # so the std devs must add in quadrature (and they should be equal).
         # I think this error stuff is working now
-        self.parameters["noise_floor"] = 3*self.dark_stdev # 3.4 is a good cutoff for SB candidates
+        #self.parameters["noise_floor"] = 3*self.dark_stdev # 3.4 is a good cutoff for SB candidates
         
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
@@ -263,13 +260,14 @@ class HighSidebandCCD(CCD):
 
         # Add a constant offset to the data
         if type(other) in (int, float):
-            ret.proc_data[:, 1] = self.proc_data[:, 1] + other 
+            ret.proc_data[:, 1] = self.proc_data[:, 1] + other
             ret.addenda[0] = ret.addenda[0] + other
         
         # or add the data of two hsg_spectra together
         else:
             if np.isclose(ret.parameters['center_lambda'], other.parameters['center_lambda']):
-                ret.proc_data[:, 1] = self.proc_data[:, 1] + other.proc_data[:, 1] 
+                ret.proc_data[:, 1] = self.proc_data[:, 1] + other.proc_data[:, 1]
+                ret.proc_data[:, 2] = np.sqrt(self.proc_data[:, 1]**2 + other.proc_data[:, 1]**2)
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
@@ -290,37 +288,38 @@ class HighSidebandCCD(CCD):
         
         # Subtract a constant offset to the data
         if type(other) in (int, float):
-            ret.proc_data[:,1] = self.proc_data[:,1] - other # Need to choose a name
+            ret.proc_data[:, 1] = self.proc_data[:, 1] - other # Need to choose a name
             ret.addenda[0] = ret.addenda[0] - other
             
         # Subtract the data of two hsg_spectra from each other
         else:
-            if np.isclose(ret.proc_data[0,0], other.proc_data[0,0]):
-                ret.proc_data[:,1] = self.proc_data[:,1] - other.proc_data[:,1]
+            if np.isclose(ret.proc_data[0, 0], other.proc_data[0, 0]):
+                ret.proc_data[:, 1] = self.proc_data[:, 1] - other.proc_data[:, 1]
+                ret.proc_data[:, 2] = np.sqrt(self.proc_data[:, 1]**2 + other.proc_data[:, 1]**2)
                 ret.subtrahenda.extend(other.addenda[1:])
                 ret.addenda.extend(other.subtrahenda)
             else:
                 raise Exception('Source: Spectrum.__sub__:\nThese are not from the same grating settings')
         return ret
 
-    def add_std_error(self, std_errors):
-        """
-        This adds a numpy array of standard errors to the self.proc_data array.
-        It's actually just an append_column method, but there's no reason for 
-        that (I think)
+    # def add_std_error(self, std_errors):
+    #     """
+    #     This adds a numpy array of standard errors to the self.proc_data array.
+    #     It's actually just an append_column method, but there's no reason for 
+    #     that (I think)
 
-        Input:
-        std_errors = 1600x1 array that includes the standard error for every 
-                     individual point
+    #     Input:
+    #     std_errors = 1600x1 array that includes the standard error for every 
+    #                  individual point
 
-        Internal:
-        self.proc_data = 1600x3 array that has [photon energy, signal, error]
-        """
-        try:
-            self.proc_data = np.hstack((self.proc_data, std_errors.reshape((1600, 1))))
-        except:
-            print "Spectrum.add_std_error fucked up.  What's wrong?"
-            print std_errors.shape
+    #     Internal:
+    #     self.proc_data = 1600x3 array that has [photon energy, signal, error]
+    #     """
+    #     try:
+    #         self.proc_data = np.hstack((self.proc_data, std_errors.reshape((1600, 1))))
+    #     except:
+    #         print "Spectrum.add_std_error fucked up.  What's wrong?"
+    #         print std_errors.shape
     
     def calc_approx_sb_order(self, test_nir_freq):
         """
@@ -523,7 +522,7 @@ class HighSidebandCCD(CCD):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
                 continue
-            window_size = 0.25 + 0.0004 * order # used to be last_sb?
+            window_size = 0.28 + 0.0004 * order # used to be last_sb?
             lo_freq_bound = last_sb + thz_freq * (1 - window_size) # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
             start_index = False
@@ -558,10 +557,11 @@ class HighSidebandCCD(CCD):
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
             check_ave = np.mean(check_y)
-            check_stdev = np.std(check_y)
+            check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
 
             if verbose:
+                print "Start-end index:", start_index, end_index
                 print "check_y is", check_y
                 print "\ncheck_max_area is", check_max_area
                 print "check_ave is", check_ave
@@ -831,45 +831,6 @@ class HighSidebandPMT(PMT):
         self.sb_list = []
         self.add_sideband(file_path)
 
-        '''
-        super(HighSidebandPMT, self).__init__(folder_path)
-        self.sb_dict = {}
-        for sb_file in self.file_list:
-            f = open(sb_file, 'rU')
-            sb_num = int(f.readline().split(' ')[-1])
-            if verbose:
-                print "Sideband number is", sb_num
-            f.close()
-            raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
-            # Hopefully saving will be comma delimited soon!
-            frequencies = sorted(list(set(raw_temp[:, 0])))
-            self.spacing = abs((frequencies[1] - frequencies[0]))
-            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the 
-                                                         # cavity dump signal is
-                                                         # more than half the mean 
-                                                         # of the cavity dump signal
-            if verbose:
-                print "The fire condition is", fire_condition
-            temp = None
-            for freq in frequencies:
-                data_temp = np.array([])
-                for raw_point in raw_temp:
-                    if raw_point[0] == freq and raw_point[2] > fire_condition:
-                        #print "I'm going to add this", raw_point[0], raw_point[3]
-                        data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
-                if verbose:
-                    print "The data temp is", data_temp
-                try:
-                    temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
-                except:
-                    temp = np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])
-            temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
-            temp = temp[temp[:, 0].argsort()]
-            self.sb_dict[sb_num] = np.array(temp)
-        
-        self.sb_list = sorted(self.sb_dict.keys())
-        '''
-
     def add_sideband(self, file_name):
         """
         This bad boy will add a sideband to the sideband spectrum of this object
@@ -913,42 +874,6 @@ class HighSidebandPMT(PMT):
         self.sb_list = sorted(self.sb_dict.keys())
         if verbose:
             print "Sidebands included", self.sb_list
-        '''
-        for sb_file in self.file_list:
-            f = open(sb_file, 'rU')
-            sb_num = int(f.readline().split(' ')[-1])
-            if verbose:
-                print "Sideband number is", sb_num
-            f.close()
-            raw_temp = np.genfromtxt(sb_file, comments='#')#, delimiter=',') 
-            # Hopefully saving will be comma delimited soon!
-            frequencies = sorted(list(set(raw_temp[:, 0])))
-            self.spacing = abs((frequencies[1] - frequencies[0]))
-            fire_condition = np.mean(raw_temp[:, 2]) / 2 # Say FEL fired if the 
-                                                         # cavity dump signal is
-                                                         # more than half the mean 
-                                                         # of the cavity dump signal
-            if verbose:
-                print "The fire condition is", fire_condition
-            temp = None
-            for freq in frequencies:
-                data_temp = np.array([])
-                for raw_point in raw_temp:
-                    if raw_point[0] == freq and raw_point[2] > fire_condition:
-                        #print "I'm going to add this", raw_point[0], raw_point[3]
-                        data_temp = np.hstack((data_temp, raw_point[3])) # I don't know why hstack works here and not concatenate
-                if verbose:
-                    print "The data temp is", data_temp
-                try:
-                    temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
-                except:
-                    temp = np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])
-            temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
-            temp = temp[temp[:, 0].argsort()]
-            self.sb_dict[sb_num] = np.array(temp)
-        
-        self.sb_list = sorted(self.sb_dict.keys())
-        '''
     
     def laser_line(self):
         """
@@ -975,32 +900,6 @@ class HighSidebandPMT(PMT):
                 sb[3] = (sb[2] / laser_strength[0]) * np.sqrt((sb[3] / sb[2])**2 + (laser_strength[1] / laser_strength[0])**2)
                 sb[2] = sb[2] / laser_strength[0]
             self.parameters['normalized?'] = True
-        '''
-        three_sisters = 0.0004 # approximate measured attenuation at 12525 cm-1
-        if 0 not in self.sb_list:
-            self.parameters['normalized?'] = False
-            return
-        else:
-            self.parameters['normalized?'] = True
-            # The following is a temporary fix
-            self.full_dict[0][2:4] = self.full_dict[0][2:4] / three_sisters
-            laser_index = int(np.where(self.sb_results[:, 0] == 0)[0])
-            self.sb_results[laser_index, 3:5] = self.sb_results[laser_index, 3:5] / three_sisters
-            # End temporary fix
-            print "\n!!!\nTHIS DOES NOT HANDLE ERROR CORRECTLY\n!!!\n"
-            #print "laser line", self.full_dict[0]
-            #print "laser line results", self.sb_results[10]
-            laser_factor = self.full_dict[0][2]
-            print "Laser factor", laser_factor
-            for sideband in self.full_dict.values():
-                sideband[2] = sideband[2] / laser_factor
-                sideband[3] = sideband[3] / laser_factor
-            for sideband in self.sb_results:
-                sideband[3] = sideband[3] / laser_factor
-                sideband[4] = sideband[4] / laser_factor
-            print "laser line", self.full_dict[0]
-            print "laser line results", self.sb_results[10]
-        '''
 
     def integrate_sidebands(self, verbose=False):
         """
@@ -1014,9 +913,10 @@ class HighSidebandPMT(PMT):
             nir_frequency = sideband[1][index, 0]
             area = np.trapz(np.nan_to_num(sideband[1][:, 1]), sideband[1][:, 0])
             error = np.sqrt(np.sum(np.nan_to_num(sideband[1][:, 2])**2)) / 8065.6 # Divide by the step size?
-            print "order", sideband[0]
-            print "area", area
-            print "error", error
+            if verbose:
+                print "order", sideband[0]
+                print "area", area
+                print "error", error
             details = np.array([sideband[0], nir_frequency, 1/8065.6, area, error, 2/8065.6, 1/8065.6])
             if area < 0:
                 continue
@@ -1266,7 +1166,8 @@ class FullHighSideband(FullSpectrum):
         #self.parameters['subtrahenda'] = self.subtrahenda
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True)
-        except:
+        except Exception as e:
+            print e
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
@@ -1287,18 +1188,6 @@ class FullHighSideband(FullSpectrum):
 ####################
 # Fitting functions 
 ####################
-
-def single_triangle(x, *p):
-    mu, A, fwhm, y0 = p
-    
-    if (mu - fwhm) <= x and x < mu:
-        return (A / fwhm) * (x - (mu - fwhm)) / fwhm + y0
-    elif mu <= x and x < (mu + fwhm):
-        return (A / fwhm) * ((mu + fwhm) - x) / fwhm + y0
-    else:# (mu + fwhm) <= x:
-        return y0
-
-triangle = np.vectorize(single_triangle)
 
 def gauss(x, *p):
     mu, A, sigma, y0 = p
@@ -1340,18 +1229,22 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
     Hence why we use self.proc_data after it has been divided by the number of 
     fel pulses.  
 
+    This function should not need to be called anymore.  This should be handled
+    in the GUI.
+
     object_list: A list of spectrum objects
     """
     print "I'm trying!"
-    
+
     good_list = []
     for index in xrange(len(object_list)):
-        dark_var = 0
+        # dark_var = 0
         num_images = 1
         try:
             temp = object_list.pop(0)
-            stderr_holder = np.array(temp.proc_data[:, 1]).reshape((1600, 1))
-            # print "Standard error holder shape 1:", stderr_holder.shape
+            # var_holder = np.array(temp.proc_data[:, 2])**2
+            crr_holder = np.array(temp.proc_data[:, 1]).reshape((1600, 1))
+
         except Exception as E:
             # print "God damn it, Leroy"
             break
@@ -1363,26 +1256,28 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     num_images += 1
-                    stderr_holder = np.hstack((stderr_holder, spec.proc_data[:, 1].reshape((1600,1))))
+                    # var holder += spec.proc_data[:, 2]**2
+                    crr_holder = np.hstack((crr_holder, spec.proc_data[:, 1].reshape((1600,1))))
                     #print "Individual dark_stdev:", spec.dark_stdev
-                    dark_var += 0.0 * (spec.dark_stdev)**2
+                    # dark_var += 0.0 * (spec.dark_stdev)**2
                     #print "Standard error holder shape 2:", stderr_holder.shape
                     #print "\t\tadded"
                     #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
                     object_list.remove(spec)
-        if do_fvb_crr:
-            stderr_holder = fvb_crr(stderr_holder, debugging=False)
-            temp.proc_data[:,1] = np.mean(stderr_holder, axis=1)
-
-        spec_number = stderr_holder.shape[1]
-        std_error = np.sqrt(np.var(stderr_holder, axis=1, dtype=np.float64) + dark_var) / np.sqrt(spec_number) # Checking some sigma stuff from curve_fit
+        if do_fvb_crr and num_images > 1:
+            print "\nI am doing cosmic ray removal!!\n"
+            crr_holder = fvb_crr(crr_holder, debugging=False)
+            temp.proc_data[:, 1] = np.mean(crr_holder, axis=1)
+        else:
+            print "\nI did not do anything bad, I think\n"
+        # std_error = np.sqrt(np.var(stderr_holder, axis=1, dtype=np.float64) + dark_var) / np.sqrt(spec_number) # Checking some sigma stuff from curve_fit
         # This standard error is for every point.  I think it actually overestimates
         # the error at places with no signal because we add the dark variance
         # effectively twice.
         #print "final dark_stdev:", np.sqrt(dark_var)
-        temp.add_std_error(std_error)
+        # temp.add_std_error(std_error)
         temp.image_normalize(num_images)
-        temp.parameters["noise_floor"] = 3 * np.sqrt(dark_var) # Because SB candidates are cut off witwh 3.4
+        # temp.parameters["noise_floor"] = 3 * np.sqrt(dark_var) # Because SB candidates are cut off witwh 3.4
         good_list.append(temp)
     return good_list
 
@@ -1468,7 +1363,7 @@ def stitch_abs_results(main, new):
 ####################
 
 
-def fvb_crr(raw_array, offset = 0, medianRatio = 1, noiseCoeff = 5, debugging = False):
+def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
     """
 
         Remove cosmic rays from a sequency of identical exposures
@@ -1609,8 +1504,7 @@ def fvb_crr(raw_array, offset = 0, medianRatio = 1, noiseCoeff = 5, debugging = 
 
     return np.array(d)
 
-
-def fft_filter(data, cutoffFrequency = 1520, inspectPlots = False, tryFitting = False, freqSigma = 50, ftol = 1e-4, isInteractive=False):
+def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False, freqSigma=50, ftol=1e-4, isInteractive=False):
     """
     Performs an FFT, then fits a peak in frequency around the
     input with the input width.
@@ -2209,12 +2103,12 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     plt.legend()
     return pmt_data
 
-def proc_n_plotCCD(folder_path, cutoff=3, offset=None, plot=False, save=None, verbose=False):
+def proc_n_plotCCD(folder_path, cutoff=5, offset=None, plot=False, save=None, verbose=False):
     """
     This function will take a list of ccd files and process it completely.
     save_name is a tuple (file_base, folder_path)
     """
-    file_list = glob.glob(os.path.join(folder_path, '*[0-9]_spectrum.txt'))
+    file_list = glob.glob(os.path.join(folder_path, '*seq_spectrum.txt'))
     raw_list = []
     for fname in file_list:
         raw_list.append(HighSidebandCCD(fname, spectrometer_offset=offset))
