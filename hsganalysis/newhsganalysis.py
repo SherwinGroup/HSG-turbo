@@ -192,6 +192,110 @@ class Absorbance(CCD):
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
+class NeonNoiseAnalysis(CCD):
+    def __init__(self, fname, spectrometer_offset=None):
+        super(HighSidebandCCD, self).__init__(fname, spectrometer_offset=spectrometer_offset)
+
+        self.addenda = self.parameters['addenda']
+        self.subtrahenda = self.parameters['subtrahenda']
+
+        self.noise_and_signal()
+        self.process_stuff()
+
+    def noise_and_signal(self):
+        """
+        This bad boy calculates the standard deviation of the space between the 
+        neon lines.
+
+        The noise regions are, in nm:
+        high: 784-792
+        low1: 795-806
+        low2: 815-823
+        low3: 831-834
+
+        the peaks are located at, in nm:
+        #1, weak: 793.6
+        #2, medium: 794.3 
+        #3, medium: 808.2
+        #4, weak: 825.9
+        #5, strong: 830.0
+        """
+        self.high_noise_region = np.array(self.ccd_data[30:230, :])
+        self.low_noise_region1 = np.array(self.ccd_data[380:700, :])
+        self.low_noise_region2 = np.array(self.ccd_data[950:1200, :])
+        self.low_noise_region3 = np.array(self.ccd_data[1446:1546, :])
+
+        self.high_noise = np.std(self.high_noise_region[:, 1])
+        self.low_noise1 = np.std(self.low_noise_region1[:, 1])
+        self.low_noise2 = np.std(self.low_noise_region2[:, 1])
+        self.low_noise3 = np.std(self.low_noise_region3[:, 1])
+
+        self.noise_list = [self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3]
+        print "Noise list:", self.noise_list
+
+        self.peak1 = np.array(self.ccd_data[303:323, :])
+        self.peak2 = np.array(self.ccd_data[319:339, :])
+        self.peak3 = np.array(self.ccd_data[736:746, :])
+        self.peak4 = np.array(self.ccd_data[1268:1288, :])
+        self.peak5 = np.array(self.ccd_data[1381:1421, :])
+
+        self.signal1 = np.sum(self.peak1[:, 1])
+        self.error1 = np.sqrt(np.sum(self.peak1[:, 2]**2))
+        self.signal2 = np.sum(self.peak2[:, 1])
+        self.error2 = np.sqrt(np.sum(self.peak2[:, 2]**2))
+        self.signal3 = np.sum(self.peak3[:, 1])
+        self.error3 = np.sqrt(np.sum(self.peak3[:, 2]**2))
+        self.signal4 = np.sum(self.peak4[:, 1])
+        self.error4 = np.sqrt(np.sum(self.peak4[:, 2]**2))
+        self.signal5 = np.sum(self.peak5[:, 1])
+        self.error5 = np.sqrt(np.sum(self.peak5[:, 2]**2))
+
+        self.signal_list = [self.signal1, self.signal2, self.signal3, self.signal4, self.signal5]
+        self.error_list = [self.error1, self.error2, self.error3, self.error4, self.error5]
+        print "Signal list:", self.signal_list
+
+    def process_stuff(self):
+        """
+        This one puts high_noise, low_noise1, signal2, and error2 in a nice horizontal array
+        """
+        self.results = np.array([self.high_noise, self.low_noise1, self.signal2, self.error2])
+
+def collect_noise(neon_list, param_name, folder_name, file_name):
+    """
+    This function acts like save parameter sweep.
+
+    param_name = string that we're gonna save!
+    """
+    
+    for elem in neon_list:
+        temp = np.column_stack((elem.parameters[param_name], elem.results))
+        try:
+            param_array = np.row_stack(param_array, elem.results)
+        except:
+            param_array = np.array(elem.results)
+    
+    try:
+        os.mkdir(folder_name)
+    except OSError, e:
+        if e.errno == errno.EEXIST:
+            pass
+        else:
+            raise
+
+    file_name = file_name + '.txt'
+
+    origin_import1 = param_name + ",Noise,Noise,Signal,error"
+    origin_import2 = ",counts,counts,counts,counts"
+    origin_import3 = ",High noise region,Low noise region,808nm peak,808nm peak error"
+
+    header_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
+
+    #print "Spec header: ", spec_header
+    print "the param_array is:", param_array
+    np.savetxt(os.path.join(folder_name, file_name), param_array, delimiter=',', 
+               header=header_total, comments='', fmt='%0.6e')
+    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_name, file_name))
+
 class HighSidebandCCD(CCD):
     def __init__(self, fname, spectrometer_offset=None):
         """
@@ -745,6 +849,8 @@ class HighSidebandCCD(CCD):
                    header=fits_header, comments='', fmt='%0.6e')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
+
+
 
 class PMT(object):
     def __init__(self, file_path):
