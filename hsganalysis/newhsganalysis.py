@@ -41,8 +41,8 @@ class CCD(object):
                           data file.
         self.description = string that is the text box from data taking GUI
         self.raw_data = raw data output by measurement software, wavelength vs.
-                        data.  It may not entirely be numbers?
-        self.ccd_data = semi-processed 1600 x 2 array of photon energy vs. data
+                        data.  There may be text for some of the entries
+        self.ccd_data = semi-processed 1600 x 3 array of photon energy vs. data with error
         """
         self.fname = fname
         
@@ -203,6 +203,8 @@ class HighSidebandCCD(CCD):
         
         Input:
         fname = file name of the hsg spectrum from CCD superclass
+        spectrometer_offset = number of nanometers the spectrometer is off by, 
+                              should be 0.0...but can be 0.2 or 1.0
         
         Internal:
         self.fname = the filename
@@ -210,9 +212,7 @@ class HighSidebandCCD(CCD):
         self.description = the description we added to the file as the data
                            was being taken
         self.proc_data = processed data that has gone is frequency vs counts/pulse
-        self.dark_stdev = the standard deviation of the dark noise taken from
-                          the background file when data was taken (I hope).  It
-                          is divided by the number of FEL pulses
+        self.dark_stdev = this is not currently handled appropriately
         self.addenda = the list of things that have been added to the file, in
                        form of [constant, *spectra_added]
         self.subtrahenda = the list of spectra that have been subtracted from
@@ -228,25 +228,15 @@ class HighSidebandCCD(CCD):
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
         self.parameters["thz_power"] = float(self.parameters["fel_power"])
 
-        # Need to do this next line AFTER adding all the spectra together
-
-        
-        #self.dark_stdev = np.sqrt(2) * self.parameters["background_darkcount_std"] / self.parameters['fel_pulses'] 
-        # The square root of two is there to deal with the fact that the darkcount_std
-        # comes from only the background image, whereas the data is signal - bg, 
-        # so the std devs must add in quadrature (and they should be equal).
-        # I think this error stuff is working now
-        #self.parameters["noise_floor"] = 3*self.dark_stdev # 3.4 is a good cutoff for SB candidates
-        
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
-        #self.sb_results = None
 
     def __add__(self, other):
         """
         Add together the image data from self.proc_data, or add a constant to 
         that np.array.  It will then combine the addenda and subtrahenda lists,
-        as well as add the fel_pulses together.
+        as well as add the fel_pulses together.  If type(other) is a CCD object,
+        then it will add the errors as well.
 
         Input:
         self = CCD-like object
@@ -301,25 +291,6 @@ class HighSidebandCCD(CCD):
             else:
                 raise Exception('Source: Spectrum.__sub__:\nThese are not from the same grating settings')
         return ret
-
-    # def add_std_error(self, std_errors):
-    #     """
-    #     This adds a numpy array of standard errors to the self.proc_data array.
-    #     It's actually just an append_column method, but there's no reason for 
-    #     that (I think)
-
-    #     Input:
-    #     std_errors = 1600x1 array that includes the standard error for every 
-    #                  individual point
-
-    #     Internal:
-    #     self.proc_data = 1600x3 array that has [photon energy, signal, error]
-    #     """
-    #     try:
-    #         self.proc_data = np.hstack((self.proc_data, std_errors.reshape((1600, 1))))
-    #     except:
-    #         print "Spectrum.add_std_error fucked up.  What's wrong?"
-    #         print std_errors.shape
     
     def calc_approx_sb_order(self, test_nir_freq):
         """
@@ -355,7 +326,7 @@ class HighSidebandCCD(CCD):
         self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
         self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
     
-    def guess_sidebands(self, cutoff=4, verbose=False):
+    def guess_sidebands(self, cutoff=5, verbose=False):
         """
         Finds the locations of all the sidebands in the proc_data array to be 
         able to seed the fitting method.  This works by finding the maximum data
@@ -435,8 +406,9 @@ class HighSidebandCCD(CCD):
                 if verbose:
                     print "I skipped", order
                 continue
-            lo_freq_bound = last_sb - thz_freq * (1 + 0.22) # Not sure what to do about these
-            hi_freq_bound = last_sb - thz_freq * (1 - 0.22)
+            window_size = 0.28 + 0.0004 * order # used to be last_sb?
+            lo_freq_bound = last_sb - thz_freq * (1 + window_size) # Not sure what to do about these
+            hi_freq_bound = last_sb - thz_freq * (1 - window_size)
 
             start_index = False
             end_index = False
@@ -464,12 +436,11 @@ class HighSidebandCCD(CCD):
                 break
             check_y = y_axis[start_index:end_index]
 
-            #check_max = check_y.max()
-            #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
             check_ave = np.mean(check_y)
-            check_stdev = np.std(check_y)
+            check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]]) 
+                # So the sideband isn't included in the noise calculation
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
 
             if verbose:
@@ -552,8 +523,6 @@ class HighSidebandCCD(CCD):
                 break
             check_y = y_axis[start_index:end_index]
 
-            #check_max = check_y.max()
-            #print "check_max is", check_max
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
             check_ave = np.mean(check_y)
@@ -561,7 +530,7 @@ class HighSidebandCCD(CCD):
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
 
             if verbose:
-                print "Start-end index:", start_index, end_index
+                print "Start and end index:", start_index, end_index
                 print "check_y is", check_y
                 print "\ncheck_max_area is", check_max_area
                 print "check_ave is", check_ave
@@ -648,7 +617,7 @@ class HighSidebandCCD(CCD):
                                  plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
                                                              # just looked around at what functions
                                                              # matplotlib has...
-                                 , linewidth = linewidth)
+                                 , linewidth=linewidth)
                     except: # to prevent weird mac issues with the matplotlib things?
                         plt.plot(x_vals, gauss(x_vals, *p0), '--', linewidth=linewidth)
                                      
@@ -718,6 +687,10 @@ class HighSidebandCCD(CCD):
         This will save all of the self.proc_data and the results from the 
         fitting of this individual file.
         
+        Format:
+        spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
+
         Inputs:
         file_name = the beginning of the file name to be saved
         folder_str = the location of the folder where the file will be saved, 
@@ -791,16 +764,10 @@ class PMT(object):
             self.files - included file paths
         """
         print "This started"
-        '''
-        self.folder_path = folder_path
-        self.file_list = glob.glob(os.path.join(folder_path, '*[0-9].txt'))
-        '''
+
         self.files = [file_path]
-        
-        # in __main__.py, look for the method "genSaveHeader"
-        #                 look for method "initSettings" to see what parameters are saved
+
         with open(file_path, 'rU') as f:
-        #f = open(file_path,'rU')
             throw_away = f.readline() # Just need to get things down to the next line
             parameters_str = f.readline()
             self.parameters = json.loads(parameters_str[1:])
@@ -927,7 +894,6 @@ class HighSidebandPMT(PMT):
             self.full_dict[sideband[0]] = details[1:]
         self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
         
-
     def fit_sidebands(self, plot=False, verbose=False):
         """
         This method will fit a gaussian to each of the sidebands provided in 
@@ -1002,6 +968,10 @@ class HighSidebandPMT(PMT):
         This will save all of the self.proc_data and the results from the 
         fitting of this individual file.
         
+        Format:
+        spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
+
         Inputs:
         file_name = the beginning of the file name to be saved
         folder_str = the location of the folder where the file will be saved, 
@@ -1130,6 +1100,9 @@ class FullHighSideband(FullSpectrum):
         This will save all of the self.proc_data and the results from the 
         fitting of this individual file.
         
+        Format:
+        fit_fname = file_name + '_' + marker + '_' + str(index) + '_full.txt'
+
         Inputs:
         file_name = the beginning of the file name to be saved
         folder_str = the location of the folder where the file will be saved, 
@@ -1256,13 +1229,9 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
                 if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
                     temp += spec
                     num_images += 1
-                    # var holder += spec.proc_data[:, 2]**2
+
                     crr_holder = np.hstack((crr_holder, spec.proc_data[:, 1].reshape((1600,1))))
-                    #print "Individual dark_stdev:", spec.dark_stdev
-                    # dark_var += 0.0 * (spec.dark_stdev)**2
-                    #print "Standard error holder shape 2:", stderr_holder.shape
-                    #print "\t\tadded"
-                    #print "I ADDED", temp.parameters['FELP'], spec.parameters['FELP']
+
                     object_list.remove(spec)
         if do_fvb_crr and num_images > 1:
             print "\nI am doing cosmic ray removal!!\n"
@@ -1277,7 +1246,6 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
         #print "final dark_stdev:", np.sqrt(dark_var)
         # temp.add_std_error(std_error)
         temp.image_normalize(num_images)
-        # temp.parameters["noise_floor"] = 3 * np.sqrt(dark_var) # Because SB candidates are cut off witwh 3.4
         good_list.append(temp)
     return good_list
 
@@ -1361,7 +1329,6 @@ def stitch_abs_results(main, new):
 ####################
 # Helper functions 
 ####################
-
 
 def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
     """
@@ -1504,248 +1471,6 @@ def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
 
     return np.array(d)
 
-def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False, freqSigma=50, ftol=1e-4, isInteractive=False):
-    """
-    Performs an FFT, then fits a peak in frequency around the
-    input with the input width.
-
-    If only data is given, it will cut off all frequencies above the default value.
-
-    inspectPlots = True will plot the FFT and the filtering at each step, as well as the results
-
-    tryFitting = True will try to fit the peak in frequency space centered at the cutoffFrequency
-    and with a width of freqSigma, using the background function above. Will replace
-    the peak with the background function. Feature not very well tested
-
-    isInteractive: Will pop up interactive windows to move the cutoff frequency and view the
-    FFT in real time. Requires pyqtgraph and PyQt4 installed (pyqt4 is standard with
-    anaconda/winpython, but pyqtgraph is not)
-    """
-    # Make a copy so we can return the same thing
-    retData = np.array(data)
-    x = np.array(data[:,0])
-    y = np.array(data[:,-1])
-    # Let's you place with zero padding.
-    zeroPadding = len(x)
-    N = len(x)
-
-    if isInteractive:
-        try:
-            import pyqtgraph as pg
-            from PyQt4 import QtCore, QtGui
-        except:
-            raise ImportError("Cannot do interactive plotting without pyqtgraph installed")
-        # Need to make some basic classes fir signals and slots to make things simple
-        class FFTWin(pg.PlotWindow):
-            sigCutoffChanged = QtCore.pyqtSignal(object)
-            sigClosed = QtCore.pyqtSignal()
-            def __init__(self, x, y):
-                super(FFTWin, self).__init__()
-                # Plot the log of the data,
-                # it breaks text boxes to do semilogy
-                self.plotItem.plot(x, np.log10(y))
-                # The line for picking the cutoff
-                # Connect signals so the textbox updates and the
-                # realspace window can recalcualte the FFT
-                self.line = pg.InfiniteLine(cutoffFrequency, movable=True)
-                self.line.sigPositionChanged.connect(lambda x:self.sigCutoffChanged.emit(x.value()))
-                self.line.sigPositionChanged.connect(self.updateText)
-                self.addItem(self.line)
-                # Set up the textbox so user knows the frequency
-                # If this ends up being useful, may need
-                # a way to set the cutoff manually
-                self.text = pg.TextItem("{:.4f}".format(cutoffFrequency))
-                self.addItem(self.text)
-                self.text.setPos(min(x), max(np.log10(y)))
-
-                # Cheap magic to get the close event
-                # of the main window. Need to keep a reference
-                # to the old function so that we can call it
-                # to properly clean up afterwards
-                self.oldCloseEvent = self.win.closeEvent
-                self.win.closeEvent = self.closeEvent
-            def updateText(self, val):
-                self.text.setText("{:.4f}".format(val.value()))
-
-            def closeEvent(self, ev):
-                # Just emit that we've been closed and
-                # pass it along to the window closer
-                self.sigClosed.emit()
-                self.oldCloseEvent(ev)
-
-        class RealWin(pg.PlotWindow):
-            sigClosed = QtCore.pyqtSignal()
-            def __init__(self, data, fftWin):
-                super(RealWin, self).__init__()
-                # To connect signals from it
-                self.fftWin = fftWin
-                self.data = data
-
-                # Start off with the FFT given by the original
-                # inputted cutoff
-                self.updatePlot(cutoffFrequency)
-
-                # See above comments
-                self.oldClose = self.win.closeEvent
-                self.win.closeEvent = self.closeEvent
-                fftWin.sigCutoffChanged.connect(self.updatePlot)
-                # Close self if other window is closed
-                fftWin.sigClosed.connect(self.win.close)
-
-            def updatePlot(self, val):
-                self.plotItem.clear()
-                self.plotItem.plot(*self.data.T, pen=pg.mkPen(width=3))
-                # Recursion! Call this same function to do the FFT
-                newData = fft_filter(self.data, cutoffFrequency=val)
-                self.plotItem.plot(*newData.T, pen=pg.mkPen('r', width=3))
-
-            def closeEvent(self, ev):
-                self.sigClosed.emit()
-                try:
-                    self.fftWin.win.close()
-                except:
-                    pass
-                self.oldClose(ev)
-
-
-        k = fft.fftfreq(zeroPadding, x[1]-x[0])
-        Y = fft.fft(y, n=zeroPadding)
-        # Make the windows
-        fftWin = FFTWin(k, np.abs(Y))
-        realWin = RealWin(np.array(retData), fftWin)
-        realWin.show()
-        # Need to pause the program until the frequency is selected
-        # Done with this qeventloop.
-        loop = QtCore.QEventLoop()
-        realWin.sigClosed.connect(loop.exit)
-        loop.exec_()
-        # Return with the desired output value
-        return fft_filter(retData, fftWin.line.value())
-
-
-    if inspectPlots:
-        plt.figure("Real Space")
-        plt.plot(x, y, label="Input Data")
-
-
-    # Replicate origin directy
-    # http://www.originlab.com/doc/Origin-Help/Smooth-Algorithm
-    # "rotate" the data set so it ends at 0,
-    # enforcing a periodicity in the data. Otherwise
-    # oscillatory artifacts result at the ends
-    onePerc = int(0.01*N)
-    x1 = np.mean(x[:onePerc])
-    x2 = np.mean(x[-onePerc:])
-    y1 = np.mean(y[:onePerc])
-    y2 = np.mean(y[-onePerc:])
-
-    m = (y1-y2)/(x1-x2)
-    b = y1 - m * x1
-
-    flattenLine = m * x + b
-    y -= flattenLine
-
-    if inspectPlots:
-        plt.plot(x, y, label="Rotated Data")
-
-    # Perform the FFT and find the appropriate frequency spacing
-    k = fft.fftfreq(zeroPadding, x[1]-x[0])
-    Y = fft.fft(y, n=zeroPadding)
-    if inspectPlots:
-        plt.figure("Frequency Space")
-        plt.semilogy(k, np.abs(Y), label="Raw FFT")
-
-    if tryFitting:
-        try:
-            # take +/- 4 sigma points around peak to fit to
-            sl = np.abs(k-cutoffFrequency).argmin() + np.array([-1, 1]) * 10 * freqSigma / np.abs(k[0]-k[1])
-            sl = slice(*[int(j) for j in sl])
-            p0 = [cutoffFrequency,
-                  np.abs(Y)[sl].max() * freqSigma, # estimate the height baased on the max in the set
-                  freqSigma,
-                  0.14, 2e3, 1.1] # magic test numbers, they fit the background well
-
-
-            if inspectPlots:
-                plt.semilogy(k[sl], gaussWithBackground(k[sl], *p0), label="Peak with initial values")
-            p, _ = curve_fit(gaussWithBackground, k[sl], np.abs(Y)[sl], p0=p0, ftol=ftol)
-            if inspectPlots:
-                plt.semilogy(k[sl], gaussWithBackground(k[sl], *p), label="Fitted Peak")
-
-
-            # Want to remove data within 5 sigma ( arb value... )
-            st = int(p[0] - 5*p[2])
-            en = int(p[0] + 5*p[2])
-
-            # Find get the indices to remove.
-            refitRangeIdx = np.argwhere((k>st) & (k<en))
-            refitRangeIdxNeg = np.argwhere((k<-st) & (k>-en))
-
-            # Replace the data with the backgroudn
-            # Note: abuses the symmetry of the FFT of a real function
-            # to get the negative side of the data
-            Y[refitRangeIdx] = background(k[refitRangeIdx], *p[-2:])
-            Y[refitRangeIdxNeg] = background(k[refitRangeIdx], *p[-2:])[::-1]
-        except:
-            print "ERROR: Trouble fitting the peak in frequency space.\n\t Defaulting to cutting off"
-
-            # Assume cutoffFrequency was the peak, not the actual cutoff
-            # Leaving it alone means half the peak would remain and the data
-            # wouldn't really be smoothed
-            cutoffFrequency -= 5 * freqSigma
-
-            # Reset this so the next part gets called
-            tryFitting = False
-
-    # "if not" instead of "else" because if the above
-    # fitting fails, we can default to the sharp cutoff
-    if not tryFitting:
-        # Define where to remove the data
-        st = cutoffFrequency
-        en = int(max(k))+1
-
-        # Find the indices to remove the data
-        refitRangeIdx = np.argwhere((k>st) & (k<en))
-        refitRangeIdxNeg = np.argwhere((k<-st) & (k>-en))
-
-        # Kill it all after the cutoff
-        Y[refitRangeIdx] = 0
-        Y[refitRangeIdxNeg] = 0
-
-        smoothIdx = np.argwhere((-st<k) & (k< st))
-        smoothr = -1./cutoffFrequency**2 * k[smoothIdx]**2 + 1
-
-        Y[smoothIdx] *= smoothr
-
-    if inspectPlots:
-        plt.plot(k, np.abs(Y), label="FFT with removed parts")
-        a = plt.legend()
-        a.draggable(True)
-
-    # invert the FFT
-    y = fft.ifft(Y, n=zeroPadding)
-
-    # unshift the data
-    y += flattenLine
-
-    # using fft, not rfft, so data may have some
-    # complex parts. But we can assume they'll be negligible and
-    # remove them
-    # ( Safer to use np.real, not np.abs? )
-    # Need the [:len] to remove zero-padded stuff
-    y = np.abs(y)[:len(x)]
-
-    if inspectPlots:
-        plt.figure("Real Space")
-        print x.size, y.size
-        plt.plot(x, y, label="Smoothed Data")
-        a = plt.legend()
-        a.draggable(True)
-
-    retData[:,0] = x
-    retData[:,-1] = y
-    return retData
-
 def stitchData(dataList, plot=False):
     """
     Attempt to stitch together absorbance data. Will translate the second data set
@@ -1786,60 +1511,6 @@ def stitchData(dataList, plot=False):
     if max(first[:,0])>max(second[:,0]):
         flipped = True
         first, second = second, first
-
-def fitter(p, shiftable, immutable):
-    # Function for leastsq to minimize
-
-    # Get the shifts
-    dx = p[0]
-    dy = p[1]
-
-    # Don't want pass-by-reference nonsense, recast our own refs
-    shiftable = np.array(shiftable)
-    immutable = np.array(immutable)
-
-    # Shift the data set
-    shiftable[:,1]+=dy
-    shiftable[:,0]+=dx
-
-    # Create an interpolator. We want a
-    # direct comparision for subtracting the two functions
-    # Different spec grating positions have different wavelengths
-    # so they're not directly comparable.
-    shiftF = spi.interp1d(*shiftable.T)
-
-    # Find the bounds of where the two data sets overlap
-    overlap = (min(shiftable[:,0]), max(immutable[:,0]))
-        #print "overlap", overlap
-
-    # Determine the indices of the immutable function
-    # where it overlaps. argwhere returns 2-d thing,
-    # requiring the [0] at the end of each call
-    fOlIdx = (min(np.argwhere(immutable[:,0]>=overlap[0]))[0],
-              max(np.argwhere(immutable[:,0]<=overlap[1]))[0])
-
-    # Get the interpolated values of the shiftable function at the same
-    # x-coordinates as the immutable case
-    newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1],0])
-
-    if plot:
-        plt.plot(*immutable[fOlIdx[0]:fOlIdx[1],:].T, marker='o', label="imm", markersize=10)
-        plt.plot(immutable[fOlIdx[0]:fOlIdx[1], 0], newShift, marker='o', label="shift")
-    imm = immutable[fOlIdx[0]:fOlIdx[1],1]
-    shift = newShift
-    return imm-shift
-
-    a, _, _, msg, err= spo.leastsq(fitter, [0.0001, 0.01*max(first[:,1])], args=(second, first), full_output = 1)
-    # print "a", a
-    if plot:
-        # Revert back to the original figure, as per top comments
-        plt.figure(firstFig.number)
-
-    # Need to invert the shift if we flipped which
-    # model we're supposed to move
-    if flipped: a*=-1
-
-    return a
 
 def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     """
@@ -2082,11 +1753,7 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     This function will take a pmt object, process it completely.
     """
     pmt_data = pmt_sorter(folder_path)
-    '''
-    if pmt_data.spacing < 0.1:
-        pmt_data.fit_sidebands(plot=False)
-    else:
-    '''
+
     for spectrum in pmt_data:
         spectrum.integrate_sidebands()
         spectrum.laser_line()
