@@ -194,7 +194,7 @@ class Absorbance(CCD):
 
 class NeonNoiseAnalysis(CCD):
     def __init__(self, fname, spectrometer_offset=None):
-        super(HighSidebandCCD, self).__init__(fname, spectrometer_offset=spectrometer_offset)
+        super(NeonNoiseAnalysis, self).__init__(fname, spectrometer_offset=spectrometer_offset)
 
         self.addenda = self.parameters['addenda']
         self.subtrahenda = self.parameters['subtrahenda']
@@ -220,6 +220,9 @@ class NeonNoiseAnalysis(CCD):
         #4, weak: 825.9
         #5, strong: 830.0
         """
+
+
+
         self.high_noise_region = np.array(self.ccd_data[30:230, :])
         self.low_noise_region1 = np.array(self.ccd_data[380:700, :])
         self.low_noise_region2 = np.array(self.ccd_data[950:1200, :])
@@ -268,11 +271,13 @@ def collect_noise(neon_list, param_name, folder_name, file_name):
     """
     
     for elem in neon_list:
-        temp = np.column_stack((elem.parameters[param_name], elem.results))
+        print "pname: {}".format(elem.parameters[param_name]),
+        print "results:", elem.results
+        temp = np.insert(elem.results, 0, elem.parameters[param_name])
         try:
-            param_array = np.row_stack(param_array, elem.results)
+            param_array = np.row_stack((param_array, temp))
         except:
-            param_array = np.array(elem.results)
+            param_array = np.array(temp)
     
     try:
         os.mkdir(folder_name)
