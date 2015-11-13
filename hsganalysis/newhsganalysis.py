@@ -194,6 +194,7 @@ class Absorbance(CCD):
 
 class NeonNoiseAnalysis(CCD):
     def __init__(self, fname, spectrometer_offset=None):
+        print 'opening', fname
         super(NeonNoiseAnalysis, self).__init__(fname, spectrometer_offset=spectrometer_offset)
 
         self.addenda = self.parameters['addenda']
@@ -222,7 +223,7 @@ class NeonNoiseAnalysis(CCD):
         """
 
 
-
+        self.ccd_data = np.flipud(self.ccd_data)
         self.high_noise_region = np.array(self.ccd_data[30:230, :])
         self.low_noise_region1 = np.array(self.ccd_data[380:700, :])
         self.low_noise_region2 = np.array(self.ccd_data[950:1200, :])
@@ -234,7 +235,6 @@ class NeonNoiseAnalysis(CCD):
         self.low_noise3 = np.std(self.low_noise_region3[:, 1])
 
         self.noise_list = [self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3]
-        print "Noise list:", self.noise_list
 
         self.peak1 = np.array(self.ccd_data[303:323, :])
         self.peak2 = np.array(self.ccd_data[319:339, :])
@@ -256,14 +256,15 @@ class NeonNoiseAnalysis(CCD):
         self.signal_list = [self.signal1, self.signal2, self.signal3, self.signal4, self.signal5]
         self.error_list = [self.error1, self.error2, self.error3, self.error4, self.error5]
         print "Signal list:", self.signal_list
+        self.ccd_data = np.flipud(self.ccd_data)
 
     def process_stuff(self):
         """
         This one puts high_noise, low_noise1, signal2, and error2 in a nice horizontal array
         """
-        self.results = np.array([self.high_noise, self.low_noise1, self.signal2, self.error2])
+        self.results = np.array([self.high_noise, self.low_noise1, self.signal1, self.error1])
 
-def collect_noise(neon_list, param_name, folder_name, file_name):
+def collect_noise(neon_list, param_name, folder_name, file_name, name='Signal'):
     """
     This function acts like save parameter sweep.
 
@@ -276,8 +277,21 @@ def collect_noise(neon_list, param_name, folder_name, file_name):
         temp = np.insert(elem.results, 0, elem.parameters[param_name])
         try:
             param_array = np.row_stack((param_array, temp))
-        except:
+        except UnboundLocalError:
             param_array = np.array(temp)
+
+    if len(param_array.shape) == 1:
+        print "I don't think you want this file"
+        return
+    # append the relative peak error
+    param_array = np.column_stack((param_array, param_array[:,4]/param_array[:,3] ))
+    # append the snr
+    param_array = np.column_stack((param_array, param_array[:,3]/param_array[:,2] ))
+    try:
+        param_array = param_array[param_array[:,0].argsort()]
+    except:
+        print "param_array shape", param_array.shape
+        raise
     
     try:
         os.mkdir(folder_name)
@@ -289,9 +303,9 @@ def collect_noise(neon_list, param_name, folder_name, file_name):
 
     file_name = file_name + '.txt'
 
-    origin_import1 = param_name + ",Noise,Noise,Signal,error"
-    origin_import2 = ",counts,counts,counts,counts"
-    origin_import3 = ",High noise region,Low noise region,808nm peak,808nm peak error"
+    origin_import1 = param_name + ",Noise,Noise,Signal,error,rel peak error,peak signal-to-noise"
+    origin_import2 = ",counts,counts,counts,counts,,"
+    origin_import3 = ",High noise region,Low noise region,{},{} error,{} rel error, {}".format(name, name, name, name)
 
     header_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
 
