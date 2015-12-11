@@ -56,7 +56,7 @@ class CCD(object):
             while read_description:
                 line = f.readline()
                 if line[0] == '#':
-                    self.description += line[1:]
+                    self.description += line[:]
                 else:
                     read_description = False
         try:
@@ -224,17 +224,22 @@ class NeonNoiseAnalysis(CCD):
         print '\n\n'
 
         self.ccd_data = np.flipud(self.ccd_data)
-        self.high_noise_region = np.array(self.ccd_data[30:230, :])
+        # self.high_noise_region = np.array(self.ccd_data[30:230, :])
+        self.high_noise_region = np.array(self.ccd_data[80:180, :]) # for dark current measurements
         self.low_noise_region1 = np.array(self.ccd_data[380:700, :])
         self.low_noise_region2 = np.array(self.ccd_data[950:1200, :])
         self.low_noise_region3 = np.array(self.ccd_data[1446:1546, :])
 
-        self.high_noise = np.std(self.high_noise_region[:, 1])
+        # self.high_noise = np.std(self.high_noise_region[:, 1])
+        self.high_noise_std = np.std(self.high_noise_region[:, 1])
+        self.high_noise_sig = np.mean(self.high_noise_region[:, 1])
         self.low_noise1 = np.std(self.low_noise_region1[:, 1])
         self.low_noise2 = np.std(self.low_noise_region2[:, 1])
+        self.low_noise_std = np.std(self.low_noise_region2[:, 1])
+        self.low_noise_sig = np.mean(self.low_noise_region2[:, 1])
         self.low_noise3 = np.std(self.low_noise_region3[:, 1])
 
-        self.noise_list = [self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3]
+        #self.noise_list = [self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3]
 
         self.peak1 = np.array(self.ccd_data[303:323, :])
         self.peak2 = np.array(self.ccd_data[319:339, :])
@@ -271,9 +276,10 @@ class NeonNoiseAnalysis(CCD):
         """
         This one puts high_noise, low_noise1, signal2, and error2 in a nice horizontal array
         """
-        self.results = np.array([self.high_noise, self.low_noise1, self.signal5, self.error5])
+        # self.results = np.array([self.high_noise, self.low_noise1, self.signal5, self.error5])
         # average = np.mean([self.low_noise1, self.low_noise2, self.low_noise3])
         # self.results = np.array([self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3, self.high_noise/average])
+        self.results = np.array([self.high_noise_sig, self.high_noise_std, self.low_noise_sig, self.low_noise_std])
 
 def collect_noise(neon_list, param_name, folder_name, file_name, name='Signal'):
     """
@@ -918,7 +924,7 @@ class PMT(object):
             while read_description:
                 line = f.readline()
                 if line[0] == '#':
-                    self.description += line[1:]
+                    self.description += line[:]
                 else:
                     read_description = False
 
@@ -1163,6 +1169,14 @@ class HighSidebandPMT(PMT):
                    header=fits_header, comments='', fmt='%0.6e')
         
         print "Saved PMT spectrum.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
+
+class TimeTrace(PMT):
+    """
+    This class will be able to handle time traces output by the PMT softare.
+    """
+    def __init__(self, file_path):
+        super(HighSidebandPMT, self).__init__(file_path)
+
 
 class FullSpectrum(object):
     def __init__(self):
