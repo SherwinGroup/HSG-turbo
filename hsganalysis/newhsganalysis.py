@@ -2229,6 +2229,55 @@ def stitchData(dataList, plot=False):
     if flipped: a*=-1
 
     return a
+
+def integrateData(data, t1, t2, ave=False):
+    """
+    Integrate a discrete data set for a
+    given time period. Sums the data between
+    the given bounds and divides by dt. Optional
+    argument to divide by T = t2-t1 for calculating
+    averages.
+
+    data = 2D array. data[:,0] = t, data[:,1] = y
+    t1 = start of integration
+    t2 = end of integration
+
+
+    if data is a NxM, with M>=3, it will take the
+    third column to be the errors of the points,
+    and return the error as the quadrature sum
+    """
+    t = data[:,0]
+    y = data[:,1]
+    if data.shape[0] >= 3:
+        errors = data[:,2]
+    else:
+        errors = np.ones_like(y) * np.nan
+
+    gt = set(np.where(t>t1)[0])
+    lt = set(np.where(t<t2)[0])
+
+    # find the intersection of the sets
+    vals = list(gt&lt)
+
+    # Calculate the average
+    tot = np.sum(y[vals])
+    error = np.sqrt(np.sum(errors[vals]**2))
+
+
+
+    # Multiply by sampling
+    tot *= (t[1]-t[0])
+    error *= (t[1]-t[0])
+
+    if ave:
+        # Normalize by total width if you want an average
+        tot /= (t2-t1)
+        errors /= (t2-t1)
+    if not np.isnan(error):
+        return tot, error
+    return tot
+
 ####################
 # Complete functions 
 ####################
