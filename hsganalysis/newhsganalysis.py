@@ -49,16 +49,25 @@ class CCD(object):
         print "I'm going to open", fname
         #f = open(fname,'rU')
         with open(fname,'rU') as f:
-            parameters_str = f.readline()
-            self.parameters = json.loads(parameters_str[1:])
-            self.description = ''
-            read_description = True
-            while read_description:
-                line = f.readline()
-                if line[0] == '#':
-                    self.description += line[:]
-                else:
-                    read_description = False
+            initial = '#'
+            param_str = ''
+            while initial == '#':
+                new = f.readline()
+                initial = new[0]
+                param_str += new[1:]
+            print param_str
+            self.parameters = json.loads(param_str)
+        # with open(fname,'rU') as f:
+        #     parameters_str = f.readline()
+        #     self.parameters = json.loads(parameters_str[1:])
+        #     self.description = ''
+        #     read_description = True
+        #     while read_description:
+        #         line = f.readline()
+        #         if line[0] == '#':
+        #             self.description += line[:]
+        #         else:
+        #             read_description = False
         try:
             self.parameters["spec_step"] = int(self.parameters["spec_step"])
         except ValueError:
@@ -82,7 +91,7 @@ class CCD(object):
         self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
 
     def __str__(self):
-        return self.description
+        return self.parameters['comments']
 
 class Photoluminescence(CCD):
     def __init__(self, fname):
@@ -178,14 +187,15 @@ class Absorbance(CCD):
         self.save_name = spectra_fname
 
         try:
-            parameter_str = json.dumps(self.parameters, sort_keys=True)
+            parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except:
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-
+        parameter_str.replace('\n', '#\n')
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
-        spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+        spec_header = '#' + parameter_str + origin_import_spec
+        # spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
@@ -873,17 +883,17 @@ class HighSidebandCCD(CCD):
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
-            parameter_str = json.dumps(self.parameters, sort_keys=True)
+            parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except:
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-
+        parameter_str.replace('\n', '#\n')
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
-        spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+        spec_header = '#' + parameter_str + origin_import_spec
         
         origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
-        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
+        fits_header = '#' + parameter_str + origin_import_fits
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
@@ -912,19 +922,28 @@ class PMT(object):
         print "This started"
 
         self.files = [file_path]
-
-        with open(file_path, 'rU') as f:
-            throw_away = f.readline() # Just need to get things down to the next line
-            parameters_str = f.readline()
-            self.parameters = json.loads(parameters_str[1:])
-            self.description = ''
-            read_description = True
-            while read_description:
-                line = f.readline()
-                if line[0] == '#':
-                    self.description += line[:]
-                else:
-                    read_description = False
+        with open(fname,'rU') as f:
+            throw_away = f.readline() # Delete me if that first line denoting sideband order is removed
+            initial = '#'
+            param_str = ''
+            while initial == '#':
+                new = f.readline()
+                initial = new[0]
+                param_str += new[1:]
+            print param_str
+            self.parameters = json.loads(param_str)
+        # with open(file_path, 'rU') as f:
+        #     throw_away = f.readline() # Just need to get things down to the next line
+        #     parameters_str = f.readline()
+        #     self.parameters = json.loads(parameters_str[1:])
+        #     self.description = ''
+        #     read_description = True
+        #     while read_description:
+        #         line = f.readline()
+        #         if line[0] == '#':
+        #             self.description += line[:]
+        #         else:
+        #             read_description = False
 
 class HighSidebandPMT(PMT):
     def __init__(self, file_path, verbose=False):
@@ -1142,17 +1161,17 @@ class HighSidebandPMT(PMT):
         self.save_name = spectra_fname
         self.parameters['included_files'] = list(self.files)
         try:
-            parameter_str = json.dumps(self.parameters, sort_keys=True)
+            parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except:
             print "Source: PMT.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-
+        parameter_str.replace('\n', '#\n')
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
-        spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+        spec_header = '#' + parameter_str + origin_import_spec
         
         origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error\neV,,arb. u.,,eV,,\n,,'# + marker
-        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
+        fits_header = '#' + parameter_str + origin_import_fits
         
         for sideband in sorted(self.sb_dict.keys()):
             try:
@@ -1292,18 +1311,18 @@ class FullHighSideband(FullSpectrum):
         #self.parameters['addenda'] = self.addenda
         #self.parameters['subtrahenda'] = self.subtrahenda
         try:
-            parameter_str = json.dumps(self.parameters, sort_keys=True)
+            parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except Exception as e:
             print e
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-
+        parameter_str.replace('\n', '#\n')
         #origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         #spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
         origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
-        fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
+        fits_header = '#' + parameter_str + origin_import_fits
         
         #np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
         #           header=spec_header, comments='', fmt='%f')
@@ -1863,10 +1882,11 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     file_name = file_name + '.txt'
     
     try:
-        included_spectra_str = json.dumps(included_spectra, sort_keys=True)
+        included_spectra_str = json.dumps(included_spectra, sort_keys=True, indent=4, separators=(',', ': '))
     except:
         print "Source: save_parameter_sweep\nJSON FAILED"
         return
+    included_spectra_str.replace('\n', '#\n')
     origin_import1 = param_name
     origin_import2 = unit
     origin_import3 = ""
