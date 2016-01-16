@@ -126,7 +126,7 @@ class Absorbance(CCD):
         """
 
         if "abs_" in fname:
-            CCD.__init__(self, fname)
+            super(Absorbance, self).__init__(fname)
             # Separate into the separate data sets
             #   The raw counts of the reference data
             self.ref_data = np.array(self.ccd_data[:, [0, 1]])
@@ -134,6 +134,7 @@ class Absorbance(CCD):
             self.raw_data = np.array(self.ccd_data[:, [0, 2]])
             #   The calculated absorbance data (-log10(raw/ref))
             self.proc_data = np.array(self.ccd_data[:, [0, 3]])
+            self.proc_data[:, 1] = 10 * self.proc_data[:, 1]
         else:
             # Should be here if you pass the reference/trans filenames
             try:
@@ -173,6 +174,14 @@ class Absorbance(CCD):
         """
         temp_abs = -np.log(self.proc_data[:, 1] / self.proc_data[:, 2]) / qw_number
         self.proc_data = np.hstack((self.proc_data, temp_abs))
+
+    def fft_smooth(self, cutoff, inspectPlots=False):
+        """
+        """
+        #self.fixed = -np.log10(abs(self.raw_data[:, 1]) / abs(self.ref_data[:, 1]))
+        self.fixed = np.nan_to_num(self.proc_data[:, 1])
+        #self.fixed = np.column_stack((self.raw_data[:, 0], self.fixed))
+        self.clean = low_pass_filter(self.raw_data[:, 0], self.fixed, cutoff, inspectPlots)
 
     def save_processing(self, file_name, folder_str, marker='', index=''):
         try:
@@ -1918,6 +1927,227 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
                header=header_snip, comments='', fmt='%0.6e')
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
 
+def stitchData(dataList, plot=False):
+    """
+    Attempt to stitch together absorbance data. Will translate the second data set
+    to minimize leastsq between the two data sets.
+    :param dataList: Iterable of the data sets to be fit. Currently
+            it only takes the first two elements of the list, but should be fairly
+            straightforward to recursivly handle a list>2. Shifts the second
+            data set to overlap the first
+             elements of dataList can be either np.arrays or Absorbance class,
+              where it will take the proc_data itself
+    :param plot: bool whether or not you want the fit iterations to be plotted
+            (for debugging)
+    :return: a, a (2,) np.array of the shift
+    """
+
+    # Data coercsion, make sure we know what we're working wtih
+    first = dataList[0]
+    if isinstance(first, Absorbance):
+        first = first.proc_data
+        second = dataList[1]
+    if isinstance(second, Absorbance):
+        second = second.proc_data
+    if plot:
+        # Keep a reference to whatever plot is open at call-time
+        # Useful if the calling script has plots before and after, as
+        # omitting this will cause future plots to be added to figures here
+        firstFig = plt.gcf()
+        plt.figure("Stitcher")
+        # Plot the raw input data
+        plt.plot(*first.T)
+        plt.plot(*second.T)
+
+    # Algorithm is set up such that the "second" data set spans the
+    # higher domain than first. Need to enforce this, and remember it
+    # so the correct shift is applied
+    flipped = False
+    if max(first[:,0])>max(second[:,0]):
+        flipped = True
+        first, second = second, first
+
+    def fitter(p, shiftable, immutable):
+        # designed to over
+
+        # Get the shifts
+        dx = p[0]
+        dy = p[1]
+
+        # Don't want pass-by-reference nonsense, recast our own refs
+        shiftable = np.array(shiftable)
+        immutable = np.array(immutable)
+
+        # Shift the data set
+        shiftable[:,1]+=dy
+        shiftable[:,0]+=dx
+
+        # Create an interpolator. We want a
+        # direct comparision for subtracting the two functions
+        # Different spec grating positions have different wavelengths
+        # so they're not directly comparable.
+        shiftF = spi.interp1d(*shiftable.T)
+
+        # Find the bounds of where the two data sets overlap
+        overlap = (min(shiftable[:,0]), max(immutable[:,0]))
+            #print "overlap", overlap
+
+        # Determine the indices of the immutable function
+        # where it overlaps. argwhere returns 2-d thing,
+        # requiring the [0] at the end of each call
+        fOlIdx = (min(np.argwhere(immutable[:,0]>=overlap[0]))[0],
+                  max(np.argwhere(immutable[:,0]<=overlap[1]))[0])
+
+        # Get the interpolated values of the shiftable function at the same
+        # x-coordinates as the immutable case
+        newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1],0])
+
+        if plot:
+            plt.plot(*immutable[fOlIdx[0]:fOlIdx[1],:].T, marker='o', label="imm", markersize=10)
+            plt.plot(immutable[fOlIdx[0]:fOlIdx[1], 0], newShift, marker='o', label="shift")
+        imm = immutable[fOlIdx[0]:fOlIdx[1],1]
+        shift = newShift
+        return imm-shift
+
+    a, _, _, msg, err= spo.leastsq(fitter, [0.0001, 0.01*max(first[:,1])], args=(second, first), full_output = 1)
+    # print "a", a
+    if plot:
+        # Revert back to the original figure, as per top comments
+        plt.figure(firstFig.number)
+
+    # Need to invert the shift if we flipped which
+    # model we're supposed to move
+    if flipped: a*=-1
+
+    return a
+
+def integrateData(data, t1, t2, ave=False):
+    """
+    Integrate a discrete data set for a
+    given time period. Sums the data between
+    the given bounds and divides by dt. Optional
+    argument to divide by T = t2-t1 for calculating
+    averages.
+
+    data = 2D array. data[:,0] = t, data[:,1] = y
+    t1 = start of integration
+    t2 = end of integration
+
+
+    if data is a NxM, with M>=3, it will take the
+    third column to be the errors of the points,
+    and return the error as the quadrature sum
+    """
+    t = data[:,0]
+    y = data[:,1]
+    if data.shape[0] >= 3:
+        errors = data[:,2]
+    else:
+        errors = np.ones_like(y) * np.nan
+
+    gt = set(np.where(t>t1)[0])
+    lt = set(np.where(t<t2)[0])
+
+    # find the intersection of the sets
+    vals = list(gt&lt)
+
+    # Calculate the average
+    tot = np.sum(y[vals])
+    error = np.sqrt(np.sum(errors[vals]**2))
+
+
+
+    # Multiply by sampling
+    tot *= (t[1]-t[0])
+    error *= (t[1]-t[0])
+
+    if ave:
+        # Normalize by total width if you want an average
+        tot /= (t2-t1)
+        errors /= (t2-t1)
+    if not np.isnan(error):
+        return tot, error
+    return tot
+
+####################
+# Smoothing functions
+####################
+
+def savitzky_golay(y, window_size, order, deriv=0, rate=1):
+    r"""Smooth (and optionally differentiate) data with a Savitzky-Golay filter.
+    The Savitzky-Golay filter removes high frequency noise from data.
+    It has the advantage of preserving the original shape and
+    features of the signal better than other types of filtering
+    approaches, such as moving averages techniques.
+    Parameters
+    ----------
+    y : array_like, shape (N,)
+        the values of the time history of the signal.
+    window_size : int
+        the length of the window. Must be an odd integer number.
+    order : int
+        the order of the polynomial used in the filtering.
+        Must be less then `window_size` - 1.
+    deriv: int
+        the order of the derivative to compute (default = 0 means only smoothing)
+    Returns
+    -------
+    ys : ndarray, shape (N)
+        the smoothed signal (or it's n-th derivative).
+    Notes
+    -----
+    The Savitzky-Golay is a type of low-pass filter, particularly
+    suited for smoothing noisy data. The main idea behind this
+    approach is to make for each point a least-square fit with a
+    polynomial of high order over a odd-sized window centered at
+    the point.
+    Examples
+    --------
+    t = np.linspace(-4, 4, 500)
+    y = np.exp( -t**2 ) + np.random.normal(0, 0.05, t.shape)
+    ysg = savitzky_golay(y, window_size=31, order=4)
+    import matplotlib.pyplot as plt
+    plt.plot(t, y, label='Noisy signal')
+    plt.plot(t, np.exp(-t**2), 'k', lw=1.5, label='Original signal')
+    plt.plot(t, ysg, 'r', label='Filtered signal')
+    plt.legend()
+    plt.show()
+    References
+    ----------
+    .. [1] A. Savitzky, M. J. E. Golay, Smoothing and Differentiation of
+       Data by Simplified Least Squares Procedures. Analytical
+       Chemistry, 1964, 36 (8), pp 1627-1639.
+    .. [2] Numerical Recipes 3rd Edition: The Art of Scientific Computing
+       W.H. Press, S.A. Teukolsky, W.T. Vetterling, B.P. Flannery
+       Cambridge University Press ISBN-13: 9780521880688
+
+    source:
+    http://scipy.github.io/old-wiki/pages/Cookbook/SavitzkyGolay
+    """
+    import numpy as np
+    from math import factorial
+
+    try:
+        window_size = np.abs(np.int(window_size))
+        order = np.abs(np.int(order))
+    except ValueError, msg:
+        raise ValueError("window_size and order have to be of type int")
+    if window_size % 2 != 1 or window_size < 1:
+        raise TypeError("window_size size must be a positive odd number")
+    if window_size < order + 2:
+        raise TypeError("window_size is too small for the polynomials order")
+    order_range = range(order+1)
+    half_window = (window_size -1) // 2
+    # precompute coefficients
+    b = np.mat([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
+    m = np.linalg.pinv(b).A[deriv] * rate**deriv * factorial(deriv)
+    # pad the signal at the extremes with
+    # values taken from the signal itself
+    firstvals = y[0] - np.abs( y[1:half_window+1][::-1] - y[0] )
+    lastvals = y[-1] + np.abs(y[-half_window-1:-1][::-1] - y[-1])
+    y = np.concatenate((firstvals, y, lastvals))
+    return np.convolve( m[::-1], y, mode='valid')
+
 def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False, freqSigma=50, ftol=1e-4, isInteractive=False):
     """
     Performs an FFT, then fits a peak in frequency around the
@@ -2156,147 +2386,92 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
     retData[:,-1] = y
     return retData
 
-def stitchData(dataList, plot=False):
-    """
-    Attempt to stitch together absorbance data. Will translate the second data set
-    to minimize leastsq between the two data sets.
-    :param dataList: Iterable of the data sets to be fit. Currently
-            it only takes the first two elements of the list, but should be fairly
-            straightforward to recursivly handle a list>2. Shifts the second
-            data set to overlap the first
-             elements of dataList can be either np.arrays or Absorbance class,
-              where it will take the proc_data itself
-    :param plot: bool whether or not you want the fit iterations to be plotted
-            (for debugging)
-    :return: a, a (2,) np.array of the shift
-    """
+def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
+    # Replicate origin directy
+    # http://www.originlab.com/doc/Origin-Help/Smooth-Algorithm
+    # "rotate" the data set so it ends at 0,
+    # enforcing a periodicity in the data. Otherwise
+    # oscillatory artifacts result at the ends
+    zeroPadding = len(x_vals)
+    print "zero padding", zeroPadding
+    N = len(x_vals)
+    onePerc = int(0.01*N)
+    x1 = np.mean(x_vals[:onePerc])
+    x2 = np.mean(x_vals[-onePerc:])
+    y1 = np.mean(y_vals[:onePerc])
+    y2 = np.mean(y_vals[-onePerc:])
 
-    # Data coercsion, make sure we know what we're working wtih
-    first = dataList[0]
-    if isinstance(first, Absorbance):
-        first = first.proc_data
-        second = dataList[1]
-    if isinstance(second, Absorbance):
-        second = second.proc_data
-    if plot:
-        # Keep a reference to whatever plot is open at call-time
-        # Useful if the calling script has plots before and after, as
-        # omitting this will cause future plots to be added to figures here
-        firstFig = plt.gcf()
-        plt.figure("Stitcher")
-        # Plot the raw input data
-        plt.plot(*first.T)
-        plt.plot(*second.T)
+    m = (y1-y2)/(x1-x2)
+    b = y1 - m * x1
 
-    # Algorithm is set up such that the "second" data set spans the
-    # higher domain than first. Need to enforce this, and remember it
-    # so the correct shift is applied
-    flipped = False
-    if max(first[:,0])>max(second[:,0]):
-        flipped = True
-        first, second = second, first
+    flattenLine = m * x_vals + b
+    y_vals -= flattenLine
 
-    def fitter(p, shiftable, immutable):
-        # designed to over
+    if inspectPlots:
+        plt.plot(x_vals, y_vals, label="Rotated Data")
 
-        # Get the shifts
-        dx = p[0]
-        dy = p[1]
+    # Perform the FFT and find the appropriate frequency spacing
+    x_fourier = fft.fftfreq(zeroPadding, x_vals[1]-x_vals[0])
+    y_fourier = fft.fft(y_vals, n=zeroPadding)
 
-        # Don't want pass-by-reference nonsense, recast our own refs
-        shiftable = np.array(shiftable)
-        immutable = np.array(immutable)
-
-        # Shift the data set
-        shiftable[:,1]+=dy
-        shiftable[:,0]+=dx
-
-        # Create an interpolator. We want a
-        # direct comparision for subtracting the two functions
-        # Different spec grating positions have different wavelengths
-        # so they're not directly comparable.
-        shiftF = spi.interp1d(*shiftable.T)
-
-        # Find the bounds of where the two data sets overlap
-        overlap = (min(shiftable[:,0]), max(immutable[:,0]))
-            #print "overlap", overlap
-
-        # Determine the indices of the immutable function
-        # where it overlaps. argwhere returns 2-d thing,
-        # requiring the [0] at the end of each call
-        fOlIdx = (min(np.argwhere(immutable[:,0]>=overlap[0]))[0],
-                  max(np.argwhere(immutable[:,0]<=overlap[1]))[0])
-
-        # Get the interpolated values of the shiftable function at the same
-        # x-coordinates as the immutable case
-        newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1],0])
-
-        if plot:
-            plt.plot(*immutable[fOlIdx[0]:fOlIdx[1],:].T, marker='o', label="imm", markersize=10)
-            plt.plot(immutable[fOlIdx[0]:fOlIdx[1], 0], newShift, marker='o', label="shift")
-        imm = immutable[fOlIdx[0]:fOlIdx[1],1]
-        shift = newShift
-        return imm-shift
-
-    a, _, _, msg, err= spo.leastsq(fitter, [0.0001, 0.01*max(first[:,1])], args=(second, first), full_output = 1)
-    # print "a", a
-    if plot:
-        # Revert back to the original figure, as per top comments
-        plt.figure(firstFig.number)
-
-    # Need to invert the shift if we flipped which
-    # model we're supposed to move
-    if flipped: a*=-1
-
-    return a
-
-def integrateData(data, t1, t2, ave=False):
-    """
-    Integrate a discrete data set for a
-    given time period. Sums the data between
-    the given bounds and divides by dt. Optional
-    argument to divide by T = t2-t1 for calculating
-    averages.
-
-    data = 2D array. data[:,0] = t, data[:,1] = y
-    t1 = start of integration
-    t2 = end of integration
+    if inspectPlots:
+        plt.figure("Frequency Space")
+        plt.semilogy(x_fourier, np.abs(y_fourier), label="Raw FFT")
 
 
-    if data is a NxM, with M>=3, it will take the
-    third column to be the errors of the points,
-    and return the error as the quadrature sum
-    """
-    t = data[:,0]
-    y = data[:,1]
-    if data.shape[0] >= 3:
-        errors = data[:,2]
-    else:
-        errors = np.ones_like(y) * np.nan
+    # Define where to remove the data
+    band_start = cutoff
+    band_end = int(max(abs(x_fourier))) + 1
 
-    gt = set(np.where(t>t1)[0])
-    lt = set(np.where(t<t2)[0])
+    '''
+    # Find the indices to remove the data
+    refitRangeIdx = np.argwhere((x_fourier > band_start) & (x_fourier <= band_end))
+    refitRangeIdxNeg = np.argwhere((x_fourier < -band_start) & (x_fourier >= -band_end))
 
-    # find the intersection of the sets
-    vals = list(gt&lt)
+    #print "x_fourier", x_fourier[795:804]
+    #print "max(x_fourier)", max(x_fourier)
+    #print "refitRangeIdxNeg", refitRangeIdxNeg[:-400]
 
-    # Calculate the average
-    tot = np.sum(y[vals])
-    error = np.sqrt(np.sum(errors[vals]**2))
+    # Kill it all after the cutoff
+    y_fourier[refitRangeIdx] = 0
+    y_fourier[refitRangeIdxNeg] = 0
 
+    # This section does a pseudo-windowing on the remaining code.
+    smoothIdx = np.argwhere((-band_start < x_fourier) & (x_fourier < band_start))
+    smoothr = -1 / band_start**2 * x_fourier[smoothIdx]**2 + 1
 
+    y_fourier[smoothIdx] *= smoothr
+    '''
 
-    # Multiply by sampling
-    tot *= (t[1]-t[0])
-    error *= (t[1]-t[0])
+    butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff)**30))
+    y_fourier *= butterworth
 
-    if ave:
-        # Normalize by total width if you want an average
-        tot /= (t2-t1)
-        errors /= (t2-t1)
-    if not np.isnan(error):
-        return tot, error
-    return tot
+    if inspectPlots:
+        plt.plot(x_fourier, np.abs(y_fourier), label="FFT with removed parts")
+        a = plt.legend()
+        a.draggable(True)
+
+    # invert the FFT
+    y_vals = fft.ifft(y_fourier, n=zeroPadding)
+
+    # unshift the data
+    y_vals += flattenLine
+
+    # using fft, not rfft, so data may have some
+    # complex parts. But we can assume they'll be negligible and
+    # remove them
+    # ( Safer to use np.real, not np.abs? )
+    # Need the [:len] to remove zero-padded stuff
+    y_vals = np.abs(y_vals)[:len(x_vals)]
+
+    if inspectPlots:
+        plt.figure("Real Space")
+        print x_vals.size, y_vals.size
+        plt.plot(x_vals, y_vals, label="Smoothed Data")
+        a = plt.legend()
+        a.draggable(True)
+
+    return np.column_stack((x_vals, y_vals))
 
 ####################
 # Complete functions 
@@ -2352,78 +2527,3 @@ def proc_n_plotCCD(folder_path, cutoff=5, offset=None, plot=False, save=None, ve
             spectrum.save_processing(save[0], save[1], marker=spectrum.parameters["series"] + '_' + str(spectrum.parameters["spec_step"]), index=index)
             index += 1
     return spectra_list
-
-def savitzky_golay(y, window_size, order, deriv=0, rate=1):
-    r"""Smooth (and optionally differentiate) data with a Savitzky-Golay filter.
-    The Savitzky-Golay filter removes high frequency noise from data.
-    It has the advantage of preserving the original shape and
-    features of the signal better than other types of filtering
-    approaches, such as moving averages techniques.
-    Parameters
-    ----------
-    y : array_like, shape (N,)
-        the values of the time history of the signal.
-    window_size : int
-        the length of the window. Must be an odd integer number.
-    order : int
-        the order of the polynomial used in the filtering.
-        Must be less then `window_size` - 1.
-    deriv: int
-        the order of the derivative to compute (default = 0 means only smoothing)
-    Returns
-    -------
-    ys : ndarray, shape (N)
-        the smoothed signal (or it's n-th derivative).
-    Notes
-    -----
-    The Savitzky-Golay is a type of low-pass filter, particularly
-    suited for smoothing noisy data. The main idea behind this
-    approach is to make for each point a least-square fit with a
-    polynomial of high order over a odd-sized window centered at
-    the point.
-    Examples
-    --------
-    t = np.linspace(-4, 4, 500)
-    y = np.exp( -t**2 ) + np.random.normal(0, 0.05, t.shape)
-    ysg = savitzky_golay(y, window_size=31, order=4)
-    import matplotlib.pyplot as plt
-    plt.plot(t, y, label='Noisy signal')
-    plt.plot(t, np.exp(-t**2), 'k', lw=1.5, label='Original signal')
-    plt.plot(t, ysg, 'r', label='Filtered signal')
-    plt.legend()
-    plt.show()
-    References
-    ----------
-    .. [1] A. Savitzky, M. J. E. Golay, Smoothing and Differentiation of
-       Data by Simplified Least Squares Procedures. Analytical
-       Chemistry, 1964, 36 (8), pp 1627-1639.
-    .. [2] Numerical Recipes 3rd Edition: The Art of Scientific Computing
-       W.H. Press, S.A. Teukolsky, W.T. Vetterling, B.P. Flannery
-       Cambridge University Press ISBN-13: 9780521880688
-
-    source:
-    http://scipy.github.io/old-wiki/pages/Cookbook/SavitzkyGolay
-    """
-    import numpy as np
-    from math import factorial
-
-    try:
-        window_size = np.abs(np.int(window_size))
-        order = np.abs(np.int(order))
-    except ValueError, msg:
-        raise ValueError("window_size and order have to be of type int")
-    if window_size % 2 != 1 or window_size < 1:
-        raise TypeError("window_size size must be a positive odd number")
-    if window_size < order + 2:
-        raise TypeError("window_size is too small for the polynomials order")
-    order_range = range(order+1)
-    half_window = (window_size -1) // 2
-    # precompute coefficients
-    b = np.mat([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
-    m = np.linalg.pinv(b).A[deriv] * rate**deriv * factorial(deriv)
-    # pad the signal at the extremes with
-    # values taken from the signal itself
-    firstvals = y[0] - np.abs( y[1:half_window+1][::-1] - y[0] )
-    lastvals = y[-1] + np.abs(y[-half_window-1:-1][::-1] - y[-1])
-    y = np.concatenate((firstvals, y, lastvals))
-    return np.convolve( m[::-1], y, mode='valid')
