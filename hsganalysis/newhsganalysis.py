@@ -49,13 +49,12 @@ class CCD(object):
         print "I'm going to open", fname
         #f = open(fname,'rU')
         with open(fname,'rU') as f:
-            initial = '#'
             param_str = ''
-            while initial == '#':
-                new = f.readline()
-                initial = new[0]
-                param_str += new[1:]
-            print param_str
+            line = f.readline()
+            while line[0] == '#':
+                param_str += line[1:]
+                line = f.readline()
+
             self.parameters = json.loads(param_str)
         # with open(fname,'rU') as f:
         #     parameters_str = f.readline()
@@ -2392,6 +2391,17 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     # "rotate" the data set so it ends at 0,
     # enforcing a periodicity in the data. Otherwise
     # oscillatory artifacts result at the ends
+    import scipy.interpolate as spin
+
+    # take the min difference to oversample (I've read
+    # that's better than undersampling)
+
+    x_vals_respaced = np.arange(x_vals[0], x_vals[-1], np.diff(x_vals).min())
+    y_vals_interpolater = spin.interp1d(x_vals, y_vals)
+    y_vals_interpolated = y_vals_interpolater(x_vals_respaced)
+
+
+
     zeroPadding = len(x_vals)
     print "zero padding", zeroPadding
     N = len(x_vals)
