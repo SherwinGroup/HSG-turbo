@@ -179,9 +179,10 @@ class Absorbance(CCD):
         """
         """
         #self.fixed = -np.log10(abs(self.raw_data[:, 1]) / abs(self.ref_data[:, 1]))
-        self.fixed = np.nan_to_num(self.proc_data[:, 1])
+        #self.fixed = np.nan_to_num(self.proc_data[:, 1])
         #self.fixed = np.column_stack((self.raw_data[:, 0], self.fixed))
-        self.clean = low_pass_filter(self.raw_data[:, 0], self.fixed, cutoff, inspectPlots)
+        self.parameters['fourier cutoff'] = cutoff
+        self.clean = low_pass_filter(self.proc_data[:, 0], self.proc_data[:, 1], cutoff, inspectPlots)
 
     def save_processing(self, file_name, folder_str, marker='', index=''):
         try:
@@ -208,7 +209,9 @@ class Absorbance(CCD):
         
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
-
+        spectra_fname = 'clean ' + spectra_fname
+        np.savetxt(os.path.join(folder_str, spectra_fname), self.clean, delimiter=',',
+                   header=spec_header, comments='', fmt='%0.6e')
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
 class NeonNoiseAnalysis(CCD):
@@ -2069,6 +2072,31 @@ def integrateData(data, t1, t2, ave=False):
         return tot, error
     return tot
 
+def fourier_prep(x_vals, y_vals, num=1600):
+    """
+    This function will take a Nx2 array with unevenly spaced x-values and make 
+    them evenly spaced for use in fft-related things.
+
+    And remove nans!
+    """
+    y_vals = handle_nans(y_vals)
+    spline = spi.interp1d(x_vals, y_vals, kind='linear') # for some reason kind='quadratic' doesn't work? returns all nans
+    even_x = np.linspace(x_vals[0], x_vals[-1], num=num)
+    even_y = spline(even_x)
+    # even_y = handle_nans(even_y)
+    return even_x, even_y
+
+def handle_nans(y_vals):
+    """
+    This function removes nans and replaces them with linearly interpolated 
+    values.  It requires that the array maps from equally spaced x-values.
+    Taken from Stack Overflow: "Interpolate NaN values in a numpy array"
+    """
+    nan_idx = np.isnan(y_vals)
+    my_lambda = lambda x: x.nonzero()[0] # Returns the indices where Trues reside
+    y_vals[nan_idx] = np.interp(my_lambda(nan_idx), my_lambda(~nan_idx), y_vals[~nan_idx])
+    return y_vals
+
 ####################
 # Smoothing functions
 ####################
@@ -2387,13 +2415,16 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
     return retData
 
 def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
-    # Replicate origin directy
-    # http://www.originlab.com/doc/Origin-Help/Smooth-Algorithm
-    # "rotate" the data set so it ends at 0,
-    # enforcing a periodicity in the data. Otherwise
-    # oscillatory artifacts result at the ends
+    """
+    Replicate origin directy
+    http://www.originlab.com/doc/Origin-Help/Smooth-Algorithm
+    "rotate" the data set so it ends at 0,
+    enforcing a periodicity in the data. Otherwise
+    oscillatory artifacts result at the ends
+    """
+    x_vals, y_vals = fourier_prep(x_vals, y_vals)
     zeroPadding = len(x_vals)
-    print "zero padding", zeroPadding
+    print "zero padding", zeroPadding # This needs to be this way because truncation is bad and actually zero padding
     N = len(x_vals)
     onePerc = int(0.01*N)
     x1 = np.mean(x_vals[:onePerc])
@@ -2410,9 +2441,11 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     if inspectPlots:
         plt.plot(x_vals, y_vals, label="Rotated Data")
 
+    
+    # even_data = np.column_stack((x_vals, y_vals))
     # Perform the FFT and find the appropriate frequency spacing
     x_fourier = fft.fftfreq(zeroPadding, x_vals[1]-x_vals[0])
-    y_fourier = fft.fft(y_vals, n=zeroPadding)
+    y_fourier = fft.fft(y_vals)#, n=zeroPadding)
 
     if inspectPlots:
         plt.figure("Frequency Space")
@@ -2435,34 +2468,39 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     # Kill it all after the cutoff
     y_fourier[refitRangeIdx] = 0
     y_fourier[refitRangeIdxNeg] = 0
-
-    # This section does a pseudo-windowing on the remaining code.
+    
+    # This section does a square filter on the remaining code.
     smoothIdx = np.argwhere((-band_start < x_fourier) & (x_fourier < band_start))
     smoothr = -1 / band_start**2 * x_fourier[smoothIdx]**2 + 1
 
     y_fourier[smoothIdx] *= smoothr
     '''
-
-    butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff)**30))
+    
+    print abs(y_fourier[-10:])
+    butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff)**50))
     y_fourier *= butterworth
-
+    
     if inspectPlots:
         plt.plot(x_fourier, np.abs(y_fourier), label="FFT with removed parts")
         a = plt.legend()
         a.draggable(True)
+        print "y_fourier", len(y_fourier)
 
     # invert the FFT
     y_vals = fft.ifft(y_fourier, n=zeroPadding)
-
-    # unshift the data
-    y_vals += flattenLine
 
     # using fft, not rfft, so data may have some
     # complex parts. But we can assume they'll be negligible and
     # remove them
     # ( Safer to use np.real, not np.abs? )
-    # Need the [:len] to remove zero-padded stuff
-    y_vals = np.abs(y_vals)[:len(x_vals)]
+    # Need the [:len] to remove zero-padded stuff    
+    y_vals = y_vals[:len(x_vals)]
+    # unshift the data
+    y_vals += flattenLine
+    y_vals = np.abs(y_vals)
+
+
+    
 
     if inspectPlots:
         plt.figure("Real Space")
