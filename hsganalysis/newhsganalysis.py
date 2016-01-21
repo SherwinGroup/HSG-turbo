@@ -49,13 +49,12 @@ class CCD(object):
         print "I'm going to open", fname
         #f = open(fname,'rU')
         with open(fname,'rU') as f:
-            initial = '#'
             param_str = ''
-            while initial == '#':
-                new = f.readline()
-                initial = new[0]
-                param_str += new[1:]
-            print param_str
+            line = f.readline()
+            while line[0] == '#':
+                param_str += line[1:]
+                line = f.readline()
+
             self.parameters = json.loads(param_str)
         # with open(fname,'rU') as f:
         #     parameters_str = f.readline()
@@ -2423,6 +2422,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     oscillatory artifacts result at the ends
     """
     x_vals, y_vals = fourier_prep(x_vals, y_vals)
+
     zeroPadding = len(x_vals)
     print "zero padding", zeroPadding # This needs to be this way because truncation is bad and actually zero padding
     N = len(x_vals)
