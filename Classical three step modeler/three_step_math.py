@@ -109,14 +109,14 @@ class Trajectories(object):
         self.make_parameters()
 
         period = 1 / self.thz_freq
-        time_s = np.linspace(0, 1 * period, num=1000) # in seconds
+        time_s = np.linspace(0, 1 * period, num=10000) # in seconds
         driving_field = np.cos(2 * np.pi * self.thz_freq * time_s + self.phi) # this is dimless
         position = -driving_field - 2 * np.pi * self.thz_freq * time_s * np.sin(self.phi) + np.cos(self.phi)
 
         recollision_index = np.where(position < 0)[0][0]
         self.recollision_time_ps = time_s[recollision_index] * 1e12
 
-        self.time_vals_s = np.linspace(0, time_s[recollision_index], num = 500)
+        self.time_vals_s = np.linspace(0, time_s[recollision_index], num=1000)
         self.driving_field = np.cos(2 * np.pi * self.thz_freq * self.time_vals_s + self.phi) # this is dimless
 
         position = -self.driving_field - 2 * np.pi * self.thz_freq * self.time_vals_s * np.sin(self.phi) + np.cos(self.phi)

@@ -751,11 +751,12 @@ class HighSidebandCCD(CCD):
         
         Temporary stuff:
         sb_fits = holder of the fitting results until all spectra have been fit
-        
+
         Attributes created:
-        self.sb_results = the money maker
+        self.sb_results = the money maker.  Column order:
+                          [sb number, Freq (eV), Freq error (eV), Gauss area (arb.), Area error, Gauss linewidth (eV), Linewidth error (eV)]
         self.full_dict = a dictionary similar to sb_results, but now the keys 
-                         are the sideband orders
+                         are the sideband orders.  Column ordering is otherwise the same.
         """
         #print "Trying to fit these"
         sb_fits = []
@@ -1049,6 +1050,12 @@ class HighSidebandPMT(PMT):
         This method will integrate the sidebands to find their strengths, and then
         use a magic number to get the width, since they are currently so utterly
         undersampled for fitting.
+
+        Creates:
+        self.sb_results = full list of integrated data. Column order is:
+                          [sb order, Freq (eV), "error" (eV), Integrate area (arb.), area error, "Linewidth" (eV), "Linewidth error" (eV)
+        self.full_dict = Dictionary where the SB order column is removed and turned into the keys.  The values
+                         are the rest of that sideband's results.
         """
         self.full_dict = {}
         for sideband in self.sb_dict.items():
@@ -2420,6 +2427,8 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     "rotate" the data set so it ends at 0,
     enforcing a periodicity in the data. Otherwise
     oscillatory artifacts result at the ends
+
+    This uses a 50th order Butterworth filter.
     """
     x_vals, y_vals = fourier_prep(x_vals, y_vals)
 
