@@ -795,7 +795,8 @@ class HighSidebandCCD(CCD):
                 print "number:", elem, num
                 #print "data_temp:", data_temp
                 print "p0:", p0
-            if plot:
+            plot_guess = False # This is to disable guess plotting
+            if plot_guess:
                 plt.figure('CCD data')
                 linewidth = 3
                 x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
@@ -828,6 +829,7 @@ class HighSidebandCCD(CCD):
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     # And had to scale by the area?
                 if plot:
+                    plt.figure('CCD data')
                     linewidth = 5
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
                     if elem!=0:
@@ -935,7 +937,7 @@ class HighSidebandCCD(CCD):
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
 class PMT(object):
-    def __init__(self, file_path):
+    def __init__(self, file_name):
         """
         Initializes a SPEX spectrum.  It'll open a file, and bring in the details
         of a sideband spectrum into the object.  There isn't currently any reason
@@ -949,21 +951,30 @@ class PMT(object):
             self.description - string of the description of the file(s)
             self.sb_dict - keys are sideband order, values are PMT data arrays
             self.sb_list - sorted list of included sidebands
-            self.files - included file paths
+            self.file - included file paths
         """
         print "This started"
-
-        self.files = [file_path]
-        with open(fname,'rU') as f:
-            throw_away = f.readline() # Delete me if that first line denoting sideband order is removed
-            initial = '#'
+        self.fname = file_name
+        # self.files_included = [file_name]
+        with open(file_name,'rU') as f:
             param_str = ''
-            while initial == '#':
-                new = f.readline()
-                initial = new[0]
-                param_str += new[1:]
-            print param_str
+            line = f.readline() # Needed to move past the first line, which is the sideband order.  Not generally useful
+            line = f.readline()
+            while line[0] == '#':
+                param_str += line[1:]
+                line = f.readline()
+
             self.parameters = json.loads(param_str)
+        # with open(fname,'rU') as f:
+        #     throw_away = f.readline() # Delete me if that first line denoting sideband order is removed
+        #     initial = '#'
+        #     param_str = ''
+        #     while initial == '#':
+        #         new = f.readline()
+        #         initial = new[0]
+        #         param_str += new[1:]
+        #     print param_str
+        #     self.parameters = json.loads(param_str)
         # with open(file_path, 'rU') as f:
         #     throw_away = f.readline() # Just need to get things down to the next line
         #     parameters_str = f.readline()
@@ -985,29 +996,38 @@ class HighSidebandPMT(PMT):
         and the description.  
         
         attributes:
-            self.parameters - dictionary of important experimental parameters
-            self.description - string of the description of the file(s)
+            self.parameters - dictionary of important experimental parameters, created in PMT
             self.sb_dict - keys are sideband order, values are PMT data arrays
             self.sb_list - sorted list of included sidebands
         """
-        super(HighSidebandPMT, self).__init__(file_path)
-        self.sb_dict = {}
-        self.sb_list = []
-        self.add_sideband(file_path)
+        super(HighSidebandPMT, self).__init__(file_path) # Creates the json parameters dictionary
+        self.fname = file_path
+        self.parameters["files included"] = [file_path]
+        with open(file_path, 'rU') as f:
+            sb_num = int(f.readline()[1:])
+        raw_temp = np.genfromtxt(file_path, comments='#', delimiter=',')[3:, :]
+        self.initial_sb = sb_num
+        self.initial_data = np.array(raw_temp)
+        self.sb_dict = {sb_num: np.array(raw_temp)}
+        self.sb_list = [sb_num]
 
-    def add_sideband(self, file_name):
+    def add_sideband(self, other):
         """
-        This bad boy will add a sideband to the sideband spectrum of this object
+        This bad boy will add another PMT sideband object to the sideband spectrum of this object
+
+        It currently doesn't do any sort of job combining dictionaries or anything, but it definitely could
         """
-        self.files.append(file_name)
-        with open(file_name, 'rU') as f:
-            sb_num = int(f.readline().split(' ')[-1])
-        raw_temp = np.genfromtxt(file_name, comments='#')#, delimiter=',')
+        self.parameters["files included"].append(other.fname)
+
+        if other.initial_sb in self.sb_list:
+            self.sb_list.append(other.initial_sb)
+
+
         # Make things comma delimited?
         try:
-            self.sb_dict[sb_num].vstack((raw_temp))
+            self.sb_dict[other.initial_sb].vstack((other.initial_data))
         except:
-            self.sb_dict[sb_num] = np.array(raw_temp)
+            self.sb_dict[other.initial_sb] = np.array(other.initial_data)
 
     def process_sidebands(self, verbose=False):
         """
@@ -1015,13 +1035,16 @@ class HighSidebandPMT(PMT):
         including clearing out misfired shots and doing the averaging.
 
         """
-        for sb_deets in list(self.sb_dict.items()):
-            sb_num, sb = sb_deets[0], sb_deets[1]
+        for sb_num, sb in list(self.sb_dict.items()):
+            if sb_num == 0:
+                fire_condition = -np.inf # This way the FEL doesn't need to be on during laser line measurement
+            else:
+                fire_condition = np.mean(sb[:, 2]) / 2 # Say FEL fired if the
+                                                       # cavity dump signal is
+                                                       # more than half the mean
+                                                       # of the cavity dump signal
             frequencies = sorted(list(set(sb[:, 0])))
-            fire_condition = np.mean(sb[:, 2]) / 2 # Say FEL fired if the 
-                                                   # cavity dump signal is
-                                                   # more than half the mean 
-                                                   # of the cavity dump signal
+
             temp = None
             for freq in frequencies:
                 data_temp = np.array([])
@@ -1051,7 +1074,7 @@ class HighSidebandPMT(PMT):
             return
         else:
             laser_index = np.where(self.sb_results[:, 0] == 0)[0][0]
-            print "sb_results", self.sb_results[:, 0]
+            print "sb_results", self.sb_results[laser_index, :]
             print "laser_index", laser_index
 
             laser_strength = np.array(self.sb_results[laser_index, 3:5])
@@ -1257,7 +1280,6 @@ class FullHighSideband(FullSpectrum):
         adds more on to itself using stitch_hsg_dicts.
         """
         self.fname = initial_CCD_piece.fname
-        self.description = initial_CCD_piece.description
         self.sb_results = initial_CCD_piece.sb_results
         self.parameters = initial_CCD_piece.parameters
         self.parameters['files_here'] = [initial_CCD_piece.fname.split('/')[-1]]
@@ -1286,8 +1308,10 @@ class FullHighSideband(FullSpectrum):
         This method will be called by the stitch_hsg_results function to add the PMT
         data to the spectrum.
         """
+        print "I'm adding PMT once"
         self.full_dict = stitch_hsg_dicts(pmt_object.full_dict, self.full_dict, need_ratio=True, verbose=True)
-        self.parameters['files_here'].append(pmt_object.files)
+        print "I'm done adding PMT data"
+        self.parameters['files_here'].append(pmt_object.parameters['files included'])
         self.make_results_array()
 
     def make_results_array(self):
@@ -1517,20 +1541,37 @@ def pmt_sorter(folder_path):
     file_list = glob.glob(os.path.join(folder_path, '*[0-9].txt'))
 
     pmt_list = []
+
     for sb_file in file_list:
-        with open(sb_file, 'rU') as f:
-            sb_num = int(f.readline().split(' ')[-1])
-            parameters_str = f.readline()
-            parameters = json.loads(parameters_str[1:])
+        temp = HighSidebandPMT(sb_file)
         try:
-            for pmt_spectrum in pmt_list: # pmt_spectrum is a pmt object?
-                if parameters['series'] == pmt_spectrum.parameters['series']:
-                    pmt_spectrum.add_sideband(sb_file)
+            for pmt_spectrum in pmt_list: # pmt_spectrum is a pmt object
+                if temp.parameters['series'] == pmt_spectrum.parameters['series']:
+                    pmt_spectrum.add_sideband(temp)
                     break
             else: # this will execute IF the break was NOT called
-                pmt_list.append(HighSidebandPMT(sb_file))
+                pmt_list.append(temp)
         except:
-            pmt_list.append(HighSidebandPMT(sb_file))
+            pmt_list.append(temp)
+    # for sb_file in file_list:
+    #     with open(sb_file,'rU') as f:
+    #         param_str = ''
+    #         line = f.readline()
+    #         line = f.readline()
+    #         while line[0] == '#':
+    #             param_str += line[1:]
+    #             line = f.readline()
+    #
+    #         parameters = json.loads(param_str)
+    #     try:
+    #         for pmt_spectrum in pmt_list: # pmt_spectrum is a pmt object?
+    #             if parameters['series'] == pmt_spectrum.parameters['series']:
+    #                 pmt_spectrum.add_sideband(sb_file)
+    #                 break
+    #         else: # this will execute IF the break was NOT called
+    #             pmt_list.append(HighSidebandPMT(sb_file))
+    #     except:
+    #         pmt_list.append(HighSidebandPMT(sb_file))
 
     for pmt_spectrum in pmt_list:
         pmt_spectrum.process_sidebands()
@@ -1809,7 +1850,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             full[sb][2] = ratio * full[sb][2]
             full[sb][3] = full[sb][2] * np.sqrt((error / ratio)**2 + (ratio * full[sb][3] / full[sb][2])**2)
             print '\n2030\nfull[2]', full[0][2]
-    #print "I made this dictionary", sorted(full.keys())
+    print "I made this dictionary", sorted(full.keys())
     return full
 
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit, verbose=False):
@@ -2825,8 +2866,8 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     pmt_data = pmt_sorter(folder_path)
 
     for spectrum in pmt_data:
-        spectrum.integrate_sidebands()
-        spectrum.laser_line()
+        spectrum.integrate_sidebands(verbose=verbose)
+        spectrum.laser_line() # This function is broken because process sidebands can't handle the laser line
         print spectrum.full_dict
         index = 0
         if plot:
