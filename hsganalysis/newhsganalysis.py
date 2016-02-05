@@ -725,7 +725,7 @@ class HighSidebandCCD(CCD):
             check_max_area = np.sum(check_y[check_max_index - octant:check_max_index + octant + 1])
 
             no_peak = (2 * len(check_y)) // 5
-            print "check_y length", len(check_y)
+            # print "check_y length", len(check_y)
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
@@ -741,8 +741,8 @@ class HighSidebandCCD(CCD):
                 print "check_ave is", check_ave
                 print "check_stdev is", check_stdev
                 print "check_ratio is", check_ratio
-            print "sideband", order
-            print "check_ratio", check_ratio
+            # print "sideband", order
+            # print "check_ratio", check_ratio
 
 
             if check_ratio > cutoff:
@@ -751,7 +751,7 @@ class HighSidebandCCD(CCD):
                 last_sb = x_axis[found_index]
                 
                 # if verbose:
-                print "I just found", order, "at freq", last_sb, "\n"
+                # print "I just found", order, "at freq", last_sb, "\n"
                 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)

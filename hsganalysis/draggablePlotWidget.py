@@ -1,9 +1,11 @@
 __author__ = 'dvalovcin'
 from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
+import interactivePG as cpg
 
 
-class DraggablePlotWidget(pg.PlotWidget):
+# class DraggablePlotWidget(pg.PlotWidget):
+class DraggablePlotWidget(cpg.PlotWidget):
     def __init__(self, parent=None, background='default', **kargs):
         vb = DraggableViewBox()
         kargs["viewBox"] = vb

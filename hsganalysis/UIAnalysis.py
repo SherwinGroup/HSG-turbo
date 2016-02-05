@@ -110,6 +110,8 @@ class BaseWindow(QtGui.QMainWindow):
         self.ui.gFits.plotItem.vb.sigDropEvent.connect(self.handleFitDragEvent)
         self.ui.gSpectrum.plotItem.vb.sigDropEvent.connect(self.handleSpecDragEvent)
 
+        self.curveSpectrum = self.ui.gSpectrum.plot(pen='k', name='Spectrum')
+
 
 
         self.menuSpec = QtGui.QMenu("Plot")
@@ -222,8 +224,10 @@ class BaseWindow(QtGui.QMainWindow):
         self.menuFit.addMenu(self.menuFitY)
 
         self.ui.tabWidget.currentChanged.connect(self.changeToolbars)
+        self.menuBar().setNativeMenuBar(False) # otherwise the below breeaks on OS X
         # self.menuSpec.setVisible(False)
         self.ui.menubar.addMenu(self.menuSpec)
+
         # self.menuFit.setVisible(False)
         self.ui.menubar.addMenu(self.menuFit)
         self.changeToolbars()
@@ -266,37 +270,7 @@ class BaseWindow(QtGui.QMainWindow):
             {"name": "Series", "type": "str", "value": kwargs.get("series", 0)},
             {"name": "Spec Sweep", "type": "int", "value": kwargs.get("spec_step", 0)},
             ]},
-        # {"name":"Laser Settings", "type":"group", "children":[
-        #     {"name":"NIR Power (mW)", "type":"float", "value":kwargs.get("nir_power", 0)},
-        #     {"name":"NIR Frequency", "type":"list",
-        #         "values":["{:.3f} nm".format(kwargs.get("nir_lambda", 0)),
-        #                   "{:.2f} cm-1".format(1e7/kwargs.get("nir_lambda", 1))]},
-        #     {"name":"Center Lambda (nm)", "type":"float", "value":kwargs.get("center_lambda", 0)}
-        #     ]},
-        # {"name":"FEL Settings", "type":"group", "children":[
-        #     {"name":"SB Number", "type":"float", "value":0},
-        #     {"name":"FEL Energy (mJ)", "type":"float", "value":kwargs.get("fel_power", 0)},
-        #     {"name":"FEL Frequency (cm-1)", "type":"float", "value":kwargs.get("fel_lambda", 0)},
-        #     {"name":"Pulses", "type":"int", "value":kwargs.get("fel_pulses", 0)},
-        #     {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0)}
-        #     ]}
         ]
-        # if "fieldInt" in kwargs:
-        #     ptreelist = []
-        #     for i, inten in enumerate(kwargs["fieldInt"]):
-        #         d = {"name":"Pulse {:}".format(i), "type":"float", "value":inten}
-        #         ptreelist.append(d)
-        #     d = {"name":"FEL Intensity {:.3f} W/cm2".format(np.mean(kwargs["fieldInt"])),
-        #          "expanded":False, "type":"group", "children":ptreelist}
-        #     params.append(d)
-        # if "fieldStrength" in kwargs:
-        #     ptreelist = []
-        #     for i, inten in enumerate(kwargs["fieldStrength"]):
-        #         d = {"name":"Pulse {:}".format(i), "type":"float", "value":inten}
-        #         ptreelist.append(d)
-        #     d = {"name":"FEL Strength {:.3f} V/cm".format(np.mean(kwargs["fieldStrength"])),
-        #          "expanded":False, "type":"group", "children":ptreelist}
-        #     params.append(d)
 
         return params
 
@@ -304,28 +278,25 @@ class BaseWindow(QtGui.QMainWindow):
 
     def openFile(self, filename):
         filename = str(filename)
-        self.setWindowTitle(os.path.basename(filename))
-        data = np.genfromtxt(filename, delimiter=',', comments='#')
-        # remove nans because genfromtxt doesn't read comments properly
-        data = data[~np.all(np.isnan(data), axis=1)]
-
-        with open(filename) as f:
-            header = f.readline()
-        header = header[1:]
-        import json
-        header = json.loads(header)
-
-        self.ui.ptFile.clear()
-        params = self.genParameters(**header)
-        self.specParams = Parameter.create(name=filename, type='group', children=params)
-        self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
         dataObj = self.dataClass(filename)
+
+
+        if dataObj.parameters["series"]:
+            self.setWindowTitle(dataObj.parameters["series"])
+        else:
+            self.setWindowTitle(os.path.basename(filename))
+
+        self.ui.ptFile.clear()
+        # params = self.genParameters(**dataObj.parameters)
+        # self.specParams = Parameter.create(name=filename, type='group', children=params)
+        # self.ui.ptFile.setParameters(self.specParams, showTop=True)
+
         self.processSingleData(dataObj)
 
     def processSingleData(self, dataObj):
-        self.plotSpectrum(dataObj.proc_data)
         self.dataObj = dataObj
+        self.plotSpectrum()
         params = self.genParameters(**dataObj.parameters)
         self.specParams = Parameter.create(name=dataObj.fname, type='group', children=params)
         self.ui.ptFile.setParameters(self.specParams, showTop=True)
@@ -356,32 +327,13 @@ class BaseWindow(QtGui.QMainWindow):
     @staticmethod
     def __PLOT_SPECT_THINGS(): pass
 
-
-    def plotSBFits(self, hsgObj):
-        for fit in hsgObj.sb_results:
-            x = np.linspace(fit[1]*0.9997, fit[1]*1.0003, num=300)
-            args = list(fit[1::2])
-            args.append(0)
-            y = hsg.gauss(x, *args)
-            xType = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
-            if xType == "nm":
-                x = 1239.84 / x
-            elif xType == "wavenumber":
-                x = 10000000*x/1239.84
-
-            self.ui.gSpectrum.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen('g'))
-
-    def plotSpectrum(self, data):
-        self.ui.gSpectrum.plot(*self.convertDataForPlot(data))
-
+    def plotSpectrum(self, ):
+        self.curveSpectrum.setData(*self.convertDataForPlot(self.dataObj.proc_data))
     def convertDataForPlot(self, data):
         # Assumes data[:,0] is in eV
-        x = data[:,0]
+        x = data[:,0].copy()
         xType = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
-        if xType == "nm":
-            x = 1239.84 / x
-        elif xType == "wavenumber":
-            x = 10000000*x/1239.84
+        x = converter["eV"][xType](x)
 
         return [x, data[:,1]/self.uisbDivideBy.value()]
 
@@ -413,20 +365,16 @@ class BaseWindow(QtGui.QMainWindow):
         newName = str(sent.text())
         [i.setChecked(False) for i in self.menuSpecX.actions() if i is not sent] #uncheck the other one
 
-
         if self.dataObj is not None: #reupdate plots if we've already loaded some data
             sb = self.sbLine.value()
-            self.ui.gSpectrum.getPlotItem().clear()
-            self.plotSpectrum(self.dataObj.proc_data)
-            self.plotSBFits(self.dataObj)
+            # self.ui.gSpectrum.getPlotItem().clear()
+
+            self.plotSpectrum()
+            self.plotSBFits()
+
+
             sb = converter[oldName][newName](sb)
-
-
             self.sbLine.setValue(sb)
-            self.ui.gSpectrum.addItem(self.sbLine)
-
-
-
 
     def parseSpecYChange(self, val=None):
         self.ui.gSpectrum.getPlotItem().setLogMode(x=False, y=val)
@@ -441,7 +389,7 @@ class BaseWindow(QtGui.QMainWindow):
 
         # uncheck what was previously checked
         [i.setChecked(False) for i in self.menuFitY.actions() if i is not sent and str(i.text())!="Log"]
-        if self.hsgObj is not None:
+        if self.dataObj is not None:
             self.ui.gFits.plotItem.clear()
             self.plotFits()
 
@@ -546,12 +494,6 @@ class BaseWindow(QtGui.QMainWindow):
         # Only one file was dropped
         if len(event.mimeData().urls()) == 1:
             filename = str(event.mimeData().urls()[0].toLocalFile())
-            # if filename in fileList.keys():
-            #     print "Already opened file"
-            # else:
-            #     c = BaseWindow.getWindowClass(filename)
-            #     a = c(filename)
-            #     fileList[filename] = a
             c = BaseWindow.getWindowClass(filename)
             a = c(filename, parentWin=self)
             fileList.append(a)
@@ -721,9 +663,12 @@ class BaseWindow(QtGui.QMainWindow):
         super(BaseWindow, self).closeEvent(event)
 
 
-
 class HSGWindow(BaseWindow):
     dataClass = hsg.HighSidebandCCD
+    def __init__(self, *args, **kwargs):
+        self.curveFits = {}
+        super(HSGWindow, self).__init__(*args, **kwargs)
+
 
     def inheritParent(self, parent):
         if isinstance(parent, HSGWindow):
@@ -739,12 +684,16 @@ class HSGWindow(BaseWindow):
         super(HSGWindow, self).inheritParent(parent)
 
     def processSingleData(self, dataObj):
-        dataObj = hsg.hsg_sum_spectra([dataObj])[0]
         super(HSGWindow, self).processSingleData(dataObj)
 
-        dataObj.guess_sidebands(cutoff = 3.5)
-        dataObj.fit_sidebands(plot=False)
-        self.plotSBFits(dataObj)
+        self.dataObj.guess_sidebands()
+        self.dataObj.fit_sidebands()
+
+        self.curveFits = {ii: self.ui.gSpectrum.plot(pen='g', name=ii) for
+                          ii in self.dataObj.full_dict}
+
+
+        self.plotSBFits()
 
         params = self.genFitParams(dataObj.sb_results)
         self.fitParams = Parameter.create(
@@ -754,7 +703,21 @@ class HSGWindow(BaseWindow):
 
         self.plotFits()
 
-        self.plotSBFits(dataObj)
+
+    def plotSBFits(self):
+        xType = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
+        units = converter["eV"][xType]
+
+        # for sb, curve in self.curveFits.items():
+        for sb in self.curveFits:
+            fit = self.dataObj.full_dict[sb]
+            curve = self.curveFits[sb]
+
+            x = np.linspace(fit[0]-5*fit[4], fit[0]+5*fit[4], num=300)
+            args = list(fit[0::2])
+            args.append(0)
+            y = hsg.gauss(x, *args)
+            curve.setData(units(x), y/self.uisbDivideBy.value())
 
     def genParameters(self, **kwargs):
         if kwargs.get("nir_lambda", None) is not None:
@@ -778,27 +741,9 @@ class HSGWindow(BaseWindow):
             {"name":"SB Number", "type":"float", "value":0},
             {"name":"FEL Energy (mJ)", "type":"float", "value":kwargs.get("fel_power", 0)},
             {"name":"FEL Frequency (cm-1)", "type":"float", "value":kwargs.get("fel_lambda", 0)},
-            {"name":"Pulses", "type":"int", "value":kwargs.get("fel_pulses", 0)},
+            {"name":"Pulses", "type":"int", "value":np.mean(kwargs.get("fel_pulses", 0))},
             {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0)}
             ]})
-        return params
-        if "fieldInt" in kwargs:
-            ptreelist = []
-            for i, inten in enumerate(kwargs["fieldInt"]):
-                d = {"name":"Pulse {:}".format(i), "type":"float", "value":inten}
-                ptreelist.append(d)
-            d = {"name":"FEL Intensity {:.3f} W/cm2".format(np.mean(kwargs["fieldInt"])),
-                 "expanded":False, "type":"group", "children":ptreelist}
-            params.append(d)
-        if "fieldStrength" in kwargs:
-            ptreelist = []
-            for i, inten in enumerate(kwargs["fieldStrength"]):
-                d = {"name":"Pulse {:}".format(i), "type":"float", "value":inten}
-                ptreelist.append(d)
-            d = {"name":"FEL Strength {:.3f} V/cm".format(np.mean(kwargs["fieldStrength"])),
-                 "expanded":False, "type":"group", "children":ptreelist}
-            params.append(d)
-
         return params
 
 
@@ -854,6 +799,7 @@ class ComparisonWindow(QtGui.QMainWindow):
         self.setCentralWidget(self.gPlot)
         self.legend = pg.LegendItem()
         self.legend.setParentItem(self.gPlot.plotItem)
+        self.menuBar().setNativeMenuBar(False)
 
         removeItems = QtGui.QAction("Remove Selected Items", self.menuBar())
         removeItems.triggered.connect(self.removeSelectedLines)
@@ -956,8 +902,6 @@ class ComparisonWindow(QtGui.QMainWindow):
         pen.setColor(color)
         p.setPen(pen)
 
-
-
 def updateFileClose(obj):
     try:
         fileList.remove(obj)
@@ -1001,12 +945,7 @@ if __name__=="__main__":
     import sys
     ex = QtGui.QApplication(sys.argv)
     win = BaseWindow()
-
-#
-#     a = pg.Point(120, 250)
-#
-# cl[0].frameGeometry().contains(a.toQPoint())
-#[i.handleSpecDragEvent(None, a) for i in sorted(fl.values(), key=lambda v:v.windowTitle())]
+    print "made window"
 
     import pyqtgraph.console as pgc
     consoleWindow = pgc.ConsoleWidget(namespace={"fl":fileList,"np": np, "cl":combinedWindowList, "pg":pg})
@@ -1014,4 +953,4 @@ if __name__=="__main__":
     consoleWindow.lower()
 
     sys.exit(ex.exec_())
-    
+    ex.exec_()
