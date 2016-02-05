@@ -489,31 +489,31 @@ class HighSidebandCCD(CCD):
         approx_order = (test_nir_freq - nir_freq) / thz_freq
         return approx_order
     
-    def image_normalize(self, num_images):
-        """
-        This method will divide the proc_data by the number of images that were
-        used in the hsg_sum_spectra function.  The proc_data array contains CCD
-        signal per FEL pulse already.  
-
-        Input:
-        num_images = number of images proc_data came from
-
-        Internal:
-        self.proc_data = normalizes the data and error columns to be signal/pulse
-                         again
-        """
-
-
-
-        """
-        NOTE: Starting in Nov'15 or so, the EMCCD software
-        handles this in the saved spectra
-        """
-        return
-        self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
-        self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
+    # def image_normalize(self, num_images):
+    #     """
+    #     This method will divide the proc_data by the number of images that were
+    #     used in the hsg_sum_spectra function.  The proc_data array contains CCD
+    #     signal per FEL pulse already.
+    #
+    #     Input:
+    #     num_images = number of images proc_data came from
+    #
+    #     Internal:
+    #     self.proc_data = normalizes the data and error columns to be signal/pulse
+    #                      again
+    #     """
+    #
+    #
+    #
+    #     """
+    #     NOTE: Starting in Nov'15 or so, the EMCCD software
+    #     handles this in the saved spectra
+    #     """
+    #     return
+    #     self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
+    #     self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
     
-    def guess_sidebands(self, cutoff=5, verbose=False):
+    def guess_sidebands(self, cutoff=8, verbose=False):
         """
         Finds the locations of all the sidebands in the proc_data array to be 
         able to seed the fitting method.  This works by finding the maximum data
@@ -553,9 +553,9 @@ class HighSidebandCCD(CCD):
             check_y = y_axis[global_max - 15:global_max + 15]
 
         check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
-        check_ave = np.mean(check_y)
-        check_stdev = np.std(check_y)
 
+        check_ave = np.mean(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
+        check_stdev = np.std(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
         check_ratio = (check_max_area - 3 * check_ave) / check_stdev
         
         
@@ -625,8 +625,11 @@ class HighSidebandCCD(CCD):
 
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
-            check_ave = np.mean(check_y)
-            check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]]) 
+            no_peak = (2 * len(check_y)) // 5
+            check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
+            check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
+            # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
+            # check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
                 # So the sideband isn't included in the noise calculation
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
 
@@ -669,7 +672,8 @@ class HighSidebandCCD(CCD):
                 break  
         
         # Look for higher sidebands
-        
+        if verbose: print "Now I'll look for sidebands with higher frequency"
+
         last_sb = sb_freq_guess[0]
         index_guess = global_max
         consecutive_null_sb = 0
@@ -680,7 +684,7 @@ class HighSidebandCCD(CCD):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
                 continue
-            window_size = 0.28 + 0.0004 * order # used to be last_sb?
+            window_size = 0.32 + 0.001 * order # used to be 0.28 and 0.0004
             lo_freq_bound = last_sb + thz_freq * (1 - window_size) # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
             start_index = False
@@ -711,10 +715,21 @@ class HighSidebandCCD(CCD):
             check_y = y_axis[start_index:end_index]
 
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
-            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
-            check_ave = np.mean(check_y)
-            check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
-            check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+            octant = len(check_y) // 8
+            if octant < 1:
+                octant = 1
+
+            check_max_area = np.sum(check_y[check_max_index - octant:check_max_index + octant + 1])
+
+            no_peak = (2 * len(check_y)) // 5
+            print "check_y length", len(check_y)
+            check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
+            check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
+            # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
+            # check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
+            check_ratio = (check_max_area - (2 * octant + 1) * check_ave) / check_stdev
+
+
 
             if verbose:
                 print "Start and end index:", start_index, end_index
@@ -723,14 +738,17 @@ class HighSidebandCCD(CCD):
                 print "check_ave is", check_ave
                 print "check_stdev is", check_stdev
                 print "check_ratio is", check_ratio
-            
+            print "sideband", order
+            print "check_ratio", check_ratio
+
+
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
                 
-                if verbose:
-                    print "I just found", last_sb
+                # if verbose:
+                print "I just found", order, "at freq", last_sb, "\n"
                 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
@@ -828,7 +846,7 @@ class HighSidebandCCD(CCD):
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                     sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     # And had to scale by the area?
-                if plot:
+                if plot and verbose:
                     plt.figure('CCD data')
                     linewidth = 5
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
@@ -1061,32 +1079,6 @@ class HighSidebandPMT(PMT):
         self.sb_list = sorted(self.sb_dict.keys())
         if verbose:
             print "Sidebands included", self.sb_list
-    
-    def laser_line(self):
-        """
-        This method is designed to scale everything in the PMT to the conversion
-        efficiency based on our measurement of the laser line with a fixed 
-        attenuation.
-        """
-
-        if 0 not in self.sb_list:
-            self.parameters['normalized?'] = False
-            return
-        else:
-            laser_index = np.where(self.sb_results[:, 0] == 0)[0][0]
-            print "sb_results", self.sb_results[laser_index, :]
-            print "laser_index", laser_index
-
-            laser_strength = np.array(self.sb_results[laser_index, 3:5])
-            
-            for sb in self.sb_results:
-                print "Laser_strength", laser_strength
-                sb[4] = (sb[3] / laser_strength[0]) * np.sqrt((sb[4] / sb[3])**2 + (laser_strength[1] / laser_strength[0])**2)
-                sb[3] = sb[3] / laser_strength[0]
-            for sb in self.full_dict.values():
-                sb[3] = (sb[2] / laser_strength[0]) * np.sqrt((sb[3] / sb[2])**2 + (laser_strength[1] / laser_strength[0])**2)
-                sb[2] = sb[2] / laser_strength[0]
-            self.parameters['normalized?'] = True
 
     def integrate_sidebands(self, verbose=False):
         """
@@ -1110,8 +1102,13 @@ class HighSidebandPMT(PMT):
                 print "order", sideband[0]
                 print "area", area
                 print "error", error
+                print "ratio", area/error
             details = np.array([sideband[0], nir_frequency, 1/8065.6, area, error, 2/8065.6, 1/8065.6])
             if area < 0:
+                continue
+            elif area < 2 * error: # Two seems like a good cutoff?
+                if verbose:
+                    print "I did not keep sideband ", sideband[0]
                 continue
             try:
                 self.sb_results = np.vstack((self.sb_results, details))
@@ -1119,7 +1116,7 @@ class HighSidebandPMT(PMT):
                 self.sb_results = np.array(details)
             self.full_dict[sideband[0]] = details[1:]
         self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
-        
+
     def fit_sidebands(self, plot=False, verbose=False):
         """
         This method will fit a gaussian to each of the sidebands provided in 
@@ -1188,7 +1185,33 @@ class HighSidebandPMT(PMT):
         self.full_dict = {}
         for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
-    
+
+    def laser_line(self):
+        """
+        This method is designed to scale everything in the PMT to the conversion
+        efficiency based on our measurement of the laser line with a fixed
+        attenuation.
+        """
+
+        if 0 not in self.sb_list:
+            self.parameters['normalized?'] = False
+            return
+        else:
+            laser_index = np.where(self.sb_results[:, 0] == 0)[0][0]
+            print "sb_results", self.sb_results[laser_index, :]
+            print "laser_index", laser_index
+
+            laser_strength = np.array(self.sb_results[laser_index, 3:5])
+
+            for sb in self.sb_results:
+                print "Laser_strength", laser_strength
+                sb[4] = (sb[3] / laser_strength[0]) * np.sqrt((sb[4] / sb[3])**2 + (laser_strength[1] / laser_strength[0])**2)
+                sb[3] = sb[3] / laser_strength[0]
+            for sb in self.full_dict.values():
+                sb[3] = (sb[2] / laser_strength[0]) * np.sqrt((sb[3] / sb[2])**2 + (laser_strength[1] / laser_strength[0])**2)
+                sb[2] = sb[2] / laser_strength[0]
+            self.parameters['normalized?'] = True
+
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
         This will save all of the self.proc_data and the results from the 
@@ -2881,7 +2904,7 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     plt.legend()
     return pmt_data
 
-def proc_n_plotCCD(folder_path, cutoff=5, offset=None, plot=False, save=None, verbose=False):
+def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, verbose=False):
     """
     This function will take a list of ccd files and process it completely.
     save_name is a tuple (file_base, folder_path)
@@ -2897,8 +2920,7 @@ def proc_n_plotCCD(folder_path, cutoff=5, offset=None, plot=False, save=None, ve
         raw_list.append(HighSidebandCCD(fname, spectrometer_offset=offset))
 
     index = 0
-    spectra_list = hsg_sum_spectra(raw_list, do_fvb_crr=True)
-    for spectrum in spectra_list:
+    for spectrum in raw_list:
         spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
         if plot:
@@ -2913,4 +2935,4 @@ def proc_n_plotCCD(folder_path, cutoff=5, offset=None, plot=False, save=None, ve
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1], marker=spectrum.parameters["series"] + '_' + str(spectrum.parameters["spec_step"]), index=index)
             index += 1
-    return spectra_list
+    return raw_list
