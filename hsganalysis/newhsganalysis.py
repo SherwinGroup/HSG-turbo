@@ -396,7 +396,7 @@ class HighSidebandCCD(CCD):
             self.addenda = self.parameters['addenda']
             self.subtrahenda = self.parameters['subtrahenda']
         elif isinstance(fname, np.ndarray):
-            self.parameters = spectrometer_offset.copy()
+            self.parameters = spectrometer_offset.copy() # Probably shouldn't shoehorn this in this way
             self.addenda = []
             self.subtrahenda = []
             self.ccd_data = np.array(fname)
@@ -531,6 +531,7 @@ class HighSidebandCCD(CCD):
         self.sb_guess = three-part list including the frequency, amplitude and
                         error guesses for each sideband
         """
+        self.parameters['cutoff for guess_sidebands'] = cutoff
         x_axis = np.array(self.proc_data[:, 0])
         y_axis = np.array(self.proc_data[:, 1])
         error = np.array(self.proc_data[:, 2])
@@ -889,7 +890,19 @@ class HighSidebandCCD(CCD):
         self.full_dict = {}
         for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
-        
+
+    def infer_frequencies(self, nir_units="wavenumber", thz_units="GHz", bad_points=-2):
+        """
+        This guy tries to fit the results from fit_sidebands to a line to get the relevant frequencies
+        :param nir_units:
+        :param thz_units:
+        :param bad_points:
+        :return:
+        """
+        freqNIR, freqTHz = calc_laser_frequencies(self, nir_units, thz_units, bad_points)
+
+        self.parameters["calculated NIR freq (cm-1)"], self.parameters["calculated THz freq (GHz)"] = freqNIR, freqTHz
+
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
         This will save all of the self.proc_data and the results from the 
@@ -940,7 +953,7 @@ class HighSidebandCCD(CCD):
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-        parameter_str.replace('\n', '#\n')
+        parameter_str = parameter_str.replace('\n', '\n#')
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         
@@ -1243,14 +1256,15 @@ class HighSidebandPMT(PMT):
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
-        self.parameters['included_files'] = list(self.files)
+        #self.parameters["files included"] = list(self.files)
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except:
             print "Source: PMT.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-        parameter_str.replace('\n', '#\n')
+        parameter_str = parameter_str.replace('\n', '\n#')
+
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         
@@ -1402,7 +1416,7 @@ class FullHighSideband(FullSpectrum):
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-        parameter_str.replace('\n', '#\n')
+        parameter_str = parameter_str.replace('\n', '\n#')
         #origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         #spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
@@ -1834,7 +1848,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
         print "Error", error
         print '\n1990\nfull[2]', full[0][2]
     # Adding the new sidebands to the full set and moving errors around.
-    # I don't know exactly what to do about the other aspecs of the sidebands
+    # I don't know exactly what to do about the other aspects of the sidebands
     # besides the strength and its error.
         for sb in overlap:
             full[sb][2] = ratio * new_dict[sb][2]
@@ -1847,24 +1861,27 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             full[sb][5] = lw_error
         print '\n2003\nfull[2]', full[0][2]
     else:
-        new_starter = overlap[-1]
-        overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
-        for sb in overlap:
-            if verbose:
-                print "The sideband", sb
-                print "Old value", full[sb][4]*1000
-                print "Add value", new_dict[sb][4]*1000
-            error = np.sqrt(full[sb][3]**(-2) + new_dict[sb][3]**(-2))**(-1)
-            avg = (full[sb][2] / (full[sb][3]**2) + new_dict[sb][2] / (new_dict[sb][3]**2)) / (full[sb][3]**(-2) + new_dict[sb][3]**(-2))
-            full[sb][2] = avg
-            full[sb][3] = error
-            
-            lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
-            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
-            full[sb][4] = lw_avg
-            full[sb][5] = lw_error # This may not be the exactly right way to calculate the error
-            if verbose:
-                print "New value", lw_avg * 1000
+        try:
+            new_starter = overlap[-1]
+            overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
+            for sb in overlap:
+                if verbose:
+                    print "The sideband", sb
+                    print "Old value", full[sb][4]*1000
+                    print "Add value", new_dict[sb][4]*1000
+                error = np.sqrt(full[sb][3]**(-2) + new_dict[sb][3]**(-2))**(-1)
+                avg = (full[sb][2] / (full[sb][3]**2) + new_dict[sb][2] / (new_dict[sb][3]**2)) / (full[sb][3]**(-2) + new_dict[sb][3]**(-2))
+                full[sb][2] = avg
+                full[sb][3] = error
+
+                lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
+                lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
+                full[sb][4] = lw_avg
+                full[sb][5] = lw_error # This may not be the exactly right way to calculate the error
+                if verbose:
+                    print "New value", lw_avg * 1000
+        except:
+            new_starter = 0 # I think this makes things work when there's no overlap
     if need_ratio:
         print '\n2024\nfull[2]', full[0][2]
     for sb in [x for x in new_dict.keys() if (x >= new_starter)]:
@@ -2190,15 +2207,15 @@ def handle_nans(y_vals):
     y_vals[nan_idx] = np.interp(my_lambda(nan_idx), my_lambda(~nan_idx), y_vals[~nan_idx])
     return y_vals
 
-def calc_laser_frequencies(spec, NIR_units = "eV", THz_units = "eV",
+def calc_laser_frequencies(spec, nir_units = "eV", thz_units = "eV",
                          bad_points = -2, inspect_plots = False):
     """
     Calculate the NIR and FEL frequency for a spectrum
     :param spec: HSGCCD object to fit
     :type spec: HighSidebandCCD
-    :param NIR_units: str of desired units.
+    :param nir_units: str of desired units.
         Options: wavenumber, eV, meV, THz, GHz, nm
-    :param THz_units: str of desired units.
+    :param thz_units: str of desired units.
         Options: wavenumber, eV, meV, THz, GHz, nm
     :param bad_points: How many bad points which shouldn't be used
         to calculate the frequencies (generally because the last
@@ -2236,10 +2253,10 @@ def calc_laser_frequencies(spec, NIR_units = "eV", THz_units = "eV",
         "nm": lambda x: 1239.83/x
     }
 
-    NIRfreq = converter.get(NIR_units, converter["eV"])(NIRfreq)
-    THzfreq = converter.get(THz_units, converter["eV"])(THzfreq)
+    freqNIR = converter.get(nir_units, converter["eV"])(NIRfreq)
+    freqTHz = converter.get(thz_units, converter["eV"])(THzfreq)
 
-    return NIRfreq, THzfreq
+    return freqNIR, freqTHz
 
 
 
@@ -2923,6 +2940,8 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
     for spectrum in raw_list:
         spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
+        if "calculated NIR freq (cm-1)" not in spectrum.parameters.keys():
+            spectrum.infer_frequencies()
         if plot:
             plt.figure('CCD data')
             plt.errorbar(spectrum.proc_data[:, 0], spectrum.proc_data[:, 1], spectrum.proc_data[:, 2], label=spectrum.parameters['series'])
