@@ -42,7 +42,8 @@ class CCD(object):
         self.description = string that is the text box from data taking GUI
         self.raw_data = raw data output by measurement software, wavelength vs.
                         data.  There may be text for some of the entries
-        self.ccd_data = semi-processed 1600 x 3 array of photon energy vs. data with error
+        self.ccd_data = semi-processed 1600 x 3 array of photon energy vs. data with standard error of mean at that pixel
+                        calculated by taking multiple images.
         """
         self.fname = fname
         
@@ -409,7 +410,8 @@ class HighSidebandCCD(CCD):
                 fname, type(fname)
             ))
 
-        self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
+        self.proc_data = np.array(self.ccd_data)
+        # proc_data is now a 1600 long array with [frequency (eV), signal (counts / FEL pulse), S.E. of signal mean]
 
         self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
@@ -560,7 +562,7 @@ class HighSidebandCCD(CCD):
         else:
             check_y = y_axis[global_max - 15:global_max + 15]
 
-        check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
+        check_max_area = np.sum(y_axis[global_max - 2:global_max + 3])
 
         check_ave = np.mean(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
         check_stdev = np.std(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
@@ -580,7 +582,7 @@ class HighSidebandCCD(CCD):
             self.sb_index = [global_max]
             sb_freq_guess = [x_axis[global_max]]
             sb_amp_guess = [y_axis[global_max]]
-            sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 1:global_max + 2]])) / (check_max_area - 3 * check_ave)]
+            sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 2:global_max + 3]])) / (check_max_area - 5 * check_ave)]
         else:
             print "There are no sidebands in", self.fname
             assert False
@@ -723,7 +725,7 @@ class HighSidebandCCD(CCD):
             check_y = y_axis[start_index:end_index]
 
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
-            octant = len(check_y) // 8
+            octant = len(check_y) // 8 # To be able to break down check_y into eighths
             if octant < 1:
                 octant = 1
 
@@ -756,13 +758,15 @@ class HighSidebandCCD(CCD):
                 last_sb = x_axis[found_index]
                 
                 # if verbose:
-                print "I just found", order, "at freq", last_sb, "\n"
+                print "I just found", order, "at index", found_index, "at freq", last_sb, "\n"
                 
                 sb_freq_guess.append(x_axis[found_index])
-                sb_amp_guess.append(check_max_area - 3 * check_ave)
-                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
-                if verbose:
-                    print "My error estimate is:", error_est
+                sb_amp_guess.append(check_max_area - (2 * octant + 1) * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - octant:found_index + octant]])) / (check_max_area - (2 * octant + 1) * check_ave)
+                # This error is a relative error.
+                # if verbose:
+                print "My error estimate is:", error_est
+                #print "My relative error is:", error_est / sb_amp_guess
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
@@ -821,7 +825,7 @@ class HighSidebandCCD(CCD):
                 print "number:", elem, num
                 #print "data_temp:", data_temp
                 print "p0:", p0
-            plot_guess = False # This is to disable guess plotting
+            plot_guess = False # This is to disable plotting the guess function
             if plot_guess:
                 plt.figure('CCD data')
                 linewidth = 3
@@ -845,15 +849,19 @@ class HighSidebandCCD(CCD):
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 if verbose:
                     print "the fit worked"
-                coeff[1] = abs(coeff[1])
+                coeff[1] = abs(coeff[1]) # The amplitude could be negative if the linewidth is negative
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 if verbose:
                     print "coeffs:", coeff
                     print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
-                    sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
-                    # And had to scale by the area?
+                    sb_fits[-1][6] = self.sb_guess[elem, 2] * coeff[1] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
+                    print "number:", elem, num
+                    print "The rel. error guess is", self.sb_guess[elem, 2]
+                    print "The abs. error guess is", coeff[1] * self.sb_guess[elem, 2]
+
+                    # The error from self.sb_guess[elem, 2] is a relative error
                 if plot and verbose:
                     plt.figure('CCD data')
                     linewidth = 5
@@ -879,6 +887,7 @@ class HighSidebandCCD(CCD):
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
         try:
             sb_fits = sb_fits_temp[:, reorder]
+            print "The abs. error guess is", sb_fits[:, 0:5]
         except:
             print "The file is:", self.fname
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!\n"
@@ -1833,11 +1842,17 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     """
     #print "I'm adding these sidebands", sorted(new_dict.keys())
     overlap = []
+    missing = [] # How to deal with sideabands that are missing from full but in new.
     for new_sb in sorted(new_dict.keys()):
-        if new_sb in full.keys():
+        full_sbs = sorted(full.keys())
+        if new_sb in full_sbs:
             overlap.append(new_sb)
-    if verbose:
+        elif new_sb not in full_sbs and new_sb < full_sbs[-1]: # This probably doesn't work with bunches of negative orders
+            missing.append(new_sb)
+
+    if True:
         print "overlap:", overlap
+        print "missing:", missing
     if need_ratio:
     # Calculate the appropriate ratio to multiply the new sidebands by.
     # I'm not entirely sure what to do with the error of this guy.
@@ -1891,7 +1906,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             new_starter = 0 # I think this makes things work when there's no overlap
     if need_ratio:
         print '\n2024\nfull[2]', full[0][2]
-    for sb in [x for x in new_dict.keys() if (x >= new_starter)]:
+    for sb in [x for x in new_dict.keys() if ((x >= new_starter) or (x in missing))]:
         full[sb] = new_dict[sb]
         if need_ratio:
             full[sb][2] = ratio * full[sb][2]
