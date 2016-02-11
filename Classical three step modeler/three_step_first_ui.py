@@ -25,7 +25,7 @@ except AttributeError:
 class Ui_Form(object):
     def setupUi(self, Form):
         Form.setObjectName(_fromUtf8("Form"))
-        Form.resize(916, 633)
+        Form.resize(886, 633)
         self.horizontalLayout = QtGui.QHBoxLayout(Form)
         self.horizontalLayout.setObjectName(_fromUtf8("horizontalLayout"))
         self.frame = QtGui.QFrame(Form)
@@ -201,6 +201,12 @@ class Ui_Form(object):
         self.horizontalLayout_2.setObjectName(_fromUtf8("horizontalLayout_2"))
         spacerItem3 = QtGui.QSpacerItem(40, 20, QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem3)
+        self.pushButton_chooseFolder = QtGui.QPushButton(Form)
+        self.pushButton_chooseFolder.setObjectName(_fromUtf8("pushButton_chooseFolder"))
+        self.horizontalLayout_2.addWidget(self.pushButton_chooseFolder)
+        self.lineEdit_file_path = QtGui.QLineEdit(Form)
+        self.lineEdit_file_path.setObjectName(_fromUtf8("lineEdit_file_path"))
+        self.horizontalLayout_2.addWidget(self.lineEdit_file_path)
         self.pushButton_save = QtGui.QPushButton(Form)
         self.pushButton_save.setObjectName(_fromUtf8("pushButton_save"))
         self.horizontalLayout_2.addWidget(self.pushButton_save)
@@ -252,6 +258,8 @@ class Ui_Form(object):
         self.label_phi.setText(_translate("Form", "Phase (deg)", None))
         self.lineEdit_energy_threshold.setText(_translate("Form", "10", None))
         self.label_approx_sb.setText(_translate("Form", "Approx. sideband", None))
+        self.pushButton_chooseFolder.setText(_translate("Form", "Choose folder", None))
+        self.pushButton_save.setShortcut(_translate("Form", "Ctrl+S", None))
         self.pushButton_save.setText(_translate("Form", "Save us!", None))
 
 from pyqtgraph import PlotWidget

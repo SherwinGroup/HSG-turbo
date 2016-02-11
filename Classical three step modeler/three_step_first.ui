@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>916</width>
+    <width>886</width>
     <height>633</height>
    </rect>
   </property>
@@ -592,9 +592,22 @@
         </spacer>
        </item>
        <item>
+        <widget class="QPushButton" name="pushButton_chooseFolder">
+         <property name="text">
+          <string>Choose folder</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLineEdit" name="lineEdit_file_path"/>
+       </item>
+       <item>
         <widget class="QPushButton" name="pushButton_save">
          <property name="text">
           <string>Save us!</string>
+         </property>
+         <property name="shortcut">
+          <string>Ctrl+S</string>
          </property>
         </widget>
        </item>

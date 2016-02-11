@@ -44,7 +44,8 @@ class CCD(object):
         self.description = string that is the text box from data taking GUI
         self.raw_data = raw data output by measurement software, wavelength vs.
                         data.  There may be text for some of the entries
-        self.ccd_data = semi-processed 1600 x 3 array of photon energy vs. data with error
+        self.ccd_data = semi-processed 1600 x 3 array of photon energy vs. data with standard error of mean at that pixel
+                        calculated by taking multiple images.
         """
         self.fname = fname
         
@@ -398,15 +399,21 @@ class HighSidebandCCD(CCD):
             self.addenda = self.parameters['addenda']
             self.subtrahenda = self.parameters['subtrahenda']
         elif isinstance(fname, np.ndarray):
-            self.parameters = spectrometer_offset.copy()
+            self.parameters = spectrometer_offset.copy() # Probably shouldn't shoehorn this in this way
             self.addenda = []
             self.subtrahenda = []
             self.ccd_data = np.array(fname)
             self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
-            errors = np.ones_like(self.ccd_data[:,0])
-            self.ccd_data = np.column_stack((self.ccd_data, errors))
+            # This data won't have errors
+            self.ccd_data = np.column_stack((self.ccd_data, np.ones_like(self.ccd_data[:,1])))
+            self.fname = "Live Data"
+        else:
+            raise Exception("I don't know what this file type is {}, type: {}".format(
+                fname, type(fname)
+            ))
 
-        self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
+        self.proc_data = np.array(self.ccd_data)
+        # proc_data is now a 1600 long array with [frequency (eV), signal (counts / FEL pulse), S.E. of signal mean]
 
         self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
@@ -535,6 +542,7 @@ class HighSidebandCCD(CCD):
         self.sb_guess = three-part list including the frequency, amplitude and
                         error guesses for each sideband
         """
+        self.parameters['cutoff for guess_sidebands'] = cutoff
         x_axis = np.array(self.proc_data[:, 0])
         y_axis = np.array(self.proc_data[:, 1])
         error = np.array(self.proc_data[:, 2])
@@ -556,7 +564,7 @@ class HighSidebandCCD(CCD):
         else:
             check_y = y_axis[global_max - 15:global_max + 15]
 
-        check_max_area = np.sum(y_axis[global_max - 1:global_max + 2])
+        check_max_area = np.sum(y_axis[global_max - 2:global_max + 3])
 
         check_ave = np.mean(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
         check_stdev = np.std(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
@@ -577,7 +585,7 @@ class HighSidebandCCD(CCD):
             self.sb_index = [global_max]
             sb_freq_guess = [x_axis[global_max]]
             sb_amp_guess = [y_axis[global_max]]
-            sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 1:global_max + 2]])) / (check_max_area - 3 * check_ave)]
+            sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 2:global_max + 3]])) / (check_max_area - 5 * check_ave)]
         else:
             print "There are no sidebands in", self.fname
             assert False
@@ -720,7 +728,7 @@ class HighSidebandCCD(CCD):
             check_y = y_axis[start_index:end_index]
 
             check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
-            octant = len(check_y) // 8
+            octant = len(check_y) // 8 # To be able to break down check_y into eighths
             if octant < 1:
                 octant = 1
 
@@ -753,13 +761,15 @@ class HighSidebandCCD(CCD):
                 last_sb = x_axis[found_index]
                 
                 # if verbose:
-                # print "I just found", order, "at freq", last_sb, "\n"
+                print "I just found", order, "at index", found_index, "at freq", last_sb, "\n"
                 
                 sb_freq_guess.append(x_axis[found_index])
-                sb_amp_guess.append(check_max_area - 3 * check_ave)
-                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
-                if verbose:
-                    print "My error estimate is:", error_est
+                sb_amp_guess.append(check_max_area - (2 * octant + 1) * check_ave)
+                error_est = np.sqrt(sum([i**2 for i in error[found_index - octant:found_index + octant]])) / (check_max_area - (2 * octant + 1) * check_ave)
+                # This error is a relative error.
+                # if verbose:
+                print "My error estimate is:", error_est
+                #print "My relative error is:", error_est / sb_amp_guess
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
@@ -818,7 +828,7 @@ class HighSidebandCCD(CCD):
                 print "number:", elem, num
                 #print "data_temp:", data_temp
                 print "p0:", p0
-            plot_guess = False # This is to disable guess plotting
+            plot_guess = False # This is to disable plotting the guess function
             if plot_guess:
                 plt.figure('CCD data')
                 linewidth = 3
@@ -842,15 +852,19 @@ class HighSidebandCCD(CCD):
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 if verbose:
                     print "the fit worked"
-                coeff[1] = abs(coeff[1])
+                coeff[1] = abs(coeff[1]) # The amplitude could be negative if the linewidth is negative
                 coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
                 if verbose:
                     print "coeffs:", coeff
                     print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
-                    sb_fits[-1][6] = self.sb_guess[elem, 2] * sb_fits[-1][2] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
-                    # And had to scale by the area?
+                    sb_fits[-1][6] = self.sb_guess[elem, 2] * coeff[1] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
+                    print "number:", elem, num
+                    print "The rel. error guess is", self.sb_guess[elem, 2]
+                    print "The abs. error guess is", coeff[1] * self.sb_guess[elem, 2]
+
+                    # The error from self.sb_guess[elem, 2] is a relative error
                 if plot and verbose:
                     plt.figure('CCD data')
                     linewidth = 5
@@ -876,6 +890,7 @@ class HighSidebandCCD(CCD):
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
         try:
             sb_fits = sb_fits_temp[:, reorder]
+            print "The abs. error guess is", sb_fits[:, 0:5]
         except:
             print "The file is:", self.fname
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!\n"
@@ -894,7 +909,19 @@ class HighSidebandCCD(CCD):
         self.full_dict = {}
         for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
-        
+
+    def infer_frequencies(self, nir_units="wavenumber", thz_units="GHz", bad_points=-2):
+        """
+        This guy tries to fit the results from fit_sidebands to a line to get the relevant frequencies
+        :param nir_units:
+        :param thz_units:
+        :param bad_points:
+        :return:
+        """
+        freqNIR, freqTHz = calc_laser_frequencies(self, nir_units, thz_units, bad_points)
+
+        self.parameters["calculated NIR freq (cm-1)"], self.parameters["calculated THz freq (GHz)"] = freqNIR, freqTHz
+
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
         This will save all of the self.proc_data and the results from the 
@@ -945,7 +972,7 @@ class HighSidebandCCD(CCD):
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-        parameter_str.replace('\n', '#\n')
+        parameter_str = parameter_str.replace('\n', '\n#')
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         
@@ -1250,14 +1277,15 @@ class HighSidebandPMT(PMT):
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
-        self.parameters['included_files'] = list(self.files)
+        #self.parameters["files included"] = list(self.files)
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except:
             print "Source: PMT.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-        parameter_str.replace('\n', '#\n')
+        parameter_str = parameter_str.replace('\n', '\n#')
+
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         
@@ -1408,7 +1436,7 @@ class FullHighSideband(FullSpectrum):
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-        parameter_str.replace('\n', '#\n')
+        parameter_str = parameter_str.replace('\n', '\n#')
         #origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         #spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
@@ -1818,11 +1846,17 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     """
     #print "I'm adding these sidebands", sorted(new_dict.keys())
     overlap = []
+    missing = [] # How to deal with sideabands that are missing from full but in new.
     for new_sb in sorted(new_dict.keys()):
-        if new_sb in full.keys():
+        full_sbs = sorted(full.keys())
+        if new_sb in full_sbs:
             overlap.append(new_sb)
-    if verbose:
+        elif new_sb not in full_sbs and new_sb < full_sbs[-1]: # This probably doesn't work with bunches of negative orders
+            missing.append(new_sb)
+
+    if True:
         print "overlap:", overlap
+        print "missing:", missing
     if need_ratio:
     # Calculate the appropriate ratio to multiply the new sidebands by.
     # I'm not entirely sure what to do with the error of this guy.
@@ -1840,7 +1874,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
         print "Error", error
         print '\n1990\nfull[2]', full[0][2]
     # Adding the new sidebands to the full set and moving errors around.
-    # I don't know exactly what to do about the other aspecs of the sidebands
+    # I don't know exactly what to do about the other aspects of the sidebands
     # besides the strength and its error.
         for sb in overlap:
             full[sb][2] = ratio * new_dict[sb][2]
@@ -1853,27 +1887,30 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             full[sb][5] = lw_error
         print '\n2003\nfull[2]', full[0][2]
     else:
-        new_starter = overlap[-1]
-        overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
-        for sb in overlap:
-            if verbose:
-                print "The sideband", sb
-                print "Old value", full[sb][4]*1000
-                print "Add value", new_dict[sb][4]*1000
-            error = np.sqrt(full[sb][3]**(-2) + new_dict[sb][3]**(-2))**(-1)
-            avg = (full[sb][2] / (full[sb][3]**2) + new_dict[sb][2] / (new_dict[sb][3]**2)) / (full[sb][3]**(-2) + new_dict[sb][3]**(-2))
-            full[sb][2] = avg
-            full[sb][3] = error
-            
-            lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
-            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
-            full[sb][4] = lw_avg
-            full[sb][5] = lw_error # This may not be the exactly right way to calculate the error
-            if verbose:
-                print "New value", lw_avg * 1000
+        try:
+            new_starter = overlap[-1]
+            overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
+            for sb in overlap:
+                if verbose:
+                    print "The sideband", sb
+                    print "Old value", full[sb][4]*1000
+                    print "Add value", new_dict[sb][4]*1000
+                error = np.sqrt(full[sb][3]**(-2) + new_dict[sb][3]**(-2))**(-1)
+                avg = (full[sb][2] / (full[sb][3]**2) + new_dict[sb][2] / (new_dict[sb][3]**2)) / (full[sb][3]**(-2) + new_dict[sb][3]**(-2))
+                full[sb][2] = avg
+                full[sb][3] = error
+
+                lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
+                lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
+                full[sb][4] = lw_avg
+                full[sb][5] = lw_error # This may not be the exactly right way to calculate the error
+                if verbose:
+                    print "New value", lw_avg * 1000
+        except:
+            new_starter = 0 # I think this makes things work when there's no overlap
     if need_ratio:
         print '\n2024\nfull[2]', full[0][2]
-    for sb in [x for x in new_dict.keys() if (x >= new_starter)]:
+    for sb in [x for x in new_dict.keys() if ((x >= new_starter) or (x in missing))]:
         full[sb] = new_dict[sb]
         if need_ratio:
             full[sb][2] = ratio * full[sb][2]
@@ -2198,15 +2235,15 @@ def handle_nans(y_vals):
     y_vals[nan_idx] = np.interp(my_lambda(nan_idx), my_lambda(~nan_idx), y_vals[~nan_idx])
     return y_vals
 
-def calc_laser_frequencies(spec, NIR_units = "eV", THz_units = "eV",
+def calc_laser_frequencies(spec, nir_units = "eV", thz_units = "eV",
                          bad_points = -2, inspect_plots = False):
     """
     Calculate the NIR and FEL frequency for a spectrum
     :param spec: HSGCCD object to fit
     :type spec: HighSidebandCCD
-    :param NIR_units: str of desired units.
+    :param nir_units: str of desired units.
         Options: wavenumber, eV, meV, THz, GHz, nm
-    :param THz_units: str of desired units.
+    :param thz_units: str of desired units.
         Options: wavenumber, eV, meV, THz, GHz, nm
     :param bad_points: How many bad points which shouldn't be used
         to calculate the frequencies (generally because the last
@@ -2244,10 +2281,10 @@ def calc_laser_frequencies(spec, NIR_units = "eV", THz_units = "eV",
         "nm": lambda x: 1239.83/x
     }
 
-    NIRfreq = converter.get(NIR_units, converter["eV"])(NIRfreq)
-    THzfreq = converter.get(THz_units, converter["eV"])(THzfreq)
+    freqNIR = converter.get(nir_units, converter["eV"])(NIRfreq)
+    freqTHz = converter.get(thz_units, converter["eV"])(THzfreq)
 
-    return NIRfreq, THzfreq
+    return freqNIR, freqTHz
 
 
 
@@ -2931,6 +2968,8 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
     for spectrum in raw_list:
         spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
+        if "calculated NIR freq (cm-1)" not in spectrum.parameters.keys():
+            spectrum.infer_frequencies()
         if plot:
             plt.figure('CCD data')
             plt.errorbar(spectrum.proc_data[:, 0], spectrum.proc_data[:, 1], spectrum.proc_data[:, 2], label=spectrum.parameters['series'])

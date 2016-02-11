@@ -8,6 +8,7 @@ Created on Mon Jan 18 09:53:27 2016
 """
 from __future__ import division
 import sys
+import json
 from PyQt4 import QtGui
 import pyqtgraph as pg
 from three_step_first_ui import Ui_Form
@@ -52,6 +53,10 @@ class Window(QtGui.QWidget):
         self.ui.lineEdit_e_bind.editingFinished.connect(self.get_changes)
         self.ui.lineEdit_phase.editingFinished.connect(self.get_changes)
 
+        self.ui.pushButton_chooseFolder.clicked.connect(self.choose_folder) # Choose the path
+        self.ui.pushButton_save.clicked.connect(self.save_file) # add the file name to the path
+        self.ui.lineEdit_file_path.editingFinished.connect(self.set_file_name) # Save it all!
+
     def get_changes(self):
         """
         This is the method that is used as the slot for all of those lineEdit
@@ -84,6 +89,28 @@ class Window(QtGui.QWidget):
         self.ui.lineEdit_ponderomotive.setText('{:.3f}'.format(self.data.ponderomotive_meV))
         self.ui.lineEdit_max_sbs.setText('{:.3f}'.format(self.data.max_sb_order))
 
+    def choose_folder(self):
+        hint = 'Choose save directory'
+        self.file_dir = str(QtGui.QFileDialog.getExistingDirectory(self, hint))
+        self.ui.lineEdit_file_path.setText(self.file_dir)
+
+    def set_file_name(self):
+        self.file_name = str(self.ui.lineEdit_file_path.text())
+
+    def save_file(self):
+        header_string = '#Initial settings:\n'
+        header_string += json.dumps(self.data.parts_dict, sort_keys=True, indent=4, separators=(',', ': '))
+        header_string += '\nResults:\n'
+        header_string += json.dumps(self.data.results_dict, sort_keys=True, indent=4, separators=(',', ': '))
+        header_string = header_string.replace('\n', '\n#')
+        header_string += '\nTime,Electric field,Position,Position,Kinetic energy,Kinetic energy,Kinetic energy'
+        header_string += '\nps,kV/cm,nm,nm,meV,meV,meV'
+        header_string += '\n,,Electron,Hole,Electron,Hole,Total'
+        save_stuff = np.column_stack((self.data.time_vals_s * 1e12, self.data.driving_field * self.data.thz_field / 1e5, self.data.e_position_m * 1e9,
+                                      self.data.h_position_m * 1e9, self.data.e_kenergy_eV * 1e3, self.data.h_kenergy_eV * 1e3,
+                                      self.data.total_kenergy_eV * 1e3))
+        np.savetxt(self.file_name, save_stuff, comments='', header=header_string, delimiter=',')
+
 class Trajectories(object):
     """
     This guy includes all the information about the three step Trajectories
@@ -100,6 +127,14 @@ class Trajectories(object):
         self.e_bind = e_bind * q_e * 1e-3 # in J
         self.phi = phi * np.pi / 180 # in rad
 
+        self.parts_dict = {'eff. electron mass': '{:.4f}'.format(m_e_eff),
+                           'eff. hole mass': '{:.4f}'.format(m_h_eff),
+                           'eff. reduced mass': '{:.4f}'.format(self.reduced_mass / m_e),
+                           'thz field (kV/cm)': '{:.2f}'.format(thz_field),
+                           'thz frequency (THz)': '{:.3f}'.format(thz_freq),
+                           'exciton binding energy (eV)': '{:.3f}'.format(e_bind),
+                           'tunneling phase (deg)': '{:.3f}'.format(phi)}
+        self.results_dict = {}
         self.update_stuff()
 
     def update_stuff(self):
@@ -136,6 +171,10 @@ class Trajectories(object):
         self.total_kenergy_rec_meV = self.total_kenergy_eV[-1] * 1e3
         
         self.approx_sb = (self.total_kenergy_rec_meV + self.e_bind * 1e3 / q_e) / (self.thz_freq * 1e-12 / 0.2418)
+        self.results_dict['individual total KE (meV)'] = '{:.2f}'.format(self.total_kenergy_rec_meV)
+        self.results_dict['individual electron KE (meV)'] = '{:.2f}'.format(self.e_kenergy_rec_meV)
+        self.results_dict['individual hole KE (meV)'] = '{:.2f}'.format(self.h_kenergy_rec_meV)
+        self.results_dict['approximate sideband'] = '{:.1f}'.format(self.approx_sb)
 
     def make_parameters(self):
         """
@@ -145,14 +184,9 @@ class Trajectories(object):
         self.ponderomotive_J = (q_e**2 * self.thz_field**2) / (4 * self.reduced_mass * (2 * np.pi * self.thz_freq)**2)
         self.ponderomotive_meV = self.ponderomotive_J / q_e * 1e3 # Now its in meV
         self.max_sb_order = (3.17 * self.ponderomotive_J + self.e_bind) / (self.thz_freq * 6.626e-34)
-
-if __name__ != '__main__':
-    plt.close('all')
-    test = Trajectories(0.063, 0.051, 0.540, 11.5, 8, 54)
-
-    plt.plot(test.time_vals_ps, test.e_kenergy_meV)
-    plt.plot(test.time_vals_ps, test.total_kenergy_meV)
-    plt.show()
+        self.results_dict['keldysh parameter'] = '{:.3f}'.format(self.keldysh)
+        self.results_dict['ponderomotive energy (meV)'] = '{:.2f}'.format(self.ponderomotive_meV)
+        self.results_dict['maximum order sideband'] = '{:.1f}'.format(self.max_sb_order)
 
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
