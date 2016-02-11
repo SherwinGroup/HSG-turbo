@@ -403,6 +403,8 @@ class HighSidebandCCD(CCD):
             self.subtrahenda = []
             self.ccd_data = np.array(fname)
             self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
+            errors = np.ones_like(self.ccd_data[:,0])
+            self.ccd_data = np.column_stack((self.ccd_data, errors))
 
         self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
 
