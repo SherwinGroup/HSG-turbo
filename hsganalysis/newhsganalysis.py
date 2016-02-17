@@ -203,6 +203,10 @@ class Absorbance(CCD):
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
         parameter_str.replace('\n', '#\n')
+
+        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        for num in range(99 - num_lines): parameter_str += '\n#'
+
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         # spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
@@ -970,6 +974,10 @@ class HighSidebandCCD(CCD):
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
         parameter_str = parameter_str.replace('\n', '\n#')
+
+        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        for num in range(99 - num_lines): parameter_str += '\n#'
+
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         
@@ -1281,6 +1289,9 @@ class HighSidebandPMT(PMT):
             return
         parameter_str = parameter_str.replace('\n', '\n#')
 
+        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        for num in range(99 - num_lines): parameter_str += '\n#'
+
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         
@@ -1433,6 +1444,9 @@ class FullHighSideband(FullSpectrum):
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
         parameter_str = parameter_str.replace('\n', '\n#')
+
+        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        for num in range(99 - num_lines): parameter_str += '\n#'
         #origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         #spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
         
