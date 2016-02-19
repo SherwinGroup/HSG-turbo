@@ -1494,6 +1494,7 @@ def gaussWithBackground(x, *p):
 # Collection functions 
 ####################
 
+'''
 def hsg_sum_spectra(object_list, do_fvb_crr=False):
     """
     This function will add all the things that should be added.  Obvs.  It will
@@ -1552,7 +1553,7 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
         temp.image_normalize(num_images)
         good_list.append(temp)
     return good_list
-
+'''
 def hsg_combine_spectra(spectra_list):
     """
     This function is all about smooshing different parts of the same hsg 
@@ -2266,8 +2267,8 @@ def calc_laser_frequencies(spec, nir_units = "eV", thz_units = "eV",
     locations = spec.sb_results[:,1]
     errors = spec.sb_results[:,2]
 
-    p = np.polyfit(sidebands[:bad_points],
-                   locations[:bad_points], deg=1)
+    p = np.polyfit(sidebands[1:bad_points], # This is 1 because the peak picker function was calling the 10th order the 9th
+                   locations[1:bad_points], deg=1)
 
     NIRfreq = p[1]
     THzfreq = p[0]
