@@ -21,6 +21,7 @@ import scipy.fftpack as fft
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 
+
 ####################
 # Objects 
 ####################
@@ -31,12 +32,7 @@ class CCD(object):
         This will read the appropriate file and make a basic CCD object.  Fancier
         things will be handled with the sub classes.
 
-        input:
-        fname = file name where the data is saved
-        spectrometer_offset = number of nanometers that the spectrometer is 
-                              shifted by
-
-        creates:
+        Creates:
         self.parameters = JSON dictionary holding all of the information from the
                           data file.
         self.description = string that is the text box from data taking GUI
@@ -44,12 +40,19 @@ class CCD(object):
                         data.  There may be text for some of the entries
         self.ccd_data = semi-processed 1600 x 3 array of photon energy vs. data with standard error of mean at that pixel
                         calculated by taking multiple images.
+
+        :param fname: file name where the data is saved
+        :type fname: str
+        :param spectrometer_offset: if the spectrometer won't go where it's told, use this to correct the wavelengths (nm)
+        :type spectrometer_offset: float
+        :return: None, technically
         """
+
         self.fname = fname
-        
+
         print "I'm going to open", fname
-        #f = open(fname,'rU')
-        with open(fname,'rU') as f:
+        # f = open(fname,'rU')
+        with open(fname, 'rU') as f:
             param_str = ''
             line = f.readline()
             while line[0] == '#':
@@ -76,10 +79,10 @@ class CCD(object):
             pass
         self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=','))
         # I used flipup so that the x-axis is an increasing function of frequency
-        
-        self.ccd_data = np.array(self.raw_data[:1600,:]) # By slicing up to 1600,
-                                                         # we cut out the text 
-                                                         # header
+
+        self.ccd_data = np.array(self.raw_data[:1600, :])  # By slicing up to 1600,
+        # we cut out the text
+        # header
         if spectrometer_offset is not None:
             try:
                 # print "Doing offset", self.parameters["offset"]
@@ -101,30 +104,40 @@ class Photoluminescence(CCD):
         creates:
         self.proc_data = self.ccd_data divided by the exposure time
                          units: PL counts / second
+        :param fname: name of the file
+        :type fname: str
+
+        :return: None, it makes things.
         """
         super(Photoluminescence, self).__init__(fname)
 
-        self.proc_data = np.array(self.ccd_data) # Does this work the way I want it to?
+        self.proc_data = np.array(self.ccd_data)  # Does this work the way I want it to?
         self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['exposure']
-#     def save_processing(self):
-        
+
+
+# def save_processing(self):
+
 class Absorbance(CCD):
     def __init__(self, fname):
         """
         There are several ways Absorbance data can be loaded
         You could try to load the abs data output from data collection directly,
-        which has the wavelength, raw, blank and actual absorbance data itself
+        which has the wavelength, raw, blank and actual absorbance data itself.  This is correct.
 
         Alternatively, you could want to load the raw transmission/reference
         data, ignoring (or maybe not even having) the abs calculated
-        from the data collection software.
+        from the data collection software.  This is not the way to do it
 
-        I'm not sure the best way to input the files you want...
-        Maybe either the abs data itself, or a list of the [ref, trans]?
+        Creates:
+        self.ref_data = np array of the reference, freq (eV) vs. reference (counts)
+        self.raw_data = np.array of the raw absorption spectrum, freq (eV) vs. reference (counts)
+        self.proc_data = np.array of the absorption spectrum IN dB! freq (eV) vs. "absorbance" (dB!!!)
+        # TODO: are there errors here?
         :param fname: either an absorbance filename, or a length 2 list of filenames
-        :return:
+        :type fname: str
+        :return: None
         """
-
+        # TODO: are there errors here?
         if "abs_" in fname:
             super(Absorbance, self).__init__(fname)
             # Separate into the separate data sets
@@ -134,7 +147,8 @@ class Absorbance(CCD):
             self.raw_data = np.array(self.ccd_data[:, [0, 2]])
             #   The calculated absorbance data (-log10(raw/ref))
             self.proc_data = np.array(self.ccd_data[:, [0, 3]])
-            self.proc_data[:, 1] = 10 * self.proc_data[:, 1]
+
+            self.proc_data[:, 1] = 10 * self.proc_data[:, 1] # TODO: THIS LINE NEEDS TO BE ADJUSTED APPROPRIATELY
         else:
             # Should be here if you pass the reference/trans filenames
             try:
@@ -151,21 +165,27 @@ class Absorbance(CCD):
                 self.ref_data = np.flipud(np.genfromtxt(fname[0], comments='#',
                                                         delimiter=',', usecols=(0, 1)))
 
-                self.ref_data = np.array(self.ref_data[:1600,:])
+                self.ref_data = np.array(self.ref_data[:1600, :])
                 self.ref_data[:, 0] = 1239.84 / self.ref_data[:, 0]
 
                 self.raw_data = np.flipud(np.genfromtxt(fname[1], comments='#',
                                                         delimiter=',', usecols=(0, 1)))
 
-                self.raw_data = np.array(self.raw_data[:1600,:])
+                self.raw_data = np.array(self.raw_data[:1600, :])
                 self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
             except Exception as e:
                 print "Exception opening,", e
             self.proc_data = np.empty_like(self.ref_data)
-            self.proc_data[:,0] = self.ref_data[:,0]
-            self.proc_data[:,1] = np.log10(self.raw_data[:,1]/self.ref_data[:,1])
+            self.proc_data[:, 0] = self.ref_data[:, 0]
+            self.proc_data[:, 1] = np.log10(self.raw_data[:, 1] / self.ref_data[:, 1])
 
     def abs_per_QW(self, qw_number):
+        """
+
+        :param qw_number: number of quantum wells in the sample.
+        :type qw_number: int
+        :return: None
+        """
         """
         This method turns the absorption to the absorbance per quantum well.  Is
         that how this data should be reported?
@@ -177,14 +197,39 @@ class Absorbance(CCD):
 
     def fft_smooth(self, cutoff, inspectPlots=False):
         """
+        This function removes the Fabry-Perot that affects the absorption data
+
+        creates:
+        self.clean = np.array of the Fourier-filtered absorption data, freq (eV) vs. absorbance (dB!)
+        self.parameters['fourier cutoff'] = the low pass cutoff frequency, in eV**(-1)
+        :param cutoff: Fourier frequency of the cut off for the low pass filter
+        :type cutoff: int or float
+        :param inspectPlots: Do you want to see the results?
+        :type inspectPlots: bool
+        :return: None
         """
-        #self.fixed = -np.log10(abs(self.raw_data[:, 1]) / abs(self.ref_data[:, 1]))
-        #self.fixed = np.nan_to_num(self.proc_data[:, 1])
-        #self.fixed = np.column_stack((self.raw_data[:, 0], self.fixed))
+        # self.fixed = -np.log10(abs(self.raw_data[:, 1]) / abs(self.ref_data[:, 1]))
+        # self.fixed = np.nan_to_num(self.proc_data[:, 1])
+        # self.fixed = np.column_stack((self.raw_data[:, 0], self.fixed))
         self.parameters['fourier cutoff'] = cutoff
         self.clean = low_pass_filter(self.proc_data[:, 0], self.proc_data[:, 1], cutoff, inspectPlots)
 
     def save_processing(self, file_name, folder_str, marker='', index=''):
+        """
+        This bad boy saves the absorption spectrum that has been manipulated.
+
+        Saves 100 lines of comments.
+
+        :param file_name: The base name of the file to be saved
+        :type file_name: str
+        :param folder_str: The name of the folder where the file will be saved
+        :type folder_str: str
+        :param marker: A further label that might be the series tag or something
+        :type marker: str
+        :param index: If multiple files are being saved with the same name, include an integer to append to the end of the file
+        :type index: int
+        :return: None
+        """
         try:
             os.mkdir(folder_str)
         except OSError, e:
@@ -192,7 +237,7 @@ class Absorbance(CCD):
                 pass
             else:
                 raise
-        
+
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         self.save_name = spectra_fname
 
@@ -204,13 +249,13 @@ class Absorbance(CCD):
             return
         parameter_str.replace('\n', '#\n')
 
-        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        num_lines = parameter_str.count('#')  # Make the number of lines constant so importing into Origin is easier
         for num in range(99 - num_lines): parameter_str += '\n#'
 
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
         # spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
-        
+
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
         spectra_fname = 'clean ' + spectra_fname
@@ -218,9 +263,13 @@ class Absorbance(CCD):
                    header=spec_header, comments='', fmt='%0.6e')
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
+
 class NeonNoiseAnalysis(CCD):
+    """
+    This class is used to make handling neon calibration lines easier.  It's not great.
+    """
     def __init__(self, fname, spectrometer_offset=None):
-        #print 'opening', fname
+        # print 'opening', fname
         super(NeonNoiseAnalysis, self).__init__(fname, spectrometer_offset=spectrometer_offset)
 
         self.addenda = self.parameters['addenda']
@@ -251,7 +300,7 @@ class NeonNoiseAnalysis(CCD):
 
         self.ccd_data = np.flipud(self.ccd_data)
         # self.high_noise_region = np.array(self.ccd_data[30:230, :])
-        self.high_noise_region = np.array(self.ccd_data[80:180, :]) # for dark current measurements
+        self.high_noise_region = np.array(self.ccd_data[80:180, :])  # for dark current measurements
         self.low_noise_region1 = np.array(self.ccd_data[380:700, :])
         self.low_noise_region2 = np.array(self.ccd_data[950:1200, :])
         self.low_noise_region3 = np.array(self.ccd_data[1446:1546, :])
@@ -265,7 +314,7 @@ class NeonNoiseAnalysis(CCD):
         self.low_noise_sig = np.mean(self.low_noise_region2[:, 1])
         self.low_noise3 = np.std(self.low_noise_region3[:, 1])
 
-        #self.noise_list = [self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3]
+        # self.noise_list = [self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3]
 
         self.peak1 = np.array(self.ccd_data[303:323, :])
         self.peak2 = np.array(self.ccd_data[319:339, :])
@@ -275,23 +324,23 @@ class NeonNoiseAnalysis(CCD):
 
         temp_max = np.argmax(self.peak1[:, 1])
         self.signal1 = np.sum(self.peak1[temp_max - 1:temp_max + 2, 1])
-        self.error1 = np.sqrt(np.sum(self.peak1[temp_max - 1:temp_max + 2, 2]**2))
+        self.error1 = np.sqrt(np.sum(self.peak1[temp_max - 1:temp_max + 2, 2] ** 2))
 
         temp_max = np.argmax(self.peak2[:, 1])
         self.signal2 = np.sum(self.peak2[temp_max - 1:temp_max + 2, 1])
-        self.error2 = np.sqrt(np.sum(self.peak2[temp_max - 1:temp_max + 2, 2]**2))
+        self.error2 = np.sqrt(np.sum(self.peak2[temp_max - 1:temp_max + 2, 2] ** 2))
 
         temp_max = np.argmax(self.peak3[:, 1])
         self.signal3 = np.sum(self.peak3[temp_max - 1:temp_max + 2, 1])
-        self.error3 = np.sqrt(np.sum(self.peak3[temp_max - 1:temp_max + 2, 2]**2))
+        self.error3 = np.sqrt(np.sum(self.peak3[temp_max - 1:temp_max + 2, 2] ** 2))
 
         temp_max = np.argmax(self.peak4[:, 1])
         self.signal4 = np.sum(self.peak4[temp_max - 1:temp_max + 2, 1])
-        self.error4 = np.sqrt(np.sum(self.peak4[temp_max - 1:temp_max + 2, 2]**2))
+        self.error4 = np.sqrt(np.sum(self.peak4[temp_max - 1:temp_max + 2, 2] ** 2))
 
         temp_max = np.argmax(self.peak5[:, 1])
         self.signal5 = np.sum(self.peak5[temp_max - 1:temp_max + 2, 1])
-        self.error5 = np.sqrt(np.sum(self.peak5[temp_max - 1:temp_max + 2, 2]**2))
+        self.error5 = np.sqrt(np.sum(self.peak5[temp_max - 1:temp_max + 2, 2] ** 2))
 
         self.signal_list = [self.signal1, self.signal2, self.signal3, self.signal4, self.signal5]
         self.error_list = [self.error1, self.error2, self.error3, self.error4, self.error5]
@@ -307,13 +356,14 @@ class NeonNoiseAnalysis(CCD):
         # self.results = np.array([self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3, self.high_noise/average])
         self.results = np.array([self.high_noise_sig, self.high_noise_std, self.low_noise_sig, self.low_noise_std])
 
+
 def collect_noise(neon_list, param_name, folder_name, file_name, name='Signal'):
     """
     This function acts like save parameter sweep.
 
     param_name = string that we're gonna save!
     """
-    #param_array = None
+    # param_array = None
     for elem in neon_list:
         print "pname: {}".format(elem.parameters[param_name]),
         print "results:", elem.results
@@ -326,16 +376,16 @@ def collect_noise(neon_list, param_name, folder_name, file_name, name='Signal'):
     if len(param_array.shape) == 1:
         print "I don't think you want this file"
         return
-   # append the relative peak error
+        # append the relative peak error
 
     print '\n', param_array, '\n'
 
-    param_array = np.column_stack((param_array, param_array[:,4]/param_array[:,3] ))
+    param_array = np.column_stack((param_array, param_array[:, 4] / param_array[:, 3]))
     # append the snr
-    param_array = np.column_stack((param_array, param_array[:,3]/param_array[:,2] ))
+    param_array = np.column_stack((param_array, param_array[:, 3] / param_array[:, 2]))
 
     try:
-        param_array = param_array[param_array[:,0].argsort()]
+        param_array = param_array[param_array[:, 0].argsort()]
     except:
         print "param_array shape", param_array.shape
         raise
@@ -358,14 +408,54 @@ def collect_noise(neon_list, param_name, folder_name, file_name, name='Signal'):
     # origin_import3 = ",High noise region,Low noise region 1,Low noise region 2,Low noise region 3,High/low"
     header_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
 
-    #print "Spec header: ", spec_header
+    # print "Spec header: ", spec_header
     print "the param_array is:", param_array
-    np.savetxt(os.path.join(folder_name, file_name), param_array, delimiter=',', 
+    np.savetxt(os.path.join(folder_name, file_name), param_array, delimiter=',',
                header=header_total, comments='', fmt='%0.6e')
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_name, file_name))
 
+
 class HighSidebandCCD(CCD):
-    def __init__(self, fname, spectrometer_offset=None):
+    def __init__(self, hsg_thing, parameter_dict=None, spectrometer_offset=None):
+        """
+        This will read the appropriate file.  The header needs to be fixed to
+        reflect the changes to the output header from the Andor file.  Because
+        another helper file will do the cleaning and background subtraction,
+        those are no longer part of this init.  This also turns all wavelengths
+        from nm (NIR ones) or cm-1 (THz ones) into eV.
+
+        OR, if an array is thrown in there, it'll handle the array and dict
+
+        Input:
+            For post-processing analysis:
+                hsg_thing = file name of the hsg spectrum from CCD superclass
+                spectrometer_offset = number of nanometers the spectrometer is off by,
+                                      should be 0.0...but can be 0.2 or 1.0
+            For Live-software:
+                hsg_thing = np array of spectrum from camera
+                parameter_dict = equipment dict generated by software
+
+        Internal:
+        self.hsg_thing = the filename
+        self.parameters = string with all the relevant experimental perameters
+        self.description = the description we added to the file as the data
+                           was being taken
+        self.proc_data = processed data that has gone is frequency vs counts/pulse
+        self.dark_stdev = this is not currently handled appropriately
+        self.addenda = the list of things that have been added to the file, in
+                       form of [constant, *spectra_added]
+        self.subtrahenda = the list of spectra that have been subtracted from
+                           the file.  Constant subtraction is dealt with with
+                           self.addenda
+
+        :param hsg_thing: file name for the file to be opened.  OR the actually hsg np.ndarray.  Fun!
+        :type hsg_thing: str OR np.ndarray
+        :param parameter_dict: If being loaded through the data acquisition GUI, throw the dict in here
+        :type parameter_dict: dict
+        :param spectrometer_offset: Number of nm the spectrometer is off by
+        :type spectrometer_offset: float
+        :return: None, technically
+        """
         """
         This will read the appropriate file.  The header needs to be fixed to
         reflect the changes to the output header from the Andor file.  Because
@@ -395,27 +485,26 @@ class HighSidebandCCD(CCD):
                            the file.  Constant subtraction is dealt with with
                            self.addenda
         """
-        if isinstance(fname, str):
-            super(HighSidebandCCD, self).__init__(fname, spectrometer_offset=spectrometer_offset)
-
+        if isinstance(hsg_thing, str):
+            super(HighSidebandCCD, self).__init__(hsg_thing, spectrometer_offset=spectrometer_offset)
+            # TODO: fix addenda bullshit
             self.addenda = self.parameters['addenda']
             self.subtrahenda = self.parameters['subtrahenda']
-        elif isinstance(fname, np.ndarray):
-            self.parameters = spectrometer_offset.copy() # Probably shouldn't shoehorn this in this way
+        elif isinstance(hsg_thing, np.ndarray):
+            self.parameters = parameter_dict.copy()  # Probably shouldn't shoehorn this in this way
             self.addenda = []
             self.subtrahenda = []
-            self.ccd_data = np.array(fname)
+            self.ccd_data = np.array(hsg_thing)
             self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
             # This data won't have errors
             self.ccd_data = np.column_stack((self.ccd_data, np.ones_like(self.ccd_data[:,1])))
             self.ccd_data = np.flipud(self.ccd_data)
-
             self.fname = "Live Data"
         else:
             raise Exception("I don't know what this file type is {}, type: {}".format(
-                fname, type(fname)
+                hsg_thing, type(hsg_thing)
             ))
-
+        # TODO: fix the ferkin dark count and background stuff, too.
         self.proc_data = np.array(self.ccd_data)
         # proc_data is now a 1600 long array with [frequency (eV), signal (counts / FEL pulse), S.E. of signal mean]
 
@@ -423,7 +512,6 @@ class HighSidebandCCD(CCD):
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
         self.parameters["thz_power"] = float(self.parameters["fel_power"])
-
 
     def __add__(self, other):
         """
@@ -440,18 +528,19 @@ class HighSidebandCCD(CCD):
         ret.proc_data = the self.proc_data + other(.proc_data)
         ret.addenda = combination of two input addenda lists
         """
+        # TODO: Is this needed anymore?
         ret = copy.deepcopy(self)
 
         # Add a constant offset to the data
         if type(other) in (int, float):
             ret.proc_data[:, 1] = self.proc_data[:, 1] + other
             ret.addenda[0] = ret.addenda[0] + other
-        
+
         # or add the data of two hsg_spectra together
         else:
             if np.isclose(ret.parameters['center_lambda'], other.parameters['center_lambda']):
                 ret.proc_data[:, 1] = self.proc_data[:, 1] + other.proc_data[:, 1]
-                ret.proc_data[:, 2] = np.sqrt(self.proc_data[:, 1]**2 + other.proc_data[:, 1]**2)
+                ret.proc_data[:, 2] = np.sqrt(self.proc_data[:, 1] ** 2 + other.proc_data[:, 1] ** 2)
                 ret.addenda[0] = ret.addenda[0] + other.addenda[0]
                 ret.addenda.extend(other.addenda[1:])
                 ret.subtrahenda.extend(other.subtrahenda)
@@ -469,41 +558,40 @@ class HighSidebandCCD(CCD):
         See how __add__ works for more information.
         """
         ret = copy.deepcopy(self)
-        
+        # TODO: keep this?
         # Subtract a constant offset to the data
         if type(other) in (int, float):
-            ret.proc_data[:, 1] = self.proc_data[:, 1] - other # Need to choose a name
+            ret.proc_data[:, 1] = self.proc_data[:, 1] - other  # Need to choose a name
             ret.addenda[0] = ret.addenda[0] - other
-            
+
         # Subtract the data of two hsg_spectra from each other
         else:
             if np.isclose(ret.proc_data[0, 0], other.proc_data[0, 0]):
                 ret.proc_data[:, 1] = self.proc_data[:, 1] - other.proc_data[:, 1]
-                ret.proc_data[:, 2] = np.sqrt(self.proc_data[:, 1]**2 + other.proc_data[:, 1]**2)
+                ret.proc_data[:, 2] = np.sqrt(self.proc_data[:, 1] ** 2 + other.proc_data[:, 1] ** 2)
                 ret.subtrahenda.extend(other.addenda[1:])
                 ret.addenda.extend(other.subtrahenda)
             else:
                 raise Exception('Source: Spectrum.__sub__:\nThese are not from the same grating settings')
         return ret
-    
+
     def calc_approx_sb_order(self, test_nir_freq):
         """
         This simple method will simply return a float approximating the order
-        of the frequency input.  We need this because the CCD wavelength 
-        calibration is not even close to perfect.  And it shifts by half a nm 
+        of the frequency input.  We need this because the CCD wavelength
+        calibration is not even close to perfect.  And it shifts by half a nm
         sometimes.
 
-        Input: 
-        test_nir_freq = NIR frequency that we're guessing the order for
-
-        Returns:
-        approx_order = the approximate sideband order of the test frequency
+        :param test_nir_freq: the frequency guess of the nth sideband
+        :type test_nir_freq: float
+        :return: The approximate order of the sideband in question
+        :rtype: float
         """
         nir_freq = self.parameters['nir_freq']
         thz_freq = self.parameters['thz_freq']
         approx_order = (test_nir_freq - nir_freq) / thz_freq
         return approx_order
-    
+
     # def image_normalize(self, num_images):
     #     """
     #     This method will divide the proc_data by the number of images that were
@@ -527,7 +615,7 @@ class HighSidebandCCD(CCD):
     #     return
     #     self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
     #     self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
-    
+
     def guess_sidebands(self, cutoff=8, verbose=False):
         """
         Finds the locations of all the sidebands in the proc_data array to be 
@@ -546,17 +634,18 @@ class HighSidebandCCD(CCD):
         self.sb_guess = three-part list including the frequency, amplitude and
                         error guesses for each sideband
         """
+        # TODO: this isn't commented appropriately.  Will it be made more readable first?
         self.parameters['cutoff for guess_sidebands'] = cutoff
         x_axis = np.array(self.proc_data[:, 0])
         y_axis = np.array(self.proc_data[:, 1])
         error = np.array(self.proc_data[:, 2])
-        
+
         min_sb = int(self.calc_approx_sb_order(x_axis[0])) + 1
         max_sb = int(self.calc_approx_sb_order(x_axis[-1]))
-        
+
         nir_freq = self.parameters["nir_freq"]
         thz_freq = self.parameters["thz_freq"]
-        
+
         # Find max strength sideband and it's order
         global_max = np.argmax(y_axis)
         order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
@@ -573,8 +662,7 @@ class HighSidebandCCD(CCD):
         check_ave = np.mean(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
         check_stdev = np.std(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
         check_ratio = (check_max_area - 3 * check_ave) / check_stdev
-        
-        
+
         if verbose:
             print "\nI'm checking", self.fname, "\n"
             print "Global max checking:", global_max, check_y
@@ -588,12 +676,12 @@ class HighSidebandCCD(CCD):
             self.sb_index = [global_max]
             sb_freq_guess = [x_axis[global_max]]
             sb_amp_guess = [y_axis[global_max]]
-            sb_error_est = [np.sqrt(sum([i**2 for i in error[global_max - 2:global_max + 3]])) / (check_max_area - 5 * check_ave)]
+            sb_error_est = [
+                np.sqrt(sum([i ** 2 for i in error[global_max - 2:global_max + 3]])) / (check_max_area - 5 * check_ave)]
         else:
             print "There are no sidebands in", self.fname
             assert False
-        
-        
+
         # Look for lower order sidebands
         if verbose:
             print "Now I'll look for sidebands with frequency less than", sb_freq_guess
@@ -609,8 +697,8 @@ class HighSidebandCCD(CCD):
                 if verbose:
                     print "I skipped", order
                 continue
-            window_size = 0.28 + 0.0004 * order # used to be last_sb?
-            lo_freq_bound = last_sb - thz_freq * (1 + window_size) # Not sure what to do about these
+            window_size = 0.28 + 0.0004 * order  # used to be last_sb?
+            lo_freq_bound = last_sb - thz_freq * (1 + window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb - thz_freq * (1 - window_size)
 
             start_index = False
@@ -624,29 +712,29 @@ class HighSidebandCCD(CCD):
                     break_condition = True
                     break
                 if end_index == False and x_axis[i] < hi_freq_bound:
-                    #print "end_index is", i
+                    # print "end_index is", i
                     end_index = i
                 elif i == 1:
                     start_index = 0
-                    #print "hit end of data, start_index is 0"
+                    # print "hit end of data, start_index is 0"
                 elif start_index == False and x_axis[i] < lo_freq_bound:
                     start_index = i
-                    #print "start_index is", i
+                    # print "start_index is", i
                     index_guess = i
                     break
-            
+
             if break_condition:
                 break
             check_y = y_axis[start_index:end_index]
 
-            check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
+            check_max_index = np.argmax(check_y)  # This assumes that two floats won't be identical
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
             no_peak = (2 * len(check_y)) // 5
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
             # check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
-                # So the sideband isn't included in the noise calculation
+            # So the sideband isn't included in the noise calculation
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
 
             if verbose:
@@ -655,18 +743,19 @@ class HighSidebandCCD(CCD):
                 print "check_ave is", check_ave
                 print "check_stdev is", check_stdev
                 print "check_ratio is", check_ratio
-            
+
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
-                
+
                 if verbose:
                     print "I just found", last_sb
-                
+
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
-                error_est = np.sqrt(sum([i**2 for i in error[found_index - 1:found_index + 2]])) / (check_max_area - 3 * check_ave)
+                error_est = np.sqrt(sum([i ** 2 for i in error[found_index - 1:found_index + 2]])) / (
+                check_max_area - 3 * check_ave)
                 if verbose:
                     print "My error estimate is:", error_est
                 sb_error_est.append(error_est)
@@ -675,19 +764,19 @@ class HighSidebandCCD(CCD):
                 if order % 2 == 1:
                     consecutive_null_odd = 0
             else:
-                #print "I could not find sideband with order", order
+                # print "I could not find sideband with order", order
                 last_sb = last_sb - thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
             if consecutive_null_odd == 1 and no_more_odds == False:
-                #print "I'm done looking for odd sidebands"
+                # print "I'm done looking for odd sidebands"
                 no_more_odds = True
             if consecutive_null_sb == 2:
-                #print "I can't find any more sidebands"
-                break  
-        
-        # Look for higher sidebands
+                # print "I can't find any more sidebands"
+                break
+
+                # Look for higher sidebands
         if verbose: print "Now I'll look for sidebands with higher frequency"
 
         last_sb = sb_freq_guess[0]
@@ -700,8 +789,8 @@ class HighSidebandCCD(CCD):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
                 continue
-            window_size = 0.32 + 0.001 * order # used to be 0.28 and 0.0004
-            lo_freq_bound = last_sb + thz_freq * (1 - window_size) # Not sure what to do about these
+            window_size = 0.32 + 0.001 * order  # used to be 0.28 and 0.0004
+            lo_freq_bound = last_sb + thz_freq * (1 - window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
             start_index = False
             end_index = False
@@ -709,29 +798,29 @@ class HighSidebandCCD(CCD):
             if verbose:
                 print "\nSideband", order, "\n"
                 print "lower bound", lo_freq_bound
-                print "upper bound", hi_freq_bound ,"\n"        
+                print "upper bound", hi_freq_bound, "\n"
             for i in xrange(index_guess, 1600):
                 if start_index == False and i == 1599:
-                    #print "I'm all out of space, captain!"
+                    # print "I'm all out of space, captain!"
                     break_condition = True
                     break
                 elif start_index == False and x_axis[i] > lo_freq_bound:
-                    #print "start_index is", i
+                    # print "start_index is", i
                     start_index = i
                 elif i == 1599:
                     end_index = 1599
-                    #print "hit end of data, end_index is 1599"
+                    # print "hit end of data, end_index is 1599"
                 elif end_index == False and x_axis[i] > hi_freq_bound:
                     end_index = i
-                    #print "end_index is", i
+                    # print "end_index is", i
                     index_guess = i
                     break
             if break_condition:
                 break
             check_y = y_axis[start_index:end_index]
 
-            check_max_index = np.argmax(check_y) # This assumes that two floats won't be identical
-            octant = len(check_y) // 8 # To be able to break down check_y into eighths
+            check_max_index = np.argmax(check_y)  # This assumes that two floats won't be identical
+            octant = len(check_y) // 8  # To be able to break down check_y into eighths
             if octant < 1:
                 octant = 1
 
@@ -745,8 +834,6 @@ class HighSidebandCCD(CCD):
             # check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
             check_ratio = (check_max_area - (2 * octant + 1) * check_ave) / check_stdev
 
-
-
             if verbose:
                 print "Start and end index:", start_index, end_index
                 print "check_y is", check_y
@@ -757,40 +844,40 @@ class HighSidebandCCD(CCD):
             print "sideband", order
             print "check_ratio", check_ratio
 
-
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
-                
+
                 # if verbose:
                 print "I just found", order, "at index", found_index, "at freq", last_sb, "\n"
-                
+
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - (2 * octant + 1) * check_ave)
-                error_est = np.sqrt(sum([i**2 for i in error[found_index - octant:found_index + octant]])) / (check_max_area - (2 * octant + 1) * check_ave)
+                error_est = np.sqrt(sum([i ** 2 for i in error[found_index - octant:found_index + octant]])) / (
+                check_max_area - (2 * octant + 1) * check_ave)
                 # This error is a relative error.
                 # if verbose:
                 print "My error estimate is:", error_est
-                #print "My relative error is:", error_est / sb_amp_guess
+                # print "My relative error is:", error_est / sb_amp_guess
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
                 consecutive_null_sb = 0
                 if order % 2 == 1:
                     consecutive_null_odd = 0
             else:
-                #print "I could not find sideband with order", order
+                # print "I could not find sideband with order", order
                 last_sb = last_sb + thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
             if consecutive_null_odd == 1 and no_more_odds == False:
-                #print "I'm done looking for odd sidebands"
+                # print "I'm done looking for odd sidebands"
                 no_more_odds = True
             if consecutive_null_sb == 2:
-                #print "I can't find any more sidebands"
-                break  
-        
+                # print "I can't find any more sidebands"
+                break
+
         if verbose:
             print "I found these sidebands:", self.sb_list
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_est)]).T
@@ -798,54 +885,56 @@ class HighSidebandCCD(CCD):
     def fit_sidebands(self, plot=False, verbose=False):
         """
         This takes self.sb_guess and fits to each maxima to get the details of
-        each sideband.  It's really ugly, but it works.  The error of the 
+        each sideband.  It's really ugly, but it works.  The error of the
         sideband area is approximated from the data, not the curve fit.  All
         else is from the curve fit.
-        
-        Inputs:
-        plot = if you want to plot the fits on the same plot as before
-        
+
         Temporary stuff:
         sb_fits = holder of the fitting results until all spectra have been fit
 
         Attributes created:
         self.sb_results = the money maker.  Column order:
                           [sb number, Freq (eV), Freq error (eV), Gauss area (arb.), Area error, Gauss linewidth (eV), Linewidth error (eV)]
-        self.full_dict = a dictionary similar to sb_results, but now the keys 
+        self.full_dict = a dictionary similar to sb_results, but now the keys
                          are the sideband orders.  Column ordering is otherwise the same.
+        :param plot: Do you want to see the fits plotted with the data?
+        :type plot: bool
+        :param verbose: Do you want to see the details AND the initial guess fits?
+        :type verbose: bool
+        :return:
         """
-        #print "Trying to fit these"
+        # print "Trying to fit these"
         sb_fits = []
-        for elem, num in enumerate(self.sb_index): # Have to do this because guess_sidebands 
-                                                   # doesn't out put data in the most optimized way
+        for elem, num in enumerate(self.sb_index):  # Have to do this because guess_sidebands
+            # doesn't out put data in the most optimized way
             if self.sb_index[elem] < 30:
                 data_temp = self.proc_data[:self.sb_index[elem] + 30, :]
             elif (1600 - self.sb_index[elem]) < 30:
                 data_temp = self.proc_data[self.sb_index[elem] - 30:, :]
             else:
                 data_temp = self.proc_data[self.sb_index[elem] - 30:self.sb_index[elem] + 30, :]
-            width_guess = 0.0001 + 0.000001*self.sb_list[elem] # so the width guess gets wider as order goes up
+            width_guess = 0.0001 + 0.000001 * self.sb_list[elem]  # so the width guess gets wider as order goes up
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 0.1]
-            #print "Let's fit this shit!"
+            # print "Let's fit this shit!"
             if verbose:
                 print "number:", elem, num
-                #print "data_temp:", data_temp
+                # print "data_temp:", data_temp
                 print "p0:", p0
-            plot_guess = False # This is to disable plotting the guess function
+            plot_guess = False  # This is to disable plotting the guess function
             if plot_guess:
                 plt.figure('CCD data')
                 linewidth = 3
                 x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                if elem!=0:
+                if elem != 0:
                     try:
-                        plt.plot(x_vals, gauss(x_vals, *p0), 
-                                 plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
-                                                             # just looked around at what functions
-                                                             # matplotlib has...
+                        plt.plot(x_vals, gauss(x_vals, *p0),
+                                 plt.gca().get_lines()[-1].get_color() + '--'  # I don't really know. Mostly
+                                 # just looked around at what functions
+                                 # matplotlib has...
                                  , linewidth=linewidth)
-                    except: # to prevent weird mac issues with the matplotlib things?
+                    except:  # to prevent weird mac issues with the matplotlib things?
                         plt.plot(x_vals, gauss(x_vals, *p0), '--', linewidth=linewidth)
-                                     
+
                 else:
                     plt.plot(x_vals, gauss(x_vals, *p0), '--', linewidth=linewidth)
 
@@ -855,14 +944,15 @@ class HighSidebandCCD(CCD):
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
                 if verbose:
                     print "the fit worked"
-                coeff[1] = abs(coeff[1]) # The amplitude could be negative if the linewidth is negative
-                coeff[2] = abs(coeff[2]) # The linewidth shouldn't be negative
+                coeff[1] = abs(coeff[1])  # The amplitude could be negative if the linewidth is negative
+                coeff[2] = abs(coeff[2])  # The linewidth shouldn't be negative
                 if verbose:
                     print "coeffs:", coeff
                     print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
                 if 10e-4 > coeff[2] > 10e-6:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
-                    sb_fits[-1][6] = self.sb_guess[elem, 2] * coeff[1] # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
+                    sb_fits[-1][6] = self.sb_guess[elem, 2] * coeff[
+                        1]  # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
                     print "number:", elem, num
                     print "The rel. error guess is", self.sb_guess[elem, 2]
                     print "The abs. error guess is", coeff[1] * self.sb_guess[elem, 2]
@@ -872,16 +962,16 @@ class HighSidebandCCD(CCD):
                     plt.figure('CCD data')
                     linewidth = 5
                     x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    if elem!=0:
+                    if elem != 0:
                         try:
-                            plt.plot(x_vals, gauss(x_vals, *coeff), 
-                                     plt.gca().get_lines()[-1].get_color()+'--' # I don't really know. Mostly
-                                                                 # just looked around at what functions
-                                                                 # matplotlib has...
-                                     , linewidth = linewidth)
-                        except: # to prevent weird mac issues with the matplotlib things?
+                            plt.plot(x_vals, gauss(x_vals, *coeff),
+                                     plt.gca().get_lines()[-1].get_color() + '--'  # I don't really know. Mostly
+                                     # just looked around at what functions
+                                     # matplotlib has...
+                                     , linewidth=linewidth)
+                        except:  # to prevent weird mac issues with the matplotlib things?
                             plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
-                                         
+
                     else:
                         plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
             except:
@@ -897,13 +987,13 @@ class HighSidebandCCD(CCD):
         except:
             print "The file is:", self.fname
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!\n"
-                
+
         # Going to label the appropriate row with the sideband
         self.sb_list = sorted(list([x for x in self.sb_list if x is not None]))
         sb_names = np.vstack(self.sb_list)
 
         sorter = np.argsort(sb_fits[:, 0])
-        
+
         self.sb_results = np.array(sb_fits[sorter, :7])
         if verbose:
             print "sb_names:", sb_names
@@ -916,10 +1006,13 @@ class HighSidebandCCD(CCD):
     def infer_frequencies(self, nir_units="wavenumber", thz_units="GHz", bad_points=-2):
         """
         This guy tries to fit the results from fit_sidebands to a line to get the relevant frequencies
-        :param nir_units:
-        :param thz_units:
-        :param bad_points:
-        :return:
+        :param nir_units: What units do you want this to output?
+        :type nir_units: 'nm', 'wavenumber', 'eV', 'THz'
+        :param thz_units: What units do you want this to output for the THz?
+        :type thz_units: 'GHz', 'wavenumber', 'meV'
+        :param bad_points: How many more-positive order sidebands shall this ignore?
+        :type bad_points: int
+        :return: None
         """
         freqNIR, freqTHz = calc_laser_frequencies(self, nir_units, thz_units, bad_points)
 
@@ -953,20 +1046,19 @@ class HighSidebandCCD(CCD):
             else:
                 raise
         temp = np.array(self.sb_results)
-        
-        ampli = np.array([temp[:, 3] / temp[:, 5]]) # But [:, 3] is already area?
-                                                    # (The old name was area)
-                                                    # I think it must be amplitude
-        temp[:, 5:7] = temp[:, 5:7] * 1000 # For meV linewidths
+
+        ampli = np.array([temp[:, 3] / temp[:, 5]])  # But [:, 3] is already area?
+        # (The old name was area)
+        # I think it must be amplitude
+        temp[:, 5:7] = temp[:, 5:7] * 1000  # For meV linewidths
         print "sb_results", self.sb_results.shape
         print "ampli", ampli.shape
         save_results = np.hstack((temp, ampli.T))
-        
-        
+
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
-        
+
         self.parameters['addenda'] = self.addenda
         self.parameters['subtrahenda'] = self.subtrahenda
         try:
@@ -977,21 +1069,22 @@ class HighSidebandCCD(CCD):
             return
         parameter_str = parameter_str.replace('\n', '\n#')
 
-        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        num_lines = parameter_str.count('#')  # Make the number of lines constant so importing is easier
         for num in range(99 - num_lines): parameter_str += '\n#'
 
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
-        
+
         origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
         fits_header = '#' + parameter_str + origin_import_fits
-        
+
         np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
         np.savetxt(os.path.join(folder_str, fit_fname), save_results, delimiter=',',
                    header=fits_header, comments='', fmt='%0.6e')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
+
 
 class PMT(object):
     def __init__(self, file_name):
@@ -1013,37 +1106,38 @@ class PMT(object):
         print "This started"
         self.fname = file_name
         # self.files_included = [file_name]
-        with open(file_name,'rU') as f:
+        with open(file_name, 'rU') as f:
             param_str = ''
-            line = f.readline() # Needed to move past the first line, which is the sideband order.  Not generally useful
+            line = f.readline()  # Needed to move past the first line, which is the sideband order.  Not generally useful
             line = f.readline()
             while line[0] == '#':
                 param_str += line[1:]
                 line = f.readline()
 
             self.parameters = json.loads(param_str)
-        # with open(fname,'rU') as f:
-        #     throw_away = f.readline() # Delete me if that first line denoting sideband order is removed
-        #     initial = '#'
-        #     param_str = ''
-        #     while initial == '#':
-        #         new = f.readline()
-        #         initial = new[0]
-        #         param_str += new[1:]
-        #     print param_str
-        #     self.parameters = json.loads(param_str)
-        # with open(file_path, 'rU') as f:
-        #     throw_away = f.readline() # Just need to get things down to the next line
-        #     parameters_str = f.readline()
-        #     self.parameters = json.loads(parameters_str[1:])
-        #     self.description = ''
-        #     read_description = True
-        #     while read_description:
-        #         line = f.readline()
-        #         if line[0] == '#':
-        #             self.description += line[:]
-        #         else:
-        #             read_description = False
+            # with open(fname,'rU') as f:
+            #     throw_away = f.readline() # Delete me if that first line denoting sideband order is removed
+            #     initial = '#'
+            #     param_str = ''
+            #     while initial == '#':
+            #         new = f.readline()
+            #         initial = new[0]
+            #         param_str += new[1:]
+            #     print param_str
+            #     self.parameters = json.loads(param_str)
+            # with open(file_path, 'rU') as f:
+            #     throw_away = f.readline() # Just need to get things down to the next line
+            #     parameters_str = f.readline()
+            #     self.parameters = json.loads(parameters_str[1:])
+            #     self.description = ''
+            #     read_description = True
+            #     while read_description:
+            #         line = f.readline()
+            #         if line[0] == '#':
+            #             self.description += line[:]
+            #         else:
+            #             read_description = False
+
 
 class HighSidebandPMT(PMT):
     def __init__(self, file_path, verbose=False):
@@ -1057,7 +1151,7 @@ class HighSidebandPMT(PMT):
             self.sb_dict - keys are sideband order, values are PMT data arrays
             self.sb_list - sorted list of included sidebands
         """
-        super(HighSidebandPMT, self).__init__(file_path) # Creates the json parameters dictionary
+        super(HighSidebandPMT, self).__init__(file_path)  # Creates the json parameters dictionary
         self.fname = file_path
         self.parameters["files included"] = [file_path]
         with open(file_path, 'rU') as f:
@@ -1079,7 +1173,6 @@ class HighSidebandPMT(PMT):
         if other.initial_sb in self.sb_list:
             self.sb_list.append(other.initial_sb)
 
-
         # Make things comma delimited?
         try:
             self.sb_dict[other.initial_sb].vstack((other.initial_data))
@@ -1094,12 +1187,12 @@ class HighSidebandPMT(PMT):
         """
         for sb_num, sb in list(self.sb_dict.items()):
             if sb_num == 0:
-                fire_condition = -np.inf # This way the FEL doesn't need to be on during laser line measurement
+                fire_condition = -np.inf  # This way the FEL doesn't need to be on during laser line measurement
             else:
-                fire_condition = np.mean(sb[:, 2]) / 2 # Say FEL fired if the
-                                                       # cavity dump signal is
-                                                       # more than half the mean
-                                                       # of the cavity dump signal
+                fire_condition = np.mean(sb[:, 2]) / 2  # Say FEL fired if the
+                # cavity dump signal is
+                # more than half the mean
+                # of the cavity dump signal
             frequencies = sorted(list(set(sb[:, 0])))
 
             temp = None
@@ -1109,10 +1202,11 @@ class HighSidebandPMT(PMT):
                     if point[0] == freq and point[2] > fire_condition:
                         data_temp = np.hstack((data_temp, point[3]))
                 try:
-                    temp = np.vstack((temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
+                    temp = np.vstack(
+                        (temp, np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])))
                 except:
                     temp = np.array([freq, np.mean(data_temp), np.std(data_temp) / np.sqrt(len(data_temp))])
-            temp[:, 0] = temp[:, 0] / 8065.6 # turn NIR freq into eV
+            temp[:, 0] = temp[:, 0] / 8065.6  # turn NIR freq into eV
             temp = temp[temp[:, 0].argsort()]
             self.sb_dict[sb_num] = np.array(temp)
         self.sb_list = sorted(self.sb_dict.keys())
@@ -1136,16 +1230,16 @@ class HighSidebandPMT(PMT):
             index = np.argmax(sideband[1][:, 1])
             nir_frequency = sideband[1][index, 0]
             area = np.trapz(np.nan_to_num(sideband[1][:, 1]), sideband[1][:, 0])
-            error = np.sqrt(np.sum(np.nan_to_num(sideband[1][:, 2])**2)) / 8065.6 # Divide by the step size?
+            error = np.sqrt(np.sum(np.nan_to_num(sideband[1][:, 2]) ** 2)) / 8065.6  # Divide by the step size?
             if verbose:
                 print "order", sideband[0]
                 print "area", area
                 print "error", error
-                print "ratio", area/error
-            details = np.array([sideband[0], nir_frequency, 1/8065.6, area, error, 2/8065.6, 1/8065.6])
+                print "ratio", area / error
+            details = np.array([sideband[0], nir_frequency, 1 / 8065.6, area, error, 2 / 8065.6, 1 / 8065.6])
             if area < 0:
                 continue
-            elif area < 2 * error: # Two seems like a good cutoff?
+            elif area < 2 * error:  # Two seems like a good cutoff?
                 if verbose:
                     print "I did not keep sideband ", sideband[0]
                 continue
@@ -1177,14 +1271,14 @@ class HighSidebandPMT(PMT):
             index = np.argmax(sideband[1][:, 1])
             nir_frequency = sideband[1][index, 0]
             peak = sideband[1][index, 1]
-            width_guess = 0.0001 # Yep, another magic number
+            width_guess = 0.0001  # Yep, another magic number
             p0 = [nir_frequency, peak * width_guess, width_guess, 0.00001]
-            
+
             if verbose:
                 x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
                 plt.plot(x_vals, gauss(x_vals, *p0))
                 print "p0:", p0
-            try: 
+            try:
                 coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], sigma=sideband[1][:, 2], p0=p0)
                 coeff[1] = abs(coeff[1])
                 coeff[2] = abs(coeff[2])
@@ -1192,24 +1286,25 @@ class HighSidebandPMT(PMT):
                     print "coeffs:", coeff
                     print "stdevs:", np.sqrt(np.diag(var_list))
                     print "integral", np.trapz(sideband[1][:, 1], sideband[1][:, 0])
-                if np.sqrt(np.diag(var_list))[0] / coeff[0] < 0.5: # The error on where the sideband is should be small
+                if np.sqrt(np.diag(var_list))[0] / coeff[0] < 0.5:  # The error on where the sideband is should be small
                     sb_fits[sideband[0]] = np.concatenate((np.array([sideband[0]]), coeff, np.sqrt(np.diag(var_list))))
-                    #print "error then:", sb_fits[sideband[0]][6]
-                    relative_error = np.sqrt(sum([x**2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(sideband[1][index - 1:index + 2, 1])
+                    # print "error then:", sb_fits[sideband[0]][6]
+                    relative_error = np.sqrt(sum([x ** 2 for x in sideband[1][index - 1:index + 2, 2]])) / np.sum(
+                        sideband[1][index - 1:index + 2, 1])
                     if verbose:
                         print "relative error:", relative_error
                     sb_fits[sideband[0]][6] = coeff[1] * relative_error
-                    #print "error now:", sb_fits[sideband[0]][6]                
+                    # print "error now:", sb_fits[sideband[0]][6]
                     if plot:
                         x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
                         plt.plot(x_vals, gauss(x_vals, *coeff))
-                        #plt.plot(x_vals, gauss(x_vals, *p0))
+                        # plt.plot(x_vals, gauss(x_vals, *p0))
                 else:
                     print "what happened?"
             except:
                 print "God damn it, Leroy.\nYou couldn't fit this."
                 sb_fits[sideband[0]] = None
-            
+
         for result in sorted(sb_fits.keys()):
             try:
                 self.sb_results = np.vstack((self.sb_results, sb_fits[result]))
@@ -1244,10 +1339,12 @@ class HighSidebandPMT(PMT):
 
             for sb in self.sb_results:
                 print "Laser_strength", laser_strength
-                sb[4] = (sb[3] / laser_strength[0]) * np.sqrt((sb[4] / sb[3])**2 + (laser_strength[1] / laser_strength[0])**2)
+                sb[4] = (sb[3] / laser_strength[0]) * np.sqrt(
+                    (sb[4] / sb[3]) ** 2 + (laser_strength[1] / laser_strength[0]) ** 2)
                 sb[3] = sb[3] / laser_strength[0]
             for sb in self.full_dict.values():
-                sb[3] = (sb[2] / laser_strength[0]) * np.sqrt((sb[3] / sb[2])**2 + (laser_strength[1] / laser_strength[0])**2)
+                sb[3] = (sb[2] / laser_strength[0]) * np.sqrt(
+                    (sb[3] / sb[2]) ** 2 + (laser_strength[1] / laser_strength[0]) ** 2)
                 sb[2] = sb[2] / laser_strength[0]
             self.parameters['normalized?'] = True
 
@@ -1278,11 +1375,11 @@ class HighSidebandPMT(PMT):
                 pass
             else:
                 raise
-        
+
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_fits.txt'
         self.save_name = spectra_fname
-        #self.parameters["files included"] = list(self.files)
+        # self.parameters["files included"] = list(self.files)
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except:
@@ -1291,33 +1388,35 @@ class HighSidebandPMT(PMT):
             return
         parameter_str = parameter_str.replace('\n', '\n#')
 
-        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        num_lines = parameter_str.count('#')  # Make the number of lines constant so importing is easier
         for num in range(99 - num_lines): parameter_str += '\n#'
 
         origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         spec_header = '#' + parameter_str + origin_import_spec
-        
-        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error\neV,,arb. u.,,eV,,\n,,'# + marker
+
+        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error\neV,,arb. u.,,eV,,\n,,'  # + marker
         fits_header = '#' + parameter_str + origin_import_fits
-        
+
         for sideband in sorted(self.sb_dict.keys()):
             try:
                 complete = np.vstack((complete, self.sb_dict[sideband]))
             except:
                 complete = np.array(self.sb_dict[sideband])
-        
+
         np.savetxt(os.path.join(folder_str, spectra_fname), complete, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
-        
+
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
                    header=fits_header, comments='', fmt='%0.6e')
-        
+
         print "Saved PMT spectrum.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
+
 
 class TimeTrace(PMT):
     """
     This class will be able to handle time traces output by the PMT softare.
     """
+
     def __init__(self, file_path):
         super(HighSidebandPMT, self).__init__(file_path)
 
@@ -1326,13 +1425,16 @@ class FullSpectrum(object):
     def __init__(self):
         pass
 
+
 class FullAbsorbance(FullSpectrum):
     """
     I'm imagining this will sew up absorption spectra, but I'm not at all sure
     how to do that at the moment.
     """
+
     def __init__(self):
         pass
+
 
 class FullHighSideband(FullSpectrum):
     """
@@ -1340,6 +1442,7 @@ class FullHighSideband(FullSpectrum):
     other spectra that belong with it, then grabs the PMT object to normalize
     everything, assuming that PMT object exists.
     """
+
     def __init__(self, initial_CCD_piece):
         """
         Initialize a full HSG spectrum.  Starts with a single CCD image, then
@@ -1386,15 +1489,15 @@ class FullHighSideband(FullSpectrum):
         finished full_dict dictionary.
         """
         self.sb_results = None
-        #print "I'm making the results array:", sorted(self.full_dict.keys())
+        # print "I'm making the results array:", sorted(self.full_dict.keys())
         for sb in sorted(self.full_dict.keys()):
-            #print "Going to add this", sb
+            # print "Going to add this", sb
             try:
                 self.sb_results = np.vstack((self.sb_results, np.hstack((sb, self.full_dict[sb]))))
             except ValueError:
-                #print "It didn't exist yet!"
+                # print "It didn't exist yet!"
                 self.sb_results = np.hstack((sb, self.full_dict[sb]))
-        #print "and I made this array:", self.sb_results[:, 0]
+                # print "and I made this array:", self.sb_results[:, 0]
 
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
@@ -1424,20 +1527,20 @@ class FullHighSideband(FullSpectrum):
                 raise
 
         temp = np.array(self.sb_results)
-        
-        ampli = np.array([temp[:, 3] / temp[:, 5]]) # I'm pretty sure this is
-                                                    # amplitude, not area
-        temp[:, 5:7] = temp[:, 5:7] * 1000 # For meV linewidths
+
+        ampli = np.array([temp[:, 3] / temp[:, 5]])  # I'm pretty sure this is
+        # amplitude, not area
+        temp[:, 5:7] = temp[:, 5:7] * 1000  # For meV linewidths
         print "sb_results", self.sb_results.shape
         print "ampli", ampli.shape
         save_results = np.hstack((temp, ampli.T))
-        
-        #spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
+
+        # spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
         fit_fname = file_name + '_' + marker + '_' + str(index) + '_full.txt'
-        #self.save_name = spectra_fname
-        
-        #self.parameters['addenda'] = self.addenda
-        #self.parameters['subtrahenda'] = self.subtrahenda
+        # self.save_name = spectra_fname
+
+        # self.parameters['addenda'] = self.addenda
+        # self.parameters['subtrahenda'] = self.subtrahenda
         try:
             parameter_str = json.dumps(self.parameters, sort_keys=True, indent=4, separators=(',', ': '))
         except Exception as e:
@@ -1447,20 +1550,21 @@ class FullHighSideband(FullSpectrum):
             return
         parameter_str = parameter_str.replace('\n', '\n#')
 
-        num_lines = parameter_str.count('#') # Make the number of lines constant so importing is easier
+        num_lines = parameter_str.count('#')  # Make the number of lines constant so importing is easier
         for num in range(99 - num_lines): parameter_str += '\n#'
-        #origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
-        #spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
-        
+        # origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
+        # spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
+
         origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
         fits_header = '#' + parameter_str + origin_import_fits
-        
-        #np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
+
+        # np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
         #           header=spec_header, comments='', fmt='%f')
         np.savetxt(os.path.join(folder_str, fit_fname), save_results, delimiter=',',
                    header=fits_header, comments='', fmt='%0.6e')
 
         print "Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname))
+
 
 ####################
 # Fitting functions 
@@ -1468,15 +1572,18 @@ class FullHighSideband(FullSpectrum):
 
 def gauss(x, *p):
     mu, A, sigma, y0 = p
-    return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0
-    
+    return (A / sigma) * np.exp(-(x - mu) ** 2 / (2. * sigma ** 2)) + y0
+
+
 def lingauss(x, *p):
     mu, A, sigma, y0, m = p
-    return (A / sigma) * np.exp(-(x - mu)**2 / (2. * sigma**2)) + y0 + m*x
+    return (A / sigma) * np.exp(-(x - mu) ** 2 / (2. * sigma ** 2)) + y0 + m * x
+
 
 def lorentzian(x, *p):
     mu, A, gamma, y0 = p
-    return (A / np.pi) * (gamma / ((x - mu)**2 + gamma**2)) + y0
+    return (A / np.pi) * (gamma / ((x - mu) ** 2 + gamma ** 2)) + y0
+
 
 def background(x, *p):
     """
@@ -1485,17 +1592,20 @@ def background(x, *p):
     with the background
     """
     a, b = p
-    return a * (1/x)**b
+    return a * (1 / x) ** b
+
 
 def gaussWithBackground(x, *p):
     pGauss = p[:4]
     a, b = p[4:]
     return gauss(x, *pGauss) + background(x, a, b)
 
+
 ####################
 # Collection functions 
 ####################
 
+'''
 def hsg_sum_spectra(object_list, do_fvb_crr=False):
     """
     This function will add all the things that should be added.  Obvs.  It will
@@ -1554,6 +1664,8 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
         temp.image_normalize(num_images)
         good_list.append(temp)
     return good_list
+'''
+
 
 def hsg_combine_spectra(spectra_list):
     """
@@ -1595,9 +1707,10 @@ def hsg_combine_spectra(spectra_list):
                     print "I found this one", piece.parameters["series"]
                     counter += 1
                     good_list[-1].add_CCD(piece)
-                    spectra_list.remove(piece)                    
+                    spectra_list.remove(piece)
         good_list[-1].make_results_array()
     return good_list
+
 
 def pmt_sorter(folder_path):
     """
@@ -1614,11 +1727,11 @@ def pmt_sorter(folder_path):
     for sb_file in file_list:
         temp = HighSidebandPMT(sb_file)
         try:
-            for pmt_spectrum in pmt_list: # pmt_spectrum is a pmt object
+            for pmt_spectrum in pmt_list:  # pmt_spectrum is a pmt object
                 if temp.parameters['series'] == pmt_spectrum.parameters['series']:
                     pmt_spectrum.add_sideband(temp)
                     break
-            else: # this will execute IF the break was NOT called
+            else:  # this will execute IF the break was NOT called
                 pmt_list.append(temp)
         except:
             pmt_list.append(temp)
@@ -1646,8 +1759,10 @@ def pmt_sorter(folder_path):
         pmt_spectrum.process_sidebands()
     return pmt_list
 
+
 def stitch_abs_results(main, new):
     raise NotImplementedError
+
 
 ####################
 # Helper functions 
@@ -1673,7 +1788,7 @@ def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
     med = np.median(d, axis=1).reshape(d.shape[0], 1)
     if debugging:
         print "shape of median filter:", med.shape
-    meanMedian  = med.mean(axis=1)
+    meanMedian = med.mean(axis=1)
     # meanMedian = med.copy()
     if debugging:
         print "shape of meaned median filter:", meanMedian.shape
@@ -1725,11 +1840,9 @@ def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
         p2 = win2.addPlot(colspan=2)
         p2.setMaximumHeight(250)
 
-        p2.plot(np.sum(med, axis=1)/d.shape[1])
+        p2.plot(np.sum(med, axis=1) / d.shape[1])
         win2.show()
         winlist.append(win2)
-
-
 
         win2 = pg.GraphicsLayoutWidget()
         win2.setWindowTitle("d-m")
@@ -1747,23 +1860,21 @@ def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
         p2 = win2.addPlot(colspan=2)
         p2.setMaximumHeight(250)
         p2.addLegend()
-        for i, v in enumerate((d-med).T):
+        for i, v in enumerate((d - med).T):
             p2.plot(v, pen=(i, d.shape[1]), name=str(i))
         p2.plot(cutoff, pen=pg.mkPen('w', width=3))
         win2.show()
         winlist.append(win2)
 
-
-
     # Find the bad pixel positions
     # Note the [:, None] - needed to cast the correct shapes
-    badPixs = np.argwhere((d - med)>(cutoff.reshape(len(cutoff), 1)))
+    badPixs = np.argwhere((d - med) > (cutoff.reshape(len(cutoff), 1)))
 
     for pix in badPixs:
         # get the other pixels in the row which aren't the cosmic
         if debugging:
             print "cleaning pixel", pix
-        p = d[pix[0], [i for i in range(d.shape[1]) if not i==pix[1]]]
+        p = d[pix[0], [i for i in range(d.shape[1]) if not i == pix[1]]]
         if debugging:
             print "\tRemaining pixels in row are", p
         # Replace the cosmic by the average of the others
@@ -1793,6 +1904,7 @@ def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
         app.exec_()
 
     return np.array(d)
+
 
 def stitchData(dataList, plot=False):
     """
@@ -1831,9 +1943,10 @@ def stitchData(dataList, plot=False):
     # higher domain than first. Need to enforce this, and remember it
     # so the correct shift is applied
     flipped = False
-    if max(first[:,0])>max(second[:,0]):
+    if max(first[:, 0]) > max(second[:, 0]):
         flipped = True
         first, second = second, first
+
 
 def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     """
@@ -1856,27 +1969,28 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     full = extended version of the input full.  Overlapping sidebands are 
            averaged because that makes sense?
     """
-    #print "I'm adding these sidebands", sorted(new_dict.keys())
+    # print "I'm adding these sidebands", sorted(new_dict.keys())
     overlap = []
-    missing = [] # How to deal with sideabands that are missing from full but in new.
+    missing = []  # How to deal with sideabands that are missing from full but in new.
     for new_sb in sorted(new_dict.keys()):
         full_sbs = sorted(full.keys())
         if new_sb in full_sbs:
             overlap.append(new_sb)
-        elif new_sb not in full_sbs and new_sb < full_sbs[-1]: # This probably doesn't work with bunches of negative orders
+        elif new_sb not in full_sbs and new_sb < full_sbs[
+            -1]:  # This probably doesn't work with bunches of negative orders
             missing.append(new_sb)
 
     if True:
         print "overlap:", overlap
         print "missing:", missing
     if need_ratio:
-    # Calculate the appropriate ratio to multiply the new sidebands by.
-    # I'm not entirely sure what to do with the error of this guy.
+        # Calculate the appropriate ratio to multiply the new sidebands by.
+        # I'm not entirely sure what to do with the error of this guy.
         ratio_list = []
         print '\n1979\nfull[2]', full[0][2]
         new_starter = overlap[-1]
         if len(overlap) > 2:
-            overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
+            overlap = [x for x in overlap if (x % 2 == 0) and (x != min(overlap) and (x != max(overlap)))]
         for sb in overlap:
             ratio_list.append(full[sb][2] / new_dict[sb][2])
         ratio = np.mean(ratio_list)
@@ -1885,51 +1999,55 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
         print "Ratio", ratio
         print "Error", error
         print '\n1990\nfull[2]', full[0][2]
-    # Adding the new sidebands to the full set and moving errors around.
-    # I don't know exactly what to do about the other aspects of the sidebands
-    # besides the strength and its error.
+        # Adding the new sidebands to the full set and moving errors around.
+        # I don't know exactly what to do about the other aspects of the sidebands
+        # besides the strength and its error.
         for sb in overlap:
             full[sb][2] = ratio * new_dict[sb][2]
-            full[sb][3] = full[sb][2] * np.sqrt((error / ratio)**2 + (new_dict[sb][3] / new_dict[sb][2])**2)
+            full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (new_dict[sb][3] / new_dict[sb][2]) ** 2)
             print '\n1997\nfull[2]', full[0][3]
             # Now for linewidths
-            lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
-            lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
+            lw_error = np.sqrt(full[sb][5] ** (-2) + new_dict[sb][5] ** (-2)) ** (-1)
+            lw_avg = (full[sb][4] / (full[sb][5] ** 2) + new_dict[sb][4] / (new_dict[sb][5] ** 2)) / (
+            full[sb][5] ** (-2) + new_dict[sb][5] ** (-2))
             full[sb][4] = lw_avg
             full[sb][5] = lw_error
         print '\n2003\nfull[2]', full[0][2]
     else:
         try:
             new_starter = overlap[-1]
-            overlap = [x for x in overlap if (x%2 == 0) and (x != min(overlap) and (x != max(overlap)))]
+            overlap = [x for x in overlap if (x % 2 == 0) and (x != min(overlap) and (x != max(overlap)))]
             for sb in overlap:
                 if verbose:
                     print "The sideband", sb
-                    print "Old value", full[sb][4]*1000
-                    print "Add value", new_dict[sb][4]*1000
-                error = np.sqrt(full[sb][3]**(-2) + new_dict[sb][3]**(-2))**(-1)
-                avg = (full[sb][2] / (full[sb][3]**2) + new_dict[sb][2] / (new_dict[sb][3]**2)) / (full[sb][3]**(-2) + new_dict[sb][3]**(-2))
+                    print "Old value", full[sb][4] * 1000
+                    print "Add value", new_dict[sb][4] * 1000
+                error = np.sqrt(full[sb][3] ** (-2) + new_dict[sb][3] ** (-2)) ** (-1)
+                avg = (full[sb][2] / (full[sb][3] ** 2) + new_dict[sb][2] / (new_dict[sb][3] ** 2)) / (
+                full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
                 full[sb][2] = avg
                 full[sb][3] = error
 
-                lw_error = np.sqrt(full[sb][5]**(-2) + new_dict[sb][5]**(-2))**(-1)
-                lw_avg = (full[sb][4] / (full[sb][5]**2) + new_dict[sb][4] / (new_dict[sb][5]**2)) / (full[sb][5]**(-2) + new_dict[sb][5]**(-2))
+                lw_error = np.sqrt(full[sb][5] ** (-2) + new_dict[sb][5] ** (-2)) ** (-1)
+                lw_avg = (full[sb][4] / (full[sb][5] ** 2) + new_dict[sb][4] / (new_dict[sb][5] ** 2)) / (
+                full[sb][5] ** (-2) + new_dict[sb][5] ** (-2))
                 full[sb][4] = lw_avg
-                full[sb][5] = lw_error # This may not be the exactly right way to calculate the error
+                full[sb][5] = lw_error  # This may not be the exactly right way to calculate the error
                 if verbose:
                     print "New value", lw_avg * 1000
         except:
-            new_starter = 0 # I think this makes things work when there's no overlap
+            new_starter = 0  # I think this makes things work when there's no overlap
     if need_ratio:
         print '\n2024\nfull[2]', full[0][2]
     for sb in [x for x in new_dict.keys() if ((x >= new_starter) or (x in missing))]:
         full[sb] = new_dict[sb]
         if need_ratio:
             full[sb][2] = ratio * full[sb][2]
-            full[sb][3] = full[sb][2] * np.sqrt((error / ratio)**2 + (ratio * full[sb][3] / full[sb][2])**2)
+            full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (ratio * full[sb][3] / full[sb][2]) ** 2)
             print '\n2030\nfull[2]', full[0][2]
     print "I made this dictionary", sorted(full.keys())
     return full
+
 
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit, verbose=False):
     """
@@ -1950,54 +2068,53 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     included_spectra = dict()
     param_array = None
     sb_included = []
-    
+
     for spec in spectrum_list:
         sb_included = sorted(list(set(sb_included + spec.full_dict.keys())))
         included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
     if verbose:
-        #print "full name:", spectrum_list[0].fname
+        # print "full name:", spectrum_list[0].fname
         print "included names:", included_spectra
         print "sb_included:", sb_included
-    
-    
+
     for spec in spectrum_list:
-        temp_dict = {} # This is different from full_dict in that the list has the
-                       # sideband order as the zeroth element.
+        temp_dict = {}  # This is different from full_dict in that the list has the
+        # sideband order as the zeroth element.
         if verbose:
             print "the sb_results:", spec.sb_results
         for index in xrange(len(spec.sb_results[:, 0])):
             if verbose:
                 print "my array slice:", spec.sb_results[index, :]
             temp_dict[int(round(spec.sb_results[index, 0]))] = np.array(spec.sb_results[index, :])
-        
+
         if verbose:
             print temp_dict
-        
+
         for sb in sb_included:
             blank = np.zeros(7)
             blank[0] = float(sb)
-            #print "checking sideband order:", sb
-            #print "blank", blank
+            # print "checking sideband order:", sb
+            # print "blank", blank
             if not temp_dict.has_key(sb):
-                #print "\nNeed to add sideband order:", sb
+                # print "\nNeed to add sideband order:", sb
                 temp_dict[sb] = blank
-        try: # Why is this try-except here?
+        try:  # Why is this try-except here?
             spec_data = np.array([float(spec.parameters[param_name])])
         except:
             spec_data = np.array([float(spec.parameters[param_name][:2])])
         for key in sorted(temp_dict.keys()):
-            #print "I am going to hstack this:", temp_dict[key]
+            # print "I am going to hstack this:", temp_dict[key]
             spec_data = np.hstack((spec_data, temp_dict[key]))
-            
+
         try:
             param_array = np.vstack((param_array, spec_data))
         except:
             param_array = np.array(spec_data)
         if verbose:
             print "The shape of the param_array is:", param_array.shape
-        #print "The param_array itself is:", param_array
+            # print "The param_array itself is:", param_array
     '''
     param_array_norm = np.array(param_array).T # python iterates over rows
     for elem in [x for x in xrange(len(param_array_norm)) if (x-1)%7 == 3]:
@@ -2028,7 +2145,6 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     snipped_array = snipped_array.T
     norm_array = norm_array.T
 
-
     try:
         os.mkdir(folder_str)
     except OSError, e:
@@ -2039,7 +2155,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     norm_name = file_name + '_norm.txt'
     snip_name = file_name + '_snip.txt'
     file_name = file_name + '.txt'
-    
+
     try:
         included_spectra_str = json.dumps(included_spectra, sort_keys=True, indent=4, separators=(',', ': '))
     except:
@@ -2067,15 +2183,16 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     header_total = '#' + included_spectra_str + '\n' + origin_total
     header_snip = '#' + included_spectra_str + '\n' + origin_snip
 
-    #print "Spec header: ", spec_header
+    # print "Spec header: ", spec_header
     print "the param_array is:", param_array
-    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',', 
+    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
                header=header_total, comments='', fmt='%0.6e')
-    np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',', 
+    np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
                header=header_snip, comments='', fmt='%0.6e')
-    np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',', 
+    np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
                header=header_snip, comments='', fmt='%0.6e')
     print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
+
 
 def stitchData(dataList, plot=False):
     """
@@ -2113,7 +2230,7 @@ def stitchData(dataList, plot=False):
     # higher domain than first. Need to enforce this, and remember it
     # so the correct shift is applied
     flipped = False
-    if max(first[:,0])>max(second[:,0]):
+    if max(first[:, 0]) > max(second[:, 0]):
         flipped = True
         first, second = second, first
 
@@ -2129,8 +2246,8 @@ def stitchData(dataList, plot=False):
         immutable = np.array(immutable)
 
         # Shift the data set
-        shiftable[:,1]+=dy
-        shiftable[:,0]+=dx
+        shiftable[:, 1] += dy
+        shiftable[:, 0] += dx
 
         # Create an interpolator. We want a
         # direct comparision for subtracting the two functions
@@ -2139,28 +2256,28 @@ def stitchData(dataList, plot=False):
         shiftF = spi.interp1d(*shiftable.T)
 
         # Find the bounds of where the two data sets overlap
-        overlap = (min(shiftable[:,0]), max(immutable[:,0]))
+        overlap = (min(shiftable[:, 0]), max(immutable[:, 0]))
         print "overlap", overlap
 
         # Determine the indices of the immutable function
         # where it overlaps. argwhere returns 2-d thing,
         # requiring the [0] at the end of each call
-        fOlIdx = (min(np.argwhere(immutable[:,0]>=overlap[0]))[0],
-                  max(np.argwhere(immutable[:,0]<=overlap[1]))[0])
+        fOlIdx = (min(np.argwhere(immutable[:, 0] >= overlap[0]))[0],
+                  max(np.argwhere(immutable[:, 0] <= overlap[1]))[0])
         print "fOlIdx", fOlIdx
 
         # Get the interpolated values of the shiftable function at the same
         # x-coordinates as the immutable case
-        newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1],0])
+        newShift = shiftF(immutable[fOlIdx[0]:fOlIdx[1], 0])
 
         if plot:
-            plt.plot(*immutable[fOlIdx[0]:fOlIdx[1],:].T, marker='o', label="imm", markersize=10)
+            plt.plot(*immutable[fOlIdx[0]:fOlIdx[1], :].T, marker='o', label="imm", markersize=10)
             plt.plot(immutable[fOlIdx[0]:fOlIdx[1], 0], newShift, marker='o', label="shift")
-        imm = immutable[fOlIdx[0]:fOlIdx[1],1]
+        imm = immutable[fOlIdx[0]:fOlIdx[1], 1]
         shift = newShift
-        return imm-shift
+        return imm - shift
 
-    a, _, _, msg, err= spo.leastsq(fitter, [0.0001, 0.01*max(first[:,1])], args=(second, first), full_output = 1)
+    a, _, _, msg, err = spo.leastsq(fitter, [0.0001, 0.01 * max(first[:, 1])], args=(second, first), full_output=1)
     # print "a", a
     if plot:
         # Revert back to the original figure, as per top comments
@@ -2168,9 +2285,10 @@ def stitchData(dataList, plot=False):
 
     # Need to invert the shift if we flipped which
     # model we're supposed to move
-    if flipped: a*=-1
+    if flipped: a *= -1
 
     return a
+
 
 def integrateData(data, t1, t2, ave=False):
     """
@@ -2189,36 +2307,35 @@ def integrateData(data, t1, t2, ave=False):
     third column to be the errors of the points,
     and return the error as the quadrature sum
     """
-    t = data[:,0]
-    y = data[:,1]
+    t = data[:, 0]
+    y = data[:, 1]
     if data.shape[0] >= 3:
-        errors = data[:,2]
+        errors = data[:, 2]
     else:
         errors = np.ones_like(y) * np.nan
 
-    gt = set(np.where(t>t1)[0])
-    lt = set(np.where(t<t2)[0])
+    gt = set(np.where(t > t1)[0])
+    lt = set(np.where(t < t2)[0])
 
     # find the intersection of the sets
-    vals = list(gt&lt)
+    vals = list(gt & lt)
 
     # Calculate the average
     tot = np.sum(y[vals])
-    error = np.sqrt(np.sum(errors[vals]**2))
-
-
+    error = np.sqrt(np.sum(errors[vals] ** 2))
 
     # Multiply by sampling
-    tot *= (t[1]-t[0])
-    error *= (t[1]-t[0])
+    tot *= (t[1] - t[0])
+    error *= (t[1] - t[0])
 
     if ave:
         # Normalize by total width if you want an average
-        tot /= (t2-t1)
-        errors /= (t2-t1)
+        tot /= (t2 - t1)
+        errors /= (t2 - t1)
     if not np.isnan(error):
         return tot, error
     return tot
+
 
 def fourier_prep(x_vals, y_vals, num=1600):
     """
@@ -2228,11 +2345,13 @@ def fourier_prep(x_vals, y_vals, num=1600):
     And remove nans!
     """
     y_vals = handle_nans(y_vals)
-    spline = spi.interp1d(x_vals, y_vals, kind='linear') # for some reason kind='quadratic' doesn't work? returns all nans
+    spline = spi.interp1d(x_vals, y_vals,
+                          kind='linear')  # for some reason kind='quadratic' doesn't work? returns all nans
     even_x = np.linspace(x_vals[0], x_vals[-1], num=num)
     even_y = spline(even_x)
     # even_y = handle_nans(even_y)
     return even_x, even_y
+
 
 def handle_nans(y_vals):
     """
@@ -2241,12 +2360,13 @@ def handle_nans(y_vals):
     Taken from Stack Overflow: "Interpolate NaN values in a numpy array"
     """
     nan_idx = np.isnan(y_vals)
-    my_lambda = lambda x: x.nonzero()[0] # Returns the indices where Trues reside
+    my_lambda = lambda x: x.nonzero()[0]  # Returns the indices where Trues reside
     y_vals[nan_idx] = np.interp(my_lambda(nan_idx), my_lambda(~nan_idx), y_vals[~nan_idx])
     return y_vals
 
-def calc_laser_frequencies(spec, nir_units = "eV", thz_units = "eV",
-                         bad_points = -2, inspect_plots = False):
+
+def calc_laser_frequencies(spec, nir_units="eV", thz_units="eV",
+                           bad_points=-2, inspect_plots=False):
     """
     Calculate the NIR and FEL frequency for a spectrum
     :param spec: HSGCCD object to fit
@@ -2264,16 +2384,16 @@ def calc_laser_frequencies(spec, nir_units = "eV", thz_units = "eV",
         spec.guess_sidebands()
         spec.fit_sidebands()
 
-    sidebands = spec.sb_results[:,0]
-    locations = spec.sb_results[:,1]
-    errors = spec.sb_results[:,2]
+    sidebands = spec.sb_results[:, 0]
+    locations = spec.sb_results[:, 1]
+    errors = spec.sb_results[:, 2]
 
-    p = np.polyfit(sidebands[:bad_points],
-                   locations[:bad_points], deg=1)
+    p = np.polyfit(sidebands[1:bad_points],
+                   # This is 1 because the peak picker function was calling the 10th order the 9th
+                   locations[1:bad_points], deg=1)
 
     NIRfreq = p[1]
     THzfreq = p[0]
-
 
     if inspect_plots:
         plt.figure("Frequency Fit")
@@ -2284,19 +2404,17 @@ def calc_laser_frequencies(spec, nir_units = "eV", thz_units = "eV",
 
     converter = {
         "eV": lambda x: x,
-        "meV": lambda x: 1000.*x,
-        "wavenumber": lambda x: 8065.6*x,
-        "THz": lambda x: 241.80060*x,
-        "GHz": lambda x: 241.80060*1e3*x,
-        "nm": lambda x: 1239.83/x
+        "meV": lambda x: 1000. * x,
+        "wavenumber": lambda x: 8065.6 * x,
+        "THz": lambda x: 241.80060 * x,
+        "GHz": lambda x: 241.80060 * 1e3 * x,
+        "nm": lambda x: 1239.83 / x
     }
 
     freqNIR = converter.get(nir_units, converter["eV"])(NIRfreq)
     freqTHz = converter.get(thz_units, converter["eV"])(THzfreq)
 
     return freqNIR, freqTHz
-
-
 
 
 ####################
@@ -2366,19 +2484,21 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
         raise TypeError("window_size size must be a positive odd number")
     if window_size < order + 2:
         raise TypeError("window_size is too small for the polynomials order")
-    order_range = range(order+1)
-    half_window = (window_size -1) // 2
+    order_range = range(order + 1)
+    half_window = (window_size - 1) // 2
     # precompute coefficients
-    b = np.mat([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
-    m = np.linalg.pinv(b).A[deriv] * rate**deriv * factorial(deriv)
+    b = np.mat([[k ** i for i in order_range] for k in range(-half_window, half_window + 1)])
+    m = np.linalg.pinv(b).A[deriv] * rate ** deriv * factorial(deriv)
     # pad the signal at the extremes with
     # values taken from the signal itself
-    firstvals = y[0] - np.abs( y[1:half_window+1][::-1] - y[0] )
-    lastvals = y[-1] + np.abs(y[-half_window-1:-1][::-1] - y[-1])
+    firstvals = y[0] - np.abs(y[1:half_window + 1][::-1] - y[0])
+    lastvals = y[-1] + np.abs(y[-half_window - 1:-1][::-1] - y[-1])
     y = np.concatenate((firstvals, y, lastvals))
-    return np.convolve( m[::-1], y, mode='valid')
+    return np.convolve(m[::-1], y, mode='valid')
 
-def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False, freqSigma=50, ftol=1e-4, isInteractive=False):
+
+def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False, freqSigma=50, ftol=1e-4,
+               isInteractive=False):
     """
     Performs an FFT, then fits a peak in frequency around the
     input with the input width.
@@ -2393,8 +2513,8 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
     """
     # Make a copy so we can return the same thing
     retData = np.array(data)
-    x = np.array(data[:,0])
-    y = np.array(data[:,-1])
+    x = np.array(data[:, 0])
+    y = np.array(data[:, -1])
     # Let's you place with zero padding.
     zeroPadding = len(x)
     N = len(x)
@@ -2405,10 +2525,12 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
             from PyQt4 import QtCore, QtGui
         except:
             raise ImportError("Cannot do interactive plotting without pyqtgraph installed")
+
         # Need to make some basic classes fir signals and slots to make things simple
         class FFTWin(pg.PlotWindow):
             sigCutoffChanged = QtCore.pyqtSignal(object)
             sigClosed = QtCore.pyqtSignal()
+
             def __init__(self, x, y):
                 super(FFTWin, self).__init__()
                 # Plot the log of the data,
@@ -2418,7 +2540,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
                 # Connect signals so the textbox updates and the
                 # realspace window can recalcualte the FFT
                 self.line = pg.InfiniteLine(cutoffFrequency, movable=True)
-                self.line.sigPositionChanged.connect(lambda x:self.sigCutoffChanged.emit(x.value()))
+                self.line.sigPositionChanged.connect(lambda x: self.sigCutoffChanged.emit(x.value()))
                 self.line.sigPositionChanged.connect(self.updateText)
                 self.addItem(self.line)
                 # Set up the textbox so user knows the frequency
@@ -2434,6 +2556,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
                 # to properly clean up afterwards
                 self.oldCloseEvent = self.win.closeEvent
                 self.win.closeEvent = self.closeEvent
+
             def updateText(self, val):
                 self.text.setText("{:.4f}".format(val.value()))
 
@@ -2445,6 +2568,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
 
         class RealWin(pg.PlotWindow):
             sigClosed = QtCore.pyqtSignal()
+
             def __init__(self, data, fftWin):
                 super(RealWin, self).__init__()
                 # To connect signals from it
@@ -2477,8 +2601,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
                     pass
                 self.oldClose(ev)
 
-
-        k = fft.fftfreq(zeroPadding, x[1]-x[0])
+        k = fft.fftfreq(zeroPadding, x[1] - x[0])
         Y = fft.fft(y, n=zeroPadding)
         # Make the windows
         fftWin = FFTWin(k, np.abs(Y))
@@ -2492,24 +2615,22 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
         # Return with the desired output value
         return fft_filter(retData, fftWin.line.value())
 
-
     if inspectPlots:
         plt.figure("Real Space")
         plt.plot(x, y, label="Input Data")
-
 
     # Replicate origin directy
     # http://www.originlab.com/doc/Origin-Help/Smooth-Algorithm
     # "rotate" the data set so it ends at 0,
     # enforcing a periodicity in the data. Otherwise
     # oscillatory artifacts result at the ends
-    onePerc = int(0.01*N)
+    onePerc = int(0.01 * N)
     x1 = np.mean(x[:onePerc])
     x2 = np.mean(x[-onePerc:])
     y1 = np.mean(y[:onePerc])
     y2 = np.mean(y[-onePerc:])
 
-    m = (y1-y2)/(x1-x2)
+    m = (y1 - y2) / (x1 - x2)
     b = y1 - m * x1
 
     flattenLine = m * x + b
@@ -2519,7 +2640,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
         plt.plot(x, y, label="Rotated Data")
 
     # Perform the FFT and find the appropriate frequency spacing
-    k = fft.fftfreq(zeroPadding, x[1]-x[0])
+    k = fft.fftfreq(zeroPadding, x[1] - x[0])
     Y = fft.fft(y, n=zeroPadding)
     if inspectPlots:
         plt.figure("Frequency Space")
@@ -2528,13 +2649,12 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
     if tryFitting:
         try:
             # take +/- 4 sigma points around peak to fit to
-            sl = np.abs(k-cutoffFrequency).argmin() + np.array([-1, 1]) * 10 * freqSigma / np.abs(k[0]-k[1])
+            sl = np.abs(k - cutoffFrequency).argmin() + np.array([-1, 1]) * 10 * freqSigma / np.abs(k[0] - k[1])
             sl = slice(*[int(j) for j in sl])
             p0 = [cutoffFrequency,
-                  np.abs(Y)[sl].max() * freqSigma, # estimate the height baased on the max in the set
+                  np.abs(Y)[sl].max() * freqSigma,  # estimate the height baased on the max in the set
                   freqSigma,
-                  0.14, 2e3, 1.1] # magic test numbers, they fit the background well
-
+                  0.14, 2e3, 1.1]  # magic test numbers, they fit the background well
 
             if inspectPlots:
                 plt.semilogy(k[sl], gaussWithBackground(k[sl], *p0), label="Peak with initial values")
@@ -2542,14 +2662,13 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
             if inspectPlots:
                 plt.semilogy(k[sl], gaussWithBackground(k[sl], *p), label="Fitted Peak")
 
-
             # Want to remove data within 5 sigma ( arb value... )
-            st = int(p[0] - 5*p[2])
-            en = int(p[0] + 5*p[2])
+            st = int(p[0] - 5 * p[2])
+            en = int(p[0] + 5 * p[2])
 
             # Find get the indices to remove.
-            refitRangeIdx = np.argwhere((k>st) & (k<en))
-            refitRangeIdxNeg = np.argwhere((k<-st) & (k>-en))
+            refitRangeIdx = np.argwhere((k > st) & (k < en))
+            refitRangeIdxNeg = np.argwhere((k < -st) & (k > -en))
 
             # Replace the data with the backgroudn
             # Note: abuses the symmetry of the FFT of a real function
@@ -2572,18 +2691,18 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
     if not tryFitting:
         # Define where to remove the data
         st = cutoffFrequency
-        en = int(max(k))+1
+        en = int(max(k)) + 1
 
         # Find the indices to remove the data
-        refitRangeIdx = np.argwhere((k>st) & (k<en))
-        refitRangeIdxNeg = np.argwhere((k<-st) & (k>-en))
+        refitRangeIdx = np.argwhere((k > st) & (k < en))
+        refitRangeIdxNeg = np.argwhere((k < -st) & (k > -en))
 
         # Kill it all after the cutoff
         Y[refitRangeIdx] = 0
         Y[refitRangeIdxNeg] = 0
 
-        smoothIdx = np.argwhere((-st<k) & (k< st))
-        smoothr = -1./cutoffFrequency**2 * k[smoothIdx]**2 + 1
+        smoothIdx = np.argwhere((-st < k) & (k < st))
+        smoothr = -1. / cutoffFrequency ** 2 * k[smoothIdx] ** 2 + 1
 
         Y[smoothIdx] *= smoothr
 
@@ -2612,9 +2731,10 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
         a = plt.legend()
         a.draggable(True)
 
-    retData[:,0] = x
-    retData[:,-1] = y
+    retData[:, 0] = x
+    retData[:, -1] = y
     return retData
+
 
 def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     """
@@ -2631,17 +2751,16 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.figure("Real Space")
         plt.plot(x_vals, y_vals, label="Non-nan Data")
 
-
     zeroPadding = len(x_vals)
-    print "zero padding", zeroPadding # This needs to be this way because truncation is bad and actually zero padding
+    print "zero padding", zeroPadding  # This needs to be this way because truncation is bad and actually zero padding
     N = len(x_vals)
-    onePerc = int(0.01*N)
+    onePerc = int(0.01 * N)
     x1 = np.mean(x_vals[:onePerc])
     x2 = np.mean(x_vals[-onePerc:])
     y1 = np.mean(y_vals[:onePerc])
     y2 = np.mean(y_vals[-onePerc:])
 
-    m = (y1-y2)/(x1-x2)
+    m = (y1 - y2) / (x1 - x2)
     b = y1 - m * x1
 
     flattenLine = m * x_vals + b
@@ -2651,16 +2770,14 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.figure("Real Space")
         plt.plot(x_vals, y_vals, label="Rotated Data")
 
-    
     # even_data = np.column_stack((x_vals, y_vals))
     # Perform the FFT and find the appropriate frequency spacing
-    x_fourier = fft.fftfreq(zeroPadding, x_vals[1]-x_vals[0])
-    y_fourier = fft.fft(y_vals)#, n=zeroPadding)
+    x_fourier = fft.fftfreq(zeroPadding, x_vals[1] - x_vals[0])
+    y_fourier = fft.fft(y_vals)  # , n=zeroPadding)
 
     if inspectPlots:
         plt.figure("Frequency Space")
         plt.semilogy(x_fourier, np.abs(y_fourier), label="Raw FFT")
-
 
     # Define where to remove the data
     band_start = cutoff
@@ -2685,11 +2802,11 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
 
     y_fourier[smoothIdx] *= smoothr
     '''
-    
+
     print abs(y_fourier[-10:])
-    butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff)**50))
+    butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff) ** 50))
     y_fourier *= butterworth
-    
+
     if inspectPlots:
         plt.plot(x_fourier, np.abs(y_fourier), label="FFT with removed parts")
         a = plt.legend()
@@ -2709,9 +2826,6 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     y_vals += flattenLine
     y_vals = np.abs(y_vals)
 
-
-    
-
     if inspectPlots:
         plt.figure("Real Space")
         print x_vals.size, y_vals.size
@@ -2720,6 +2834,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         a.draggable(True)
 
     return np.column_stack((x_vals, y_vals))
+
 
 def high_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     """
@@ -2736,17 +2851,16 @@ def high_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.figure("Real Space")
         plt.plot(x_vals, y_vals, label="Non-nan Data")
 
-
     zeroPadding = len(x_vals)
-    print "zero padding", zeroPadding # This needs to be this way because truncation is bad and actually zero padding
+    print "zero padding", zeroPadding  # This needs to be this way because truncation is bad and actually zero padding
     N = len(x_vals)
-    onePerc = int(0.01*N)
+    onePerc = int(0.01 * N)
     x1 = np.mean(x_vals[:onePerc])
     x2 = np.mean(x_vals[-onePerc:])
     y1 = np.mean(y_vals[:onePerc])
     y2 = np.mean(y_vals[-onePerc:])
 
-    m = (y1-y2)/(x1-x2)
+    m = (y1 - y2) / (x1 - x2)
     b = y1 - m * x1
 
     flattenLine = m * x_vals + b
@@ -2756,16 +2870,14 @@ def high_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.figure("Real Space")
         plt.plot(x_vals, y_vals, label="Rotated Data")
 
-
     # even_data = np.column_stack((x_vals, y_vals))
     # Perform the FFT and find the appropriate frequency spacing
-    x_fourier = fft.fftfreq(zeroPadding, x_vals[1]-x_vals[0])
-    y_fourier = fft.fft(y_vals)#, n=zeroPadding)
+    x_fourier = fft.fftfreq(zeroPadding, x_vals[1] - x_vals[0])
+    y_fourier = fft.fft(y_vals)  # , n=zeroPadding)
 
     if inspectPlots:
         plt.figure("Frequency Space")
         plt.semilogy(x_fourier, np.abs(y_fourier), label="Raw FFT")
-
 
     # Define where to remove the data
     band_start = cutoff
@@ -2792,7 +2904,7 @@ def high_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     '''
 
     print abs(y_fourier[-10:])
-    butterworth = 1-np.sqrt(1 / (1 + (x_fourier / cutoff)**50))
+    butterworth = 1 - np.sqrt(1 / (1 + (x_fourier / cutoff) ** 50))
     y_fourier *= butterworth
 
     if inspectPlots:
@@ -2813,9 +2925,6 @@ def high_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     # unshift the data
     y_vals += flattenLine
     y_vals = np.abs(y_vals)
-
-
-
 
     if inspectPlots:
         plt.figure("Real Space")
@@ -2842,17 +2951,16 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.figure("Real Space")
         plt.plot(x_vals, y_vals, label="Non-nan Data")
 
-
     zeroPadding = len(x_vals)
-    print "zero padding", zeroPadding # This needs to be this way because truncation is bad and actually zero padding
+    print "zero padding", zeroPadding  # This needs to be this way because truncation is bad and actually zero padding
     N = len(x_vals)
-    onePerc = int(0.01*N)
+    onePerc = int(0.01 * N)
     x1 = np.mean(x_vals[:onePerc])
     x2 = np.mean(x_vals[-onePerc:])
     y1 = np.mean(y_vals[:onePerc])
     y2 = np.mean(y_vals[-onePerc:])
 
-    m = (y1-y2)/(x1-x2)
+    m = (y1 - y2) / (x1 - x2)
     b = y1 - m * x1
 
     flattenLine = m * x_vals + b
@@ -2862,16 +2970,14 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.figure("Real Space")
         plt.plot(x_vals, y_vals, label="Rotated Data")
 
-
     # even_data = np.column_stack((x_vals, y_vals))
     # Perform the FFT and find the appropriate frequency spacing
-    x_fourier = fft.fftfreq(zeroPadding, x_vals[1]-x_vals[0])
-    y_fourier = fft.fft(y_vals)#, n=zeroPadding)
+    x_fourier = fft.fftfreq(zeroPadding, x_vals[1] - x_vals[0])
+    y_fourier = fft.fft(y_vals)  # , n=zeroPadding)
 
     if inspectPlots:
         plt.figure("Frequency Space")
         plt.semilogy(x_fourier, np.abs(y_fourier), label="Raw FFT")
-
 
     # Define where to remove the data
     band_start = cutoff
@@ -2898,8 +3004,8 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     '''
 
     print abs(y_fourier[-10:])
-    butterworth = 1-np.sqrt(1 / (1 + (x_fourier / cutoff[0])**50))
-    butterworth *= np.sqrt(1 / (1 + (x_fourier / cutoff[1])**50))
+    butterworth = 1 - np.sqrt(1 / (1 + (x_fourier / cutoff[0]) ** 50))
+    butterworth *= np.sqrt(1 / (1 + (x_fourier / cutoff[1]) ** 50))
     y_fourier *= butterworth
 
     if inspectPlots:
@@ -2921,9 +3027,6 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     y_vals += flattenLine
     y_vals = np.abs(y_vals)
 
-
-
-
     if inspectPlots:
         plt.figure("Real Space")
         print x_vals.size, y_vals.size
@@ -2932,6 +3035,7 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         a.draggable(True)
 
     return np.column_stack((x_vals, y_vals))
+
 
 ####################
 # Complete functions 
@@ -2945,7 +3049,7 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
 
     for spectrum in pmt_data:
         spectrum.integrate_sidebands(verbose=verbose)
-        spectrum.laser_line() # This function is broken because process sidebands can't handle the laser line
+        spectrum.laser_line()  # This function is broken because process sidebands can't handle the laser line
         print spectrum.full_dict
         index = 0
         if plot:
@@ -2953,11 +3057,13 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
             for elem in spectrum.sb_dict.values():
                 plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
             plt.figure('Sideband strengths')
-            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4], label=spectrum.parameters['series'], marker='o')
+            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+                         label=spectrum.parameters['series'], marker='o')
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1], index=index)
     plt.legend()
     return pmt_data
+
 
 def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, verbose=False):
     """
@@ -2982,14 +3088,18 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
             spectrum.infer_frequencies()
         if plot:
             plt.figure('CCD data')
-            plt.errorbar(spectrum.proc_data[:, 0], spectrum.proc_data[:, 1], spectrum.proc_data[:, 2], label=spectrum.parameters['series'])
+            plt.errorbar(spectrum.proc_data[:, 0], spectrum.proc_data[:, 1], spectrum.proc_data[:, 2],
+                         label=spectrum.parameters['series'])
             plt.legend()
-            #plt.yscale('log')
+            # plt.yscale('log')
             plt.figure('Sideband strengths')
-            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4], label=spectrum.parameters['series'], marker='o')
-            plt.legend()    
+            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+                         label=spectrum.parameters['series'], marker='o')
+            plt.legend()
             plt.yscale('log')
         if type(save) is tuple:
-            spectrum.save_processing(save[0], save[1], marker=spectrum.parameters["series"] + '_' + str(spectrum.parameters["spec_step"]), index=index)
+            spectrum.save_processing(save[0], save[1],
+                                     marker=spectrum.parameters["series"] + '_' + str(spectrum.parameters["spec_step"]),
+                                     index=index)
             index += 1
     return raw_list
