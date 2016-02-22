@@ -455,7 +455,6 @@ class HighSidebandCCD(CCD):
         :type spectrometer_offset: float
         :return: None, technically
         """
-        those are no longer part of this init.  This also turns all wavelengths
         if isinstance(hsg_thing, str):
             super(HighSidebandCCD, self).__init__(hsg_thing, spectrometer_offset=spectrometer_offset)
             # TODO: fix addenda bullshit
