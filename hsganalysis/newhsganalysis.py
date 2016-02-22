@@ -466,9 +466,9 @@ class HighSidebandCCD(CCD):
             self.subtrahenda = []
             self.ccd_data = np.array(hsg_thing)
             self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
-            # This data won't have errors
+            # This data won't have an error column, so attached a column of ones
             self.ccd_data = np.column_stack((self.ccd_data, np.ones_like(self.ccd_data[:,1])))
-            self.ccd_data = np.flipud(self.ccd_data)
+            self.ccd_data = np.flipud(self.ccd_data) # Because turning into eV switches direction
             self.fname = "Live Data"
         else:
             raise Exception("I don't know what this file type is {}, type: {}".format(
