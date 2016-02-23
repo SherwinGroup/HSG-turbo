@@ -811,7 +811,7 @@ class HighSidebandCCD(CCD):
             check_max_area = np.sum(check_y[check_max_index - octant:check_max_index + octant + 1])
 
             no_peak = (2 * len(check_y)) // 5
-            print "check_y length", len(check_y)
+            if verbose: print "check_y length", len(check_y)
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
@@ -825,24 +825,24 @@ class HighSidebandCCD(CCD):
                 print "check_ave is", check_ave
                 print "check_stdev is", check_stdev
                 print "check_ratio is", check_ratio
-            print "sideband", order
-            print "check_ratio", check_ratio
+                print "sideband", order
+                print "check_ratio", check_ratio
 
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
                 last_sb = x_axis[found_index]
 
-                # if verbose:
-                print "I just found", order, "at index", found_index, "at freq", last_sb, "\n"
+                if verbose:
+                    print "I just found", order, "at index", found_index, "at freq", last_sb, "\n"
 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - (2 * octant + 1) * check_ave)
                 error_est = np.sqrt(sum([i ** 2 for i in error[found_index - octant:found_index + octant]])) / (
                 check_max_area - (2 * octant + 1) * check_ave)
                 # This error is a relative error.
-                # if verbose:
-                print "My error estimate is:", error_est
+                if verbose:
+                    print "My error estimate is:", error_est
                 # print "My relative error is:", error_est / sb_amp_guess
                 sb_error_est.append(error_est)
                 self.sb_list.append(order)
@@ -967,7 +967,7 @@ class HighSidebandCCD(CCD):
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
         try:
             sb_fits = sb_fits_temp[:, reorder]
-            print "The abs. error guess is", sb_fits[:, 0:5]
+            if verbose: print "The abs. error guess is", sb_fits[:, 0:5]
         except:
             print "The file is:", self.fname
             print "\n!!!!!\nSHIT WENT WRONG\n!!!!!\n"
@@ -996,11 +996,13 @@ class HighSidebandCCD(CCD):
         :type thz_units: 'GHz', 'wavenumber', 'meV'
         :param bad_points: How many more-positive order sidebands shall this ignore?
         :type bad_points: int
-        :return: None
+        :return: freqNIR, freqTHz, the frequencies in the appropriate units
         """
         freqNIR, freqTHz = calc_laser_frequencies(self, nir_units, thz_units, bad_points)
 
-        self.parameters["calculated NIR freq (cm-1)"], self.parameters["calculated THz freq (GHz)"] = freqNIR, freqTHz
+        self.parameters["calculated NIR freq"] = "{} {}".format(freqNIR, nir_units)
+        self.parameters["calculated THz freq"] = "{} {}".format(freqNIR, freqTHz)
+        return freqNIR, freqTHz
 
     def save_processing(self, file_name, folder_str, marker='', index=''):
         """
