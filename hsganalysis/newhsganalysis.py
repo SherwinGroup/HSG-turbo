@@ -1001,7 +1001,7 @@ class HighSidebandCCD(CCD):
         freqNIR, freqTHz = calc_laser_frequencies(self, nir_units, thz_units, bad_points)
 
         self.parameters["calculated NIR freq"] = "{} {}".format(freqNIR, nir_units)
-        self.parameters["calculated THz freq"] = "{} {}".format(freqNIR, freqTHz)
+        self.parameters["calculated THz freq"] = "{} {}".format(freqTHz, freqTHz)
         return freqNIR, freqTHz
 
     def save_processing(self, file_name, folder_str, marker='', index=''):
