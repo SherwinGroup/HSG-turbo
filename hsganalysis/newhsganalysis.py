@@ -865,13 +865,17 @@ class HighSidebandCCD(CCD):
         if verbose:
             print "I found these sidebands:", self.sb_list
         self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_est)]).T
+        # self.sb_guess = [frequency guess, amplitude guess, relative error of amplitude] for each sideband.
 
     def fit_sidebands(self, plot=False, verbose=False):
         """
         This takes self.sb_guess and fits to each maxima to get the details of
         each sideband.  It's really ugly, but it works.  The error of the
         sideband area is approximated from the data, not the curve fit.  All
-        else is from the curve fit.
+        else is from the curve fit.  Which is definitely underestimating the
+        error, but we don't care too much about those errors (at this point).
+
+        self.sb_guess = [frequency guess, amplitude guess, relative error of amplitude] for each sideband.
 
         Temporary stuff:
         sb_fits = holder of the fitting results until all spectra have been fit
@@ -926,43 +930,48 @@ class HighSidebandCCD(CCD):
                 if verbose:
                     print "I'm going to try to fit", self.sb_list[elem]
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
-                if verbose:
-                    print "the fit worked"
-                coeff[1] = abs(coeff[1])  # The amplitude could be negative if the linewidth is negative
-                coeff[2] = abs(coeff[2])  # The linewidth shouldn't be negative
-                if verbose:
-                    print "coeffs:", coeff
-                    print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
-                if 10e-4 > coeff[2] > 10e-6:
-                    sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
-                    sb_fits[-1][6] = self.sb_guess[elem, 2] * coeff[
-                        1]  # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
-                    print "number:", elem, num
-                    print "The rel. error guess is", self.sb_guess[elem, 2]
-                    print "The abs. error guess is", coeff[1] * self.sb_guess[elem, 2]
-
-                    # The error from self.sb_guess[elem, 2] is a relative error
-                if plot and verbose:
-                    plt.figure('CCD data')
-                    linewidth = 5
-                    x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
-                    if elem != 0:
-                        try:
-                            plt.plot(x_vals, gauss(x_vals, *coeff),
-                                     plt.gca().get_lines()[-1].get_color() + '--'  # I don't really know. Mostly
-                                     # just looked around at what functions
-                                     # matplotlib has...
-                                     , linewidth=linewidth)
-                        except:  # to prevent weird mac issues with the matplotlib things?
-                            plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
-
-                    else:
-                        plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
             except:
                 print "I couldn't fit", elem
                 print "It's sideband", num
                 print "In file", self.fname
                 self.sb_list[elem] = None
+                continue # This will ensure the rest of the loop is not run without an actual fit.
+
+            if verbose:
+                print "the fit worked"
+            coeff[1] = abs(coeff[1])  # The amplitude could be negative if the linewidth is negative
+            coeff[2] = abs(coeff[2])  # The linewidth shouldn't be negative
+            if verbose:
+                print "coeffs:", coeff
+                print "sigma for {}: {}".format(self.sb_list[elem], coeff[2])
+            if 10e-4 > coeff[2] > 10e-6:
+                sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
+                sb_fits[-1][6] = self.sb_guess[elem, 2] * coeff[1]
+                    # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
+                    # self.sb_guess[elem, 2] is the relative error as calculated by the guess_sidebands method
+                    # coeff[1] is the area from the fit.  Therefore, the product should be the absolute error
+                    # of the integrated area of the sideband.  The other errors are still underestimated.
+                print "number:", elem, num
+                print "The rel. error guess is", self.sb_guess[elem, 2]
+                print "The abs. error guess is", coeff[1] * self.sb_guess[elem, 2]
+
+                # The error from self.sb_guess[elem, 2] is a relative error
+            if plot and verbose:
+                plt.figure('CCD data')
+                linewidth = 5
+                x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
+                if elem != 0:
+                    try:
+                        plt.plot(x_vals, gauss(x_vals, *coeff),
+                                 plt.gca().get_lines()[-1].get_color() + '--'  # I don't really know. Mostly
+                                 # just looked around at what functions
+                                 # matplotlib has...
+                                 , linewidth=linewidth)
+                    except:  # to prevent weird mac issues with the matplotlib things?
+                        plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
+
+                else:
+                    plt.plot(x_vals, gauss(x_vals, *coeff), '--', linewidth=linewidth)
         sb_fits_temp = np.asarray(sb_fits)
         reorder = [0, 1, 5, 2, 6, 3, 7, 4, 8]
         try:
