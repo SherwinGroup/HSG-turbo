@@ -931,9 +931,10 @@ class HighSidebandCCD(CCD):
                     print "I'm going to try to fit", self.sb_list[elem]
                 coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
             except:
-                print "I couldn't fit", elem
-                print "It's sideband", num
-                print "In file", self.fname
+                if verbose:
+                    print "I couldn't fit", elem
+                    print "It's sideband", num
+                    print "In file", self.fname
                 self.sb_list[elem] = None
                 continue # This will ensure the rest of the loop is not run without an actual fit.
 
@@ -951,9 +952,10 @@ class HighSidebandCCD(CCD):
                     # self.sb_guess[elem, 2] is the relative error as calculated by the guess_sidebands method
                     # coeff[1] is the area from the fit.  Therefore, the product should be the absolute error
                     # of the integrated area of the sideband.  The other errors are still underestimated.
-                print "number:", elem, num
-                print "The rel. error guess is", self.sb_guess[elem, 2]
-                print "The abs. error guess is", coeff[1] * self.sb_guess[elem, 2]
+                if verbose:
+                    print "number:", elem, num
+                    print "The rel. error guess is", self.sb_guess[elem, 2]
+                    print "The abs. error guess is", coeff[1] * self.sb_guess[elem, 2]
 
                 # The error from self.sb_guess[elem, 2] is a relative error
             if plot and verbose:
@@ -1013,7 +1015,7 @@ class HighSidebandCCD(CCD):
         self.parameters["calculated THz freq"] = "{} {}".format(freqTHz, freqTHz)
         return freqNIR, freqTHz
 
-    def save_processing(self, file_name, folder_str, marker='', index=''):
+    def save_processing(self, file_name, folder_str, marker='', index='', verbose=''):
         """
         This will save all of the self.proc_data and the results from the
         fitting of this individual file.
@@ -1058,8 +1060,9 @@ class HighSidebandCCD(CCD):
         # (The old name was area)
         # I think it must be amplitude
         temp[:, 5:7] = temp[:, 5:7] * 1000  # For meV linewidths
-        print "sb_results", self.sb_results.shape
-        print "ampli", ampli.shape
+        if verbose:
+            print "sb_results", self.sb_results.shape
+            print "ampli", ampli.shape
         save_results = np.hstack((temp, ampli.T))
 
         spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
@@ -1558,7 +1561,7 @@ class FullHighSideband(FullSpectrum):
                 self.sb_results = np.hstack((sb, self.full_dict[sb]))
                 # print "and I made this array:", self.sb_results[:, 0]
 
-    def save_processing(self, file_name, folder_str, marker='', index=''):
+    def save_processing(self, file_name, folder_str, marker='', index='', verbose=''):
         """
         This will save all of the self.proc_data and the results from the 
         fitting of this individual file.
@@ -1590,8 +1593,9 @@ class FullHighSideband(FullSpectrum):
         ampli = np.array([temp[:, 3] / temp[:, 5]])  # I'm pretty sure this is
         # amplitude, not area
         temp[:, 5:7] = temp[:, 5:7] * 1000  # For meV linewidths
-        print "sb_results", self.sb_results.shape
-        print "ampli", ampli.shape
+        if verbose:
+            print "sb_results", self.sb_results.shape
+            print "ampli", ampli.shape
         save_results = np.hstack((temp, ampli.T))
 
         # spectra_fname = file_name + '_' + marker + '_' + str(index) + '.txt'
@@ -2111,21 +2115,21 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
         print "Ratio list", ratio_list
         print "Ratio", ratio
         print "Error", error
-        print '\n1990\nfull[2]', full[0][2]
+        print '\n2118\nfull[2]', full[0][2]
         # Adding the new sidebands to the full set and moving errors around.
         # I don't know exactly what to do about the other aspects of the sidebands
         # besides the strength and its error.
         for sb in overlap:
             full[sb][2] = ratio * new_dict[sb][2]
             full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (new_dict[sb][3] / new_dict[sb][2]) ** 2)
-            print '\n1997\nfull[2]', full[0][3]
+            print '\n2125\nfull[2]', full[0][3]
             # Now for linewidths
             lw_error = np.sqrt(full[sb][5] ** (-2) + new_dict[sb][5] ** (-2)) ** (-1)
             lw_avg = (full[sb][4] / (full[sb][5] ** 2) + new_dict[sb][4] / (new_dict[sb][5] ** 2)) / (
             full[sb][5] ** (-2) + new_dict[sb][5] ** (-2))
             full[sb][4] = lw_avg
             full[sb][5] = lw_error
-        print '\n2003\nfull[2]', full[0][2]
+        print '\n2132\nfull[2]', full[0][2]
     else:
         try:
             new_starter = overlap[-1]
@@ -2151,13 +2155,13 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
         except:
             new_starter = 0  # I think this makes things work when there's no overlap
     if need_ratio:
-        print '\n2024\nfull[2]', full[0][2]
+        print '\n2158\nfull[2]', full[0][2]
     for sb in [x for x in new_dict.keys() if ((x >= new_starter) or (x in missing))]:
         full[sb] = new_dict[sb]
         if need_ratio:
             full[sb][2] = ratio * full[sb][2]
             full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (ratio * full[sb][3] / full[sb][2]) ** 2)
-            print '\n2030\nfull[2]', full[0][2]
+            print '\n2164\nfull[2]', full[0][2]
     print "I made this dictionary", sorted(full.keys())
     return full
 

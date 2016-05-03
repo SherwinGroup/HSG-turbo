@@ -13,10 +13,14 @@ from PyQt4 import QtGui
 import pyqtgraph as pg
 from three_step_first_ui import Ui_Form
 import numpy as np
+import scipy.interpolate as spi
+
 import matplotlib.pyplot as plt
 
 q_e = 1.602e-19 # Charge of electron in Coulombs
 m_e = 9.109e-31 # Mass of bare electron in kg
+hbar = 1.055e-34 # Reduced Planck's constant in J*s
+
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 class Window(QtGui.QWidget):
@@ -53,6 +57,9 @@ class Window(QtGui.QWidget):
         self.ui.lineEdit_e_bind.editingFinished.connect(self.get_changes)
         self.ui.lineEdit_phase.editingFinished.connect(self.get_changes)
 
+        self.ui.lineEdit_slew_rate_time_fs.editingFinished.connect(self.get_slew_rate)
+        self.ui.lineEdit_splitting_meV.editingFinished.connect(self.get_slew_rate)
+
         self.ui.pushButton_chooseFolder.clicked.connect(self.choose_folder) # Choose the path
         self.ui.pushButton_save.clicked.connect(self.save_file) # add the file name to the path
         self.ui.lineEdit_file_path.editingFinished.connect(self.set_file_name) # Save it all!
@@ -88,6 +95,13 @@ class Window(QtGui.QWidget):
         self.ui.lineEdit_keldysh.setText('{:.3f}'.format(self.data.keldysh))
         self.ui.lineEdit_ponderomotive.setText('{:.3f}'.format(self.data.ponderomotive_meV))
         self.ui.lineEdit_max_sbs.setText('{:.3f}'.format(self.data.max_sb_order))
+
+    def get_slew_rate(self):
+        time = float(self.ui.lineEdit_slew_rate_time_fs.text())
+        splitting = float(self.ui.lineEdit_splitting_meV.text())
+        self.data.make_energy_slew_rate(time, splitting)
+        self.ui.lineEdit_slew_rate.setText('{:.3f}'.format(self.data.energy_slew_rate_meV_fs))
+        self.ui.lineEdit_diabatic_prob.setText('{:.3f}'.format(self.data.diabatic_probability))
 
     def choose_folder(self):
         hint = 'Choose save directory'
@@ -175,6 +189,25 @@ class Trajectories(object):
         self.results_dict['individual electron KE (meV)'] = '{:.2f}'.format(self.e_kenergy_rec_meV)
         self.results_dict['individual hole KE (meV)'] = '{:.2f}'.format(self.h_kenergy_rec_meV)
         self.results_dict['approximate sideband'] = '{:.1f}'.format(self.approx_sb)
+
+    def make_energy_slew_rate(self, time, splitting):
+        """
+        Ideally this will help calculate the Landau-Zener tunneling rate
+        :param time:
+        :return:
+        """
+        time = time * 1e-15 # now in seconds
+        splitting = splitting * 1e-3 * q_e # Now in J
+        h_kenergy_J_interp = spi.interp1d(self.time_vals_s, q_e * self.h_kenergy_eV)
+        #print "Hole energy", h_kenergy_J_interp(time) / q_e
+        #print "Hole k vector = {:.2e}".format(np.sqrt(2 * h_kenergy_J_interp(time) * self.m_h_eff) / hbar)
+        dk_dt = -q_e * self.thz_field * np.cos(2 * np.pi * self.thz_freq * time + self.phi)
+        #print "dk_dt = ", dk_dt
+        dE_dk = np.sqrt(2 * h_kenergy_J_interp(time) / self.m_h_eff)  # This is now in units of velocity
+        #print "dE_dk = ", dE_dk
+        self.dE_dt_J_s = dE_dk * dk_dt # in SI
+        self.energy_slew_rate_meV_fs = self.dE_dt_J_s * (1e3 / q_e) * 1e-15
+        self.diabatic_probability = np.exp(-2 * np.pi * splitting**2 / (hbar * abs(self.dE_dt_J_s)))
 
     def make_parameters(self):
         """
