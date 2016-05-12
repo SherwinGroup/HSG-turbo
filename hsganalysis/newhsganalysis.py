@@ -609,6 +609,9 @@ class HighSidebandCCD(CCD):
         THz frequency, then by twos after it hasn't found any odd ones.  It then
         goes up from the max and finds everything above in much the same way.
 
+        There is currently no rhyme or reason to a cutoff of 8.  I don't know what
+        it should be changed to, though.
+
         Input:
         cutoff = signal-to-noise threshold to count a sideband candidate.
 
@@ -728,6 +731,8 @@ class HighSidebandCCD(CCD):
                 print "check_stdev is", check_stdev
                 print "check_ratio is", check_ratio
 
+            if order % 2 == 1: # This raises the barrier for odd sideband detection
+                check_ratio = check_ratio / 1.5
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
@@ -760,7 +765,7 @@ class HighSidebandCCD(CCD):
                 # print "I can't find any more sidebands"
                 break
 
-                # Look for higher sidebands
+        # Look for higher sidebands
         if verbose: print "Now I'll look for sidebands with higher frequency"
 
         last_sb = sb_freq_guess[0]
@@ -828,6 +833,8 @@ class HighSidebandCCD(CCD):
                 print "sideband", order
                 print "check_ratio", check_ratio
 
+            if order % 2 == 1: # This raises the barrier for odd sideband detection
+                check_ratio = check_ratio / 1.5
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
@@ -3189,6 +3196,7 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
     This function will take a list of ccd files and process it completely.
     save_name is a tuple (file_base, folder_path)
 
+    The cutoff of 8 is too high, but I don't know what to change it to
     :rtype: list of HighSidebandCCD
     """
     if isinstance(folder_path, list):
