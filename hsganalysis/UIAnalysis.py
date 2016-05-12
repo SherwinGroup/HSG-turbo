@@ -4,17 +4,19 @@ Created on Mon Jun 01 16:01:43 2015
 
 @author: dvalovcin
 """
+import os
+
 import numpy as np
-from PyQt4 import QtCore, QtGui
 import pyqtgraph as pg
 import pyqtgraph.parametertree.parameterTypes as pTypes
-from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
-import os
+from PyQt4 import QtCore, QtGui
+from pyqtgraph.parametertree import Parameter
+
 # import hsganalysis as hsg # local file, not global, no hsg.hsg
 import newhsganalysis as hsg
 
 from UI.mainWin_ui import Ui_MainWindow
-from draggablePlotWidget import DraggablePlotWidget
+from UI.draggablePlotWidget import DraggablePlotWidget
 
 # fileList = dict()
 fileList = []
@@ -794,7 +796,6 @@ class ComparisonWindow(QtGui.QMainWindow):
         #line = pg.LineSegmentROI()
 
     def initUI(self):
-        self.gPlot= pg.PlotWidget()
         self.gPlot = DraggablePlotWidget()
         self.setCentralWidget(self.gPlot)
         self.legend = pg.LegendItem()

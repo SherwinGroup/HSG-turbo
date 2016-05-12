@@ -1009,10 +1009,12 @@ class HighSidebandCCD(CCD):
         :type bad_points: int
         :return: freqNIR, freqTHz, the frequencies in the appropriate units
         """
-        freqNIR, freqTHz = calc_laser_frequencies(self, nir_units, thz_units, bad_points)
+        # force same units for in dict
+        freqNIR, freqTHz = calc_laser_frequencies(self, "wavenumber", "wavenumber", bad_points)
 
-        self.parameters["calculated NIR freq"] = "{} {}".format(freqNIR, nir_units)
-        self.parameters["calculated THz freq"] = "{} {}".format(freqTHz, freqTHz)
+        self.parameters["calculated NIR freq (cm-1)"] = "{}".format(freqNIR, nir_units)
+        self.parameters["calculated THz freq (cm-1)"] = "{}".format(freqTHz, freqTHz)
+        freqNIR, freqTHz = calc_laser_frequencies(self, nir_units, thz_units, bad_points)
         return freqNIR, freqTHz
 
     def save_processing(self, file_name, folder_str, marker='', index='', verbose=''):
@@ -2278,7 +2280,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     except:
         print "Source: save_parameter_sweep\nJSON FAILED"
         return
-    included_spectra_str.replace('\n', '#\n')
+    included_spectra_str = included_spectra_str.replace('\n', '\n#')
     origin_import1 = param_name
     origin_import2 = unit
     origin_import3 = ""
@@ -2921,7 +2923,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     '''
 
     print abs(y_fourier[-10:])
-    butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff) ** 50))
+    butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff) ** 100))
     y_fourier *= butterworth
 
     if inspectPlots:
@@ -2946,7 +2948,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     if inspectPlots:
         plt.figure("Real Space")
         print x_vals.size, y_vals.size
-        plt.plot(x_vals, y_vals, label="Smoothed Data")
+        plt.plot(x_vals, y_vals, linewidth=3, label="Smoothed Data")
         a = plt.legend()
         a.draggable(True)
 
