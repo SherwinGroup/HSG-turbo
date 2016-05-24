@@ -684,7 +684,7 @@ class HighSidebandCCD(CCD):
                 if verbose:
                     print "I skipped", order
                 continue
-            window_size = 0.28 + 0.0004 * order  # used to be last_sb?
+            window_size = 0.4 + 0.001 * order  # used to be last_sb?
             lo_freq_bound = last_sb - thz_freq * (1 + window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb - thz_freq * (1 - window_size)
 
@@ -716,7 +716,7 @@ class HighSidebandCCD(CCD):
 
             check_max_index = np.argmax(check_y)  # This assumes that two floats won't be identical
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
-            no_peak = (2 * len(check_y)) // 5
+            no_peak = (2 * len(check_y)) // 6
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
@@ -778,7 +778,7 @@ class HighSidebandCCD(CCD):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
                 continue
-            window_size = 0.32 + 0.001 * order  # used to be 0.28 and 0.0004
+            window_size = 0.45 + 0.001 * order  # used to be 0.28 and 0.0004
             lo_freq_bound = last_sb + thz_freq * (1 - window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
             start_index = False
@@ -815,8 +815,10 @@ class HighSidebandCCD(CCD):
 
             check_max_area = np.sum(check_y[check_max_index - octant:check_max_index + octant + 1])
 
-            no_peak = (2 * len(check_y)) // 5
-            if verbose: print "check_y length", len(check_y)
+            no_peak = (2 * len(check_y)) // 6 # The denominator is in flux, used to be 5
+            if verbose:
+                print "check_y length", len(check_y)
+                print "no_peak", no_peak
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
@@ -834,7 +836,7 @@ class HighSidebandCCD(CCD):
                 print "check_ratio", check_ratio
 
             if order % 2 == 1: # This raises the barrier for odd sideband detection
-                check_ratio = check_ratio / 1.5
+                check_ratio = check_ratio / 2
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
