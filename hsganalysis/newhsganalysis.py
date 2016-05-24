@@ -886,6 +886,7 @@ class HighSidebandCCD(CCD):
 
         Temporary stuff:
         sb_fits = holder of the fitting results until all spectra have been fit
+        window = an integer that determines the "radius" of the fit window, proportional to thz_freq.
 
         Attributes created:
         self.sb_results = the money maker.  Column order:
@@ -900,14 +901,19 @@ class HighSidebandCCD(CCD):
         """
         # print "Trying to fit these"
         sb_fits = []
+        thz_freq = self.parameters["thz_freq"]
+        window = 15 + int(15 * thz_freq / 0.0022) # Adjust the fit window based on the sideband spacing
+                                                  # The 15's are based on empirical knowledge that for
+                                                  # 540 GHz (2.23 meV), the best window size is 30 and
+                                                  # that it seems like the window size should grow slowly?
         for elem, num in enumerate(self.sb_index):  # Have to do this because guess_sidebands
             # doesn't out put data in the most optimized way
-            if self.sb_index[elem] < 30:
-                data_temp = self.proc_data[:self.sb_index[elem] + 30, :]
-            elif (1600 - self.sb_index[elem]) < 30:
-                data_temp = self.proc_data[self.sb_index[elem] - 30:, :]
+            if self.sb_index[elem] < window:
+                data_temp = self.proc_data[:self.sb_index[elem] + window, :]
+            elif (1600 - self.sb_index[elem]) < window:
+                data_temp = self.proc_data[self.sb_index[elem] - window:, :]
             else:
-                data_temp = self.proc_data[self.sb_index[elem] - 30:self.sb_index[elem] + 30, :]
+                data_temp = self.proc_data[self.sb_index[elem] - window:self.sb_index[elem] + window, :]
             width_guess = 0.0001 + 0.000001 * self.sb_list[elem]  # so the width guess gets wider as order goes up
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 0.1]
             # print "Let's fit this shit!"
