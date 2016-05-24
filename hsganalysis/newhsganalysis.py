@@ -83,7 +83,7 @@ class CCD(object):
         self.ccd_data = np.array(self.raw_data[:1600, :])  # By slicing up to 1600,
         # we cut out the text
         # header
-        if spectrometer_offset is not None:
+        if spectrometer_offset is not None or "offset" in self.parameters:
             try:
                 # print "Doing offset", self.parameters["offset"]
                 self.ccd_data[:, 0] += float(self.parameters["offset"])
@@ -600,7 +600,7 @@ class HighSidebandCCD(CCD):
     #     self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
     #     self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
 
-    def guess_sidebands(self, cutoff=8, verbose=False):
+    def guess_sidebands(self, cutoff=8, verbose=False, plot=False):
         """
         Finds the locations of all the sidebands in the proc_data array to be 
         able to seed the fitting method.  This works by finding the maximum data
@@ -622,7 +622,11 @@ class HighSidebandCCD(CCD):
                         error guesses for each sideband
         """
         # TODO: this isn't commented appropriately.  Will it be made more readable first?
-        self.parameters['cutoff for guess_sidebands'] = cutoff
+
+        if "cutoff" in self.parameters:
+            cutoff = self.parameters["cutoff"]
+        else:
+            self.parameters['cutoff for guess_sidebands'] = cutoff
         x_axis = np.array(self.proc_data[:, 0])
         y_axis = np.array(self.proc_data[:, 1])
         error = np.array(self.proc_data[:, 2])
@@ -684,7 +688,8 @@ class HighSidebandCCD(CCD):
                 if verbose:
                     print "I skipped", order
                 continue
-            window_size = 0.4 + 0.001 * order  # used to be last_sb?
+
+            window_size = 0.45 + 0.0004 * order  # used to be last_sb?
             lo_freq_bound = last_sb - thz_freq * (1 + window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb - thz_freq * (1 - window_size)
 
@@ -781,6 +786,8 @@ class HighSidebandCCD(CCD):
             window_size = 0.45 + 0.001 * order  # used to be 0.28 and 0.0004
             lo_freq_bound = last_sb + thz_freq * (1 - window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
+
+
             start_index = False
             end_index = False
 
@@ -815,10 +822,15 @@ class HighSidebandCCD(CCD):
 
             check_max_area = np.sum(check_y[check_max_index - octant:check_max_index + octant + 1])
 
+
+            if verbose and plot:
+                plt.figure("CCD data")
+                plt.plot([lo_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([hi_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+
             no_peak = (2 * len(check_y)) // 6 # The denominator is in flux, used to be 5
-            if verbose:
-                print "check_y length", len(check_y)
-                print "no_peak", no_peak
+            if verbose: print "check_y length", len(check_y)
+
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
@@ -923,7 +935,7 @@ class HighSidebandCCD(CCD):
                 print "number:", elem, num
                 # print "data_temp:", data_temp
                 print "p0:", p0
-            plot_guess = False  # This is to disable plotting the guess function
+            plot_guess = True  # This is to disable plotting the guess function
             if plot_guess:
                 plt.figure('CCD data')
                 linewidth = 3
@@ -1287,7 +1299,12 @@ class HighSidebandPMT(PMT):
             except:
                 self.sb_results = np.array(details)
             self.full_dict[sideband[0]] = details[1:]
-        self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
+        try:
+            self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
+        except (IndexError, AttributeError):
+            # IndexError where there's only one sideband
+            # AttributeError when there aren't any (one sb which wasn't fit)
+            pass
 
     def fit_sidebands(self, plot=False, verbose=False):
         """
@@ -1321,7 +1338,7 @@ class HighSidebandPMT(PMT):
 
             if verbose:
                 x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
-                plt.plot(x_vals, gauss(x_vals, *p0))
+                plt.plot(x_vals, gauss(x_vals, *p0), label="fit :{}".format(sideband[1]))
                 print "p0:", p0
             try:
                 coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], sigma=sideband[1][:, 2], p0=p0)
@@ -2165,7 +2182,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
                     print "Add value", new_dict[sb][4] * 1000
                 error = np.sqrt(full[sb][3] ** (-2) + new_dict[sb][3] ** (-2)) ** (-1)
                 avg = (full[sb][2] / (full[sb][3] ** 2) + new_dict[sb][2] / (new_dict[sb][3] ** 2)) / (
-                full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
+                    full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
                 full[sb][2] = avg
                 full[sb][3] = error
 
@@ -2528,10 +2545,13 @@ def calc_laser_frequencies(spec, nir_units="eV", thz_units="eV",
     sidebands = spec.sb_results[:, 0]
     locations = spec.sb_results[:, 1]
     errors = spec.sb_results[:, 2]
-
-    p = np.polyfit(sidebands[1:bad_points],
-                   # This is 1 because the peak picker function was calling the 10th order the 9th
-                   locations[1:bad_points], deg=1)
+    try:
+        p = np.polyfit(sidebands[1:bad_points],
+                       # This is 1 because the peak picker function was calling the 10th order the 9th
+                       locations[1:bad_points], deg=1)
+    except TypeError:
+        # if there aren't enough sidebands to fit, give -1
+        p = [-1, -1]
 
     NIRfreq = p[1]
     THzfreq = p[0]
@@ -3224,7 +3244,11 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
 
     index = 0
     for spectrum in raw_list:
-        spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
+        try:
+            spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose, plot=plot)
+        except RuntimeError:
+            raw_list.pop(raw_list.index(spectrum))
+            continue
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
         if "calculated NIR freq (cm-1)" not in spectrum.parameters.keys():
             spectrum.infer_frequencies()
