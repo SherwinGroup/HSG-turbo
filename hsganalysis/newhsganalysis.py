@@ -600,7 +600,7 @@ class HighSidebandCCD(CCD):
     #     self.proc_data[:, 1] = self.proc_data[:, 1] / num_images
     #     self.proc_data[:, 2] = self.proc_data[:, 2] / num_images
 
-    def guess_sidebands(self, cutoff=8, verbose=False):
+    def guess_sidebands(self, cutoff=8, verbose=False, plot=False):
         """
         Finds the locations of all the sidebands in the proc_data array to be 
         able to seed the fitting method.  This works by finding the maximum data
@@ -622,7 +622,11 @@ class HighSidebandCCD(CCD):
                         error guesses for each sideband
         """
         # TODO: this isn't commented appropriately.  Will it be made more readable first?
-        self.parameters['cutoff for guess_sidebands'] = cutoff
+
+        if "cutoff" in self.parameters:
+            cutoff = self.parameters["cutoff"]
+        else:
+            self.parameters['cutoff for guess_sidebands'] = cutoff
         x_axis = np.array(self.proc_data[:, 0])
         y_axis = np.array(self.proc_data[:, 1])
         error = np.array(self.proc_data[:, 2])
@@ -684,7 +688,7 @@ class HighSidebandCCD(CCD):
                 if verbose:
                     print "I skipped", order
                 continue
-            window_size = 0.28 + 0.0004 * order  # used to be last_sb?
+            window_size = 0.45 + 0.0004 * order  # used to be last_sb?
             lo_freq_bound = last_sb - thz_freq * (1 + window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb - thz_freq * (1 - window_size)
 
@@ -716,7 +720,7 @@ class HighSidebandCCD(CCD):
 
             check_max_index = np.argmax(check_y)  # This assumes that two floats won't be identical
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
-            no_peak = (2 * len(check_y)) // 5
+            no_peak = (2 * len(check_y)) // 6
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(no_peak, 0, -1)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
@@ -778,9 +782,11 @@ class HighSidebandCCD(CCD):
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb + thz_freq
                 continue
-            window_size = 0.32 + 0.001 * order  # used to be 0.28 and 0.0004
+            window_size = 0.45 + 0.001 * order  # used to be 0.28 and 0.0004
             lo_freq_bound = last_sb + thz_freq * (1 - window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
+
+
             start_index = False
             end_index = False
 
@@ -815,7 +821,12 @@ class HighSidebandCCD(CCD):
 
             check_max_area = np.sum(check_y[check_max_index - octant:check_max_index + octant + 1])
 
-            no_peak = (2 * len(check_y)) // 5
+            if verbose and plot:
+                plt.figure("CCD data")
+                plt.plot([lo_freq_bound]*2, [0, check_y[check_max_index]], 'b')
+                plt.plot([hi_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+
+            no_peak = (2 * len(check_y)) // 6
             if verbose: print "check_y length", len(check_y)
             check_ave = np.mean(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
             check_stdev = np.std(np.take(check_y, np.concatenate((range(no_peak), range(-no_peak, 0)))))
@@ -921,7 +932,7 @@ class HighSidebandCCD(CCD):
                 print "number:", elem, num
                 # print "data_temp:", data_temp
                 print "p0:", p0
-            plot_guess = False  # This is to disable plotting the guess function
+            plot_guess = True  # This is to disable plotting the guess function
             if plot_guess:
                 plt.figure('CCD data')
                 linewidth = 3
@@ -1324,7 +1335,7 @@ class HighSidebandPMT(PMT):
 
             if verbose:
                 x_vals = np.linspace(np.amin(sideband[1][:, 0]), np.amax(sideband[1][:, 0]), num=50)
-                plt.plot(x_vals, gauss(x_vals, *p0))
+                plt.plot(x_vals, gauss(x_vals, *p0), label="fit :{}".format(sideband[1]))
                 print "p0:", p0
             try:
                 coeff, var_list = curve_fit(gauss, sideband[1][:, 0], sideband[1][:, 1], sigma=sideband[1][:, 2], p0=p0)
@@ -3231,7 +3242,7 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
     index = 0
     for spectrum in raw_list:
         try:
-            spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
+            spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose, plot=plot)
         except RuntimeError:
             raw_list.pop(raw_list.index(spectrum))
             continue
