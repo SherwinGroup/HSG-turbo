@@ -2082,6 +2082,9 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     The first input doesn't change, so f there's a PMT set of data involved, it 
     should be in the full variable to keep the laser normalization intact.
 
+    This function almost certainly does not work for stitching many negative orders
+    in it's current state
+
     Inputs:
     full = full_dict from FullHighSideband, or HighSidebandPMT.  It's important 
            that it contains lower orders than the new_dict.
@@ -2095,25 +2098,25 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     full = extended version of the input full.  Overlapping sidebands are 
            averaged because that makes sense?
     """
-    # print "I'm adding these sidebands", sorted(new_dict.keys())
-    overlap = []
-    missing = []  # How to deal with sideabands that are missing from full but in new.
+    print "I'm adding these sidebands", sorted(new_dict.keys())
+    overlap = [] # The list that hold which orders are in both dictionaries
+    missing = [] # How to deal with sidebands that are missing from full but in new.
     for new_sb in sorted(new_dict.keys()):
         full_sbs = sorted(full.keys())
         if new_sb in full_sbs:
             overlap.append(new_sb)
-        elif new_sb not in full_sbs and new_sb < full_sbs[
-            -1]:  # This probably doesn't work with bunches of negative orders
+        elif new_sb not in full_sbs and new_sb < full_sbs[-1]:
+            # This probably doesn't work with bunches of negative orders
             missing.append(new_sb)
 
-    if True:
+    if verbose:
         print "overlap:", overlap
         print "missing:", missing
     if need_ratio:
         # Calculate the appropriate ratio to multiply the new sidebands by.
         # I'm not entirely sure what to do with the error of this guy.
         ratio_list = []
-        print '\n1979\nfull[2]', full[0][2]
+        #print '\n1979\nfull[2]', full[0][2]
         new_starter = overlap[-1]
         if len(overlap) > 2:
             overlap = [x for x in overlap if (x % 2 == 0) and (x != min(overlap) and (x != max(overlap)))]
@@ -2121,29 +2124,33 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             ratio_list.append(full[sb][2] / new_dict[sb][2])
         ratio = np.mean(ratio_list)
         error = np.std(ratio_list) / np.sqrt(len(ratio_list))
-        print "Ratio list", ratio_list
-        print "Ratio", ratio
-        print "Error", error
-        print '\n2118\nfull[2]', full[0][2]
+        if verbose:
+            print "Ratio list", ratio_list
+            print "Ratio", ratio
+            print "Error", error
+        #print '\n2118\nfull[2]', full[0][2]
         # Adding the new sidebands to the full set and moving errors around.
         # I don't know exactly what to do about the other aspects of the sidebands
         # besides the strength and its error.
         for sb in overlap:
             full[sb][2] = ratio * new_dict[sb][2]
             full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (new_dict[sb][3] / new_dict[sb][2]) ** 2)
-            print '\n2125\nfull[2]', full[0][3]
+            #print '\n2125\nfull[2]', full[0][3]
             # Now for linewidths
             lw_error = np.sqrt(full[sb][5] ** (-2) + new_dict[sb][5] ** (-2)) ** (-1)
             lw_avg = (full[sb][4] / (full[sb][5] ** 2) + new_dict[sb][4] / (new_dict[sb][5] ** 2)) / (
             full[sb][5] ** (-2) + new_dict[sb][5] ** (-2))
             full[sb][4] = lw_avg
             full[sb][5] = lw_error
-        print '\n2132\nfull[2]', full[0][2]
+        #print '\n2132\nfull[2]', full[0][2]
     else:
         try:
-            new_starter = overlap[-1]
+            new_starter = overlap[-1] # This grabs the sideband order where only the new dictionary has
+                                      # sideband information.  It's not clear why it necessarily has to be
+                                      # at this line.
             overlap = [x for x in overlap if (x % 2 == 0) and (x != min(overlap) and (x != max(overlap)))]
-            for sb in overlap:
+            # This cuts out the lowest order sideband in the overlap for mysterious reasons
+            for sb in overlap: # This for loop average two data points weighted by their relative errors
                 if verbose:
                     print "The sideband", sb
                     print "Old value", full[sb][4] * 1000
@@ -2170,7 +2177,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
         if need_ratio:
             full[sb][2] = ratio * full[sb][2]
             full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (ratio * full[sb][3] / full[sb][2]) ** 2)
-            print '\n2164\nfull[2]', full[0][2]
+            #print '\n2164\nfull[2]', full[0][2]
     print "I made this dictionary", sorted(full.keys())
     return full
 
