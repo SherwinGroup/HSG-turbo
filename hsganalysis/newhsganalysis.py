@@ -83,7 +83,7 @@ class CCD(object):
         self.ccd_data = np.array(self.raw_data[:1600, :])  # By slicing up to 1600,
         # we cut out the text
         # header
-        if spectrometer_offset is not None:
+        if spectrometer_offset is not None or "offset" in self.parameters:
             try:
                 # print "Doing offset", self.parameters["offset"]
                 self.ccd_data[:, 0] += float(self.parameters["offset"])
@@ -1285,7 +1285,12 @@ class HighSidebandPMT(PMT):
             except:
                 self.sb_results = np.array(details)
             self.full_dict[sideband[0]] = details[1:]
-        self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
+        try:
+            self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
+        except (IndexError, AttributeError):
+            # IndexError where there's only one sideband
+            # AttributeError when there aren't any (one sb which wasn't fit)
+            pass
 
     def fit_sidebands(self, plot=False, verbose=False):
         """
@@ -2163,7 +2168,7 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
                     print "Add value", new_dict[sb][4] * 1000
                 error = np.sqrt(full[sb][3] ** (-2) + new_dict[sb][3] ** (-2)) ** (-1)
                 avg = (full[sb][2] / (full[sb][3] ** 2) + new_dict[sb][2] / (new_dict[sb][3] ** 2)) / (
-                full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
+                    full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
                 full[sb][2] = avg
                 full[sb][3] = error
 
@@ -2526,10 +2531,13 @@ def calc_laser_frequencies(spec, nir_units="eV", thz_units="eV",
     sidebands = spec.sb_results[:, 0]
     locations = spec.sb_results[:, 1]
     errors = spec.sb_results[:, 2]
-
-    p = np.polyfit(sidebands[1:bad_points],
-                   # This is 1 because the peak picker function was calling the 10th order the 9th
-                   locations[1:bad_points], deg=1)
+    try:
+        p = np.polyfit(sidebands[1:bad_points],
+                       # This is 1 because the peak picker function was calling the 10th order the 9th
+                       locations[1:bad_points], deg=1)
+    except TypeError:
+        # if there aren't enough sidebands to fit, give -1
+        p = [-1, -1]
 
     NIRfreq = p[1]
     THzfreq = p[0]
@@ -3222,7 +3230,11 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
 
     index = 0
     for spectrum in raw_list:
-        spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
+        try:
+            spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose)
+        except RuntimeError:
+            raw_list.pop(raw_list.index(spectrum))
+            continue
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
         if "calculated NIR freq (cm-1)" not in spectrum.parameters.keys():
             spectrum.infer_frequencies()
