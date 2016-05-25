@@ -640,15 +640,19 @@ class HighSidebandCCD(CCD):
         # Find max strength sideband and it's order
         global_max = np.argmax(y_axis)
         order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
-
+        if verbose:
+            print "The global max is at index", global_max
         if global_max < 15:
             check_y = y_axis[:global_max + 15]
+            check_y = np.concatenate((np.zeros(15 - global_max), check_y))
         elif global_max > 1585:
             check_y = y_axis[global_max - 15:]
+            check_y = np.concatenate((check_y, np.zeros(global_max - 1585)))
         else:
             check_y = y_axis[global_max - 15:global_max + 15]
 
-        check_max_area = np.sum(y_axis[global_max - 2:global_max + 3])
+        check_max_index = np.argmax(check_y)
+        check_max_area = np.sum(check_y[check_max_index - 2:check_max_index + 3])
 
         check_ave = np.mean(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
         check_stdev = np.std(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
