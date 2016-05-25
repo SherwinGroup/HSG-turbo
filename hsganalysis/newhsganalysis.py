@@ -915,6 +915,10 @@ class HighSidebandCCD(CCD):
         """
         # print "Trying to fit these"
         sb_fits = []
+
+        # pretty sure you want this up here so things don't break
+        # when no sidebands found
+        self.full_dict = {}
         thz_freq = self.parameters["thz_freq"]
         window = 15 + int(15 * thz_freq / 0.0022) # Adjust the fit window based on the sideband spacing
                                                   # The 15's are based on empirical knowledge that for
@@ -935,8 +939,8 @@ class HighSidebandCCD(CCD):
                 print "number:", elem, num
                 # print "data_temp:", data_temp
                 print "p0:", p0
-            plot_guess = True  # This is to disable plotting the guess function
-            if plot_guess:
+            # plot_guess = True  # This is to disable plotting the guess function
+            if verbose and plot:
                 plt.figure('CCD data')
                 linewidth = 3
                 x_vals = np.linspace(data_temp[0, 0], data_temp[-1, 0], num=500)
@@ -1016,7 +1020,9 @@ class HighSidebandCCD(CCD):
 
         sorter = np.argsort(sb_fits[:, 0])
 
+
         self.sb_results = np.array(sb_fits[sorter, :7])
+
         if verbose:
             print "sb_names:", sb_names
             print "sb_fits:", sb_fits
@@ -1121,8 +1127,8 @@ class HighSidebandCCD(CCD):
                    header=spec_header, comments='', fmt='%0.6e')
         np.savetxt(os.path.join(folder_str, fit_fname), save_results, delimiter=',',
                    header=fits_header, comments='', fmt='%0.6e')
-
-        print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
+        if verbose:
+            print "Save image.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
 
 class PMT(object):
@@ -1541,7 +1547,11 @@ class FullHighSideband(FullSpectrum):
         :return: None
         """
         self.fname = initial_CCD_piece.fname
-        self.sb_results = initial_CCD_piece.sb_results
+        try:
+            self.sb_results = initial_CCD_piece.sb_results
+        except AttributeError:
+            print initial_CCD_piece.full_dict
+            raise
         self.parameters = initial_CCD_piece.parameters
         self.parameters['files_here'] = [initial_CCD_piece.fname.split('/')[-1]]
         self.full_dict = {}
@@ -1565,8 +1575,16 @@ class FullHighSideband(FullSpectrum):
             print "!!!"
 
             calc = True
-        self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict, need_ratio=calc)
-        self.parameters['files_here'].append(ccd_object.fname.split('/')[-1])
+        try:
+            self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict, need_ratio=calc)
+            self.parameters['files_here'].append(ccd_object.fname.split('/')[-1])
+        except AttributeError:
+            print 'Error, not enough sidebands to fit here! {}, {}, {}, {}'.format(
+                self.parameters["series"], self.parameters["spec_step"],
+                ccd_object.parameters["series"], ccd_object.parameters["spec_step"]
+            )
+
+
 
     def add_PMT(self, pmt_object):
         """
@@ -1809,7 +1827,7 @@ def hsg_sum_spectra(object_list, do_fvb_crr=False):
 '''
 
 
-def hsg_combine_spectra(spectra_list):
+def hsg_combine_spectra(spectra_list, verbose = False):
     """
     This function is all about smooshing different parts of the same hsg 
     spectrum together.  It takes a list of HighSidebandCCD spectra and turns the
@@ -1837,18 +1855,20 @@ def hsg_combine_spectra(spectra_list):
     for index in xrange(len(spectra_list)):
         try:
             temp = spectra_list.pop(0)
-            print "\nStarting with this guy", temp.parameters["spec_step"], "\n"
+            print "\nStarting with this guy", temp.parameters["series"], temp.parameters["spec_step"], "\n"
         except:
             break
 
         good_list.append(FullHighSideband(temp))
 
         counter = temp.parameters["spec_step"] + 1
-        print "Starting counter is", counter
+        if verbose:
+            print "Starting counter is", counter
         temp_list = list(spectra_list)
         for piece in temp_list:
-            print "checking this spec_step", piece.parameters["spec_step"]
-            print "The counter is", counter
+            if verbose:
+                print "checking this spec_step", piece.parameters["spec_step"]
+                print "The counter is", counter
             if temp.parameters["series"] == piece.parameters["series"]:
                 if piece.parameters["spec_step"] == counter:
                     print "I found this one", piece.parameters["series"]
@@ -2242,6 +2262,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         # sideband order as the zeroth element.
         if verbose:
             print "the sb_results:", spec.sb_results
+        if spec.sb_results.ndim==1: continue
         for index in xrange(len(spec.sb_results[:, 0])):
             if verbose:
                 print "my array slice:", spec.sb_results[index, :]
@@ -2282,10 +2303,12 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     '''
     snipped_array = param_array[:, 0]
     norm_array = param_array[:, 0]
-    print "Snipped_array is", snipped_array
+    if verbose:
+        print "Snipped_array is", snipped_array
     for ii in xrange(len(param_array.T)):
         if (ii - 1) % 7 == 0:
-            print "param_array shape", param_array[:, ii]
+            if verbose:
+                print "param_array shape", param_array[:, ii]
             snipped_array = np.vstack((snipped_array, param_array[:, ii]))
             norm_array = np.vstack((norm_array, param_array[:, ii]))
         elif (ii - 1) % 7 == 1:
@@ -2320,6 +2343,8 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         print "Source: save_parameter_sweep\nJSON FAILED"
         return
     included_spectra_str = included_spectra_str.replace('\n', '\n#')
+
+    included_spectra_str += '\n#' * (99 - included_spectra_str.count('\n'))
     origin_import1 = param_name
     origin_import2 = unit
     origin_import3 = ""
@@ -2342,15 +2367,136 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     header_snip = '#' + included_spectra_str + '\n' + origin_snip
 
     # print "Spec header: ", spec_header
-    print "the param_array is:", param_array
+    if verbose:
+        print "the param_array is:", param_array
     np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
                header=header_total, comments='', fmt='%0.6e')
     np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
                header=header_snip, comments='', fmt='%0.6e')
     np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
                header=header_snip, comments='', fmt='%0.6e')
-    print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
+    if verbose:
+        print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
 
+def save_parameter_sweep_vs_sideband(spectrum_list, file_name, folder_str, param_name, unit, verbose=False):
+    """
+    Similar to save_parameter_sweep, but the data[:,0] column is sideband number instead of
+    series, and each set of columns correspond to a series step. Pretty much compiles
+    all of the fit parameters from the files that are already saved and puts it into
+    one file to keep from polluting the Origin folder
+    :param spectrum_list:
+    :param file_name:
+    :param folder_str:
+    :param param_name:
+    :param unit:
+    :param verbose:
+    :return:
+    """
+    spectrum_list.sort(key=lambda x: x.parameters[param_name])
+    included_spectra = dict()
+    param_array = None
+    sb_included = []
+
+    # what parameters were included (for headers)
+    params = sorted([x.parameters[param_name] for x in spectrum_list])
+
+    for spec in spectrum_list:
+        sb_included = sorted(list(set(sb_included + spec.full_dict.keys())))
+        included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
+        # If these are from summed spectra, then only the the first file name
+        # from that sum will show up here, which should be fine?
+    if verbose:
+        # print "full name:", spectrum_list[0].fname
+        print "included names:", included_spectra
+        print "sb_included:", sb_included
+
+    param_array = np.array(sb_included)
+
+
+    for spec in spectrum_list:
+        temp_dict = spec.full_dict.copy()
+
+        #prevent breaking if no sidebands in spectrum
+        if not temp_dict:
+            if verbose:
+                print "No sidebands here? {}, {}".format(spec.parameters["series"],
+                                                         spec.parameters["spec_step"])
+            continue
+
+        if verbose:
+            print temp_dict
+
+        # matrix for holding all of the sb information
+        # for a given spectrum
+        spec_matrix = None
+        for sb in sb_included:
+            blank = np.zeros(6)
+            # print "checking sideband order:", sb
+            # print "blank", blank
+            sb_data = temp_dict.get(sb, blank)
+            try:
+                spec_matrix = np.row_stack((spec_matrix, sb_data))
+            except:
+                spec_matrix = sb_data
+        param_array = np.column_stack((param_array, spec_matrix))
+
+    # the indices we want from the param array
+    # 1- freq, 3-area, 4-area error
+    snip = [1, 3, 4]
+    N = len(spectrum_list)
+    # run it out across all of the points across the param_array
+    snipped_indices = [0] + list( np.array(snip*N) + 6*np.array(sorted(range(N)*len(snip))) )
+    snipped_array = param_array[:, snipped_indices]
+
+    try:
+        os.mkdir(folder_str)
+    except OSError, e:
+        if e.errno == errno.EEXIST:
+            pass
+        else:
+            raise
+    snip_name = file_name + '_snip.txt'
+    file_name = file_name + '.txt'
+
+    try:
+        included_spectra_str = json.dumps(included_spectra, sort_keys=True, indent=4, separators=(',', ': '))
+    except:
+        print "Source: save_parameter_sweep\nJSON FAILED"
+        return
+    included_spectra_str = included_spectra_str.replace('\n', '\n#')
+
+    included_spectra_str += '\n#' * (99 - included_spectra_str.count('\n'))
+    origin_import1 = "Sideband"
+    origin_import2 = "Order"
+    origin_import3 = "SB"
+    for param in params:
+        origin_import1 += ",Frequency,error,Sideband strength,error,Linewidth,error"
+        origin_import2 += ",eV,,arb. u.,,meV,"
+        origin_import3 += ",{0},,{0},,{0},".format(param)
+    origin_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
+    # print "origin import:",
+    # print origin_total
+    origin_import1 = "Sideband"
+    origin_import2 = "Order"
+    origin_import3 = "SB"
+    for param in params:
+        origin_import1 += ",Frequency,Sideband strength,error"
+        origin_import2 += ",eV,arb. u.,"
+        origin_import3 += ",{0},{0},".format(param)
+    origin_snip = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
+
+    header_total = '#' + included_spectra_str + '\n' + origin_total
+    header_snip = '#' + included_spectra_str + '\n' + origin_snip
+
+    # print "Spec header: ", spec_header
+    if verbose:
+        print "the param_array is:", param_array
+    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+               header=header_total, comments='', fmt='%0.6e')
+    np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
+               header=header_snip, comments='', fmt='%0.6e')
+    if verbose:
+        print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
 
 def stitchData(dataList, plot=False):
     """
@@ -2577,6 +2723,35 @@ def calc_laser_frequencies(spec, nir_units="eV", thz_units="eV",
 
     return freqNIR, freqTHz
 
+def get_data_and_header(fname, returnOrigin = False):
+    """
+    Given a file to a raw data file, returns the data
+    and the json decoded header.
+
+    Can choose to return the origin header as well
+    :param fname: Filename to open
+    :return: header (dict), data
+    """
+    with open(fname) as fh:
+        line = fh.readline()
+        header_string = ''
+        while line[0]=='#':
+            header_string += line[1:]
+            line = fh.readline()
+
+        oh = line
+        # last readline in loop removes first line in Origin Header
+        # strip the remaining two
+        oh += fh.readline()
+        oh += fh.readline()[:-1] #remove final \n
+
+        data = np.genfromtxt(fh, delimiter=',')
+
+    header = json.loads(header_string)
+
+    if returnOrigin:
+        return header, data, oh
+    return header, data
 
 ####################
 # Smoothing functions
@@ -3247,6 +3422,7 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
         try:
             spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose, plot=plot)
         except RuntimeError:
+            print "\n\n\nNo sidebands??\n\n"
             raw_list.pop(raw_list.index(spectrum))
             continue
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
