@@ -2382,6 +2382,158 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     if verbose:
         print "Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name))
 
+
+def save_parameter_sweep_no_sb(spectrum_list, file_name, folder_str, param_name, unit,
+                         verbose=False):
+    """
+    This function will take a fully processed list of spectrum objects and
+    slice Spectrum.sb_fits appropriately to get an output like:
+
+    "Parameter" | SB1 freq | err | SB1 amp | error | SB1 linewidth | error | SB2...| SBn...|
+    param1      |    .     |
+    param2      |    .     |
+      .
+      .
+      .
+
+    Currently I'm thinking fuck the offset y0
+    After constructing this large matrix, it will save it somewhere.
+    """
+    spectrum_list.sort(key=lambda x: x.parameters[param_name])
+    included_spectra = dict()
+    param_array = None
+    sb_included = []
+
+    for spec in spectrum_list:
+        sb_included = sorted(list(set(sb_included + spec.full_dict.keys())))
+        included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
+        # If these are from summed spectra, then only the the first file name
+        # from that sum will show up here, which should be fine?
+    if verbose:
+        # print "full name:", spectrum_list[0].fname
+        print "included names:", included_spectra
+        print "sb_included:", sb_included
+
+    for spec in spectrum_list:
+        temp_dict = {}  # This is different from full_dict in that the list has the
+        # sideband order as the zeroth element.
+        if verbose:
+            print "the sb_results:", spec.sb_results
+        if spec.sb_results.ndim == 1: continue
+        for index in xrange(len(spec.sb_results[:, 0])):
+            if verbose:
+                print "my array slice:", spec.sb_results[index, :]
+            temp_dict[int(round(spec.sb_results[index, 0]))] = np.array(
+                spec.sb_results[index, 1:])
+
+        if verbose:
+            print temp_dict
+
+        for sb in sb_included:
+            blank = np.zeros(6)
+            # print "checking sideband order:", sb
+            # print "blank", blank
+            if not temp_dict.has_key(sb):
+                # print "\nNeed to add sideband order:", sb
+                temp_dict[sb] = blank
+        try:  # Why is this try-except here?
+            spec_data = np.array([float(spec.parameters[param_name])])
+        except:
+            spec_data = np.array([float(spec.parameters[param_name][:2])])
+        for key in sorted(temp_dict.keys()):
+            # print "I am going to hstack this:", temp_dict[key]
+            spec_data = np.hstack((spec_data, temp_dict[key]))
+
+        try:
+            param_array = np.vstack((param_array, spec_data))
+        except:
+            param_array = np.array(spec_data)
+        if verbose:
+            print "The shape of the param_array is:", param_array.shape
+            # print "The param_array itself is:", param_array
+    '''
+    param_array_norm = np.array(param_array).T # python iterates over rows
+    for elem in [x for x in xrange(len(param_array_norm)) if (x-1)%7 == 3]:
+        temp_max = np.max(param_array_norm[elem])
+        param_array_norm[elem] = param_array_norm[elem] / temp_max
+        param_array_norm[elem + 1] = param_array_norm[elem + 1] / temp_max
+    '''
+    snipped_array = param_array[:, 0]
+    norm_array = param_array[:, 0]
+    if verbose:
+        print "Snipped_array is", snipped_array
+    for ii in xrange(len(param_array.T)):
+        if (ii - 1) % 6 == 0:
+            if verbose:
+                print "param_array shape", param_array[:, ii]
+            snipped_array = np.vstack((snipped_array, param_array[:, ii]))
+            norm_array = np.vstack((norm_array, param_array[:, ii]))
+        elif (ii - 1) % 6 == 2:
+            snipped_array = np.vstack((snipped_array, param_array[:, ii]))
+
+            temp_max = np.max(param_array[:, ii])
+            norm_array = np.vstack((norm_array, param_array[:, ii] / temp_max))
+        elif (ii - 1) % 6 == 3:
+            snipped_array = np.vstack((snipped_array, param_array[:, ii]))
+            norm_array = np.vstack((norm_array, param_array[:, ii] / temp_max))
+
+    snipped_array = snipped_array.T
+    norm_array = norm_array.T
+
+    try:
+        os.mkdir(folder_str)
+    except OSError, e:
+        if e.errno == errno.EEXIST:
+            pass
+        else:
+            raise
+    norm_name = file_name + '_norm.txt'
+    snip_name = file_name + '_snip.txt'
+    file_name = file_name + '.txt'
+
+    try:
+        included_spectra_str = json.dumps(included_spectra, sort_keys=True, indent=4,
+                                          separators=(',', ': '))
+    except:
+        print "Source: save_parameter_sweep\nJSON FAILED"
+        return
+    included_spectra_str = included_spectra_str.replace('\n', '\n#')
+
+    included_spectra_str += '\n#' * (99 - included_spectra_str.count('\n'))
+    origin_import1 = param_name
+    origin_import2 = unit
+    origin_import3 = ""
+    for order in sb_included:
+        origin_import1 += "Frequency,error,Sideband strength,error,Linewidth,error"
+        origin_import2 += ",eV,,arb. u.,,meV,"
+        origin_import3 += ",{0},,{0},,{0},".format(order)
+    origin_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
+
+    origin_import1 = param_name
+    origin_import2 = unit
+    origin_import3 = ""
+    for order in sb_included:
+        origin_import1 += ",Frequency,Sideband strength,error"
+        origin_import2 += ",eV,arb. u.,"
+        origin_import3 += ",{0},{0},".format(order)
+    origin_snip = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
+
+    header_total = '#' + included_spectra_str + '\n' + origin_total
+    header_snip = '#' + included_spectra_str + '\n' + origin_snip
+
+    # print "Spec header: ", spec_header
+    if verbose:
+        print "the param_array is:", param_array
+    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+               header=header_total, comments='', fmt='%0.6e')
+    np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
+               header=header_snip, comments='', fmt='%0.6e')
+    np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
+               header=header_snip, comments='', fmt='%0.6e')
+    if verbose:
+        print "Saved the file.\nDirectory: {}".format(
+            os.path.join(folder_str, file_name))
+
 def save_parameter_sweep_vs_sideband(spectrum_list, file_name, folder_str, param_name, unit, verbose=False):
     """
     Similar to save_parameter_sweep, but the data[:,0] column is sideband number instead of
