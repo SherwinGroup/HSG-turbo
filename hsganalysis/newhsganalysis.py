@@ -246,7 +246,7 @@ class Absorbance(CCD):
             print "Source: EMCCD_image.save_images\nJSON FAILED"
             print "Here is the dictionary that broke JSON:\n", self.parameters
             return
-        parameter_str.replace('\n', '#\n')
+        parameter_str = parameter_str.replace('\n', '\n#')
 
         num_lines = parameter_str.count('#')  # Make the number of lines constant so importing into Origin is easier
         for num in range(99 - num_lines): parameter_str += '\n#'
