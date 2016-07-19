@@ -480,8 +480,11 @@ class HighSidebandCCD(CCD):
         self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
-        self.parameters["thz_power"] = float(self.parameters["fel_power"])
-
+        try: # This is the new way of doing things.  Also, now it's power
+            self.parameters["thz_energy"] = float(self.parameters["pulseEnergies"]["mean"])
+            self.parameters["thz_energy_std"] = float(self.parameters["pulseEnergies"]["std"])
+        except: # This is the old way TODO: DEPRECATE THIS
+            self.parameters["thz_energy"] = float(self.parameters["fel_power"])
     def __add__(self, other):
         """
         Add together the image data from self.proc_data, or add a constant to 
