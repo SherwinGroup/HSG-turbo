@@ -3721,7 +3721,7 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
 # Complete functions 
 ####################
 
-def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
+def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbose=False):
     """
     This function will take a pmt object, process it completely.
     """
@@ -3737,15 +3737,22 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
             for elem in spectrum.sb_dict.values():
                 plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
             plt.figure('Sideband strengths')
-            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+            plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
                          label=spectrum.parameters['series'], marker='o')
+        if plot and confirm_fits:
+            plt.figure('PMT confirm fits')
+            for elem in spectrum.sb_dict.values():
+                plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
+            plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+                         label=spectrum.parameters['series'], marker='o')
+            plt.ylim([-0.005, 0.025])
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1], index=index)
     plt.legend()
     return pmt_data
 
 
-def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, verbose=False):
+def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=False, save=None, verbose=False):
     """
     This function will take a list of ccd files and process it completely.
     save_name is a tuple (file_base, folder_path)
@@ -3779,10 +3786,18 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
             plt.legend()
             # plt.yscale('log')
             plt.figure('Sideband strengths')
-            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+            plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
                          label=spectrum.parameters['series'], marker='o')
             plt.legend()
             plt.yscale('log')
+        if plot and confirm_fits:
+            plt.figure('CCD confirm fits')
+            plt.plot(spectrum.proc_data[:, 0], spectrum.proc_data[:, 1],# spectrum.proc_data[:, 2],
+                         label=spectrum.parameters['series'])
+            plt.plot(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3] / spectrum.sb_results[:, 5],# spectrum.sb_results[:, 4],
+                         label=spectrum.parameters['series'], marker='o')
+            plt.legend()
+            plt.ylim([-0.1, 1])
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1],
                                      marker=spectrum.parameters["series"] + '_' + str(spectrum.parameters["spec_step"]),
