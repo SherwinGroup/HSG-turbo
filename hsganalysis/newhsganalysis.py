@@ -480,7 +480,8 @@ class HighSidebandCCD(CCD):
         self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
-        self.parameters["thz_power"] = float(self.parameters["fel_power"])
+        # self.parameters["thz_power"] = float(self.parameters["fel_power"])
+        self.parameters["thz_power"] = float(self.parameters["pulseEnergies"]["mean"])
 
     def __add__(self, other):
         """
@@ -1269,6 +1270,8 @@ class HighSidebandPMT(PMT):
                 print "ratio", area / error
             details = np.array([sideband[0], nir_frequency, 1 / 8065.6, area, error, 2 / 8065.6, 1 / 8065.6])
             if area < 0:
+                if verbose:
+                    print "area less than 0", sideband[0]
                 continue
             elif area < 2 * error:  # Two seems like a good cutoff?
                 if verbose:
@@ -1279,7 +1282,10 @@ class HighSidebandPMT(PMT):
             except:
                 self.sb_results = np.array(details)
             self.full_dict[sideband[0]] = details[1:]
-        self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
+        try:
+            self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
+        except:
+            pass
 
     def fit_sidebands(self, plot=False, verbose=False):
         """
