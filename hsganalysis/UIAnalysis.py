@@ -57,6 +57,7 @@ class BaseWindow(QtGui.QMainWindow):
 
     # Class to be instantiated with data
     dataClass = hsg.CCD
+    dataSubclasses = []
 
     sigClosed = QtCore.pyqtSignal(object)
     def __init__(self, inp = None, parentWin = None):
@@ -77,8 +78,11 @@ class BaseWindow(QtGui.QMainWindow):
                 self.openFile(inp)
             elif isinstance(inp, self.dataClass):
                 self.processSingleData(inp)
+            elif type(inp) in self.dataSubclasses:
+                # to handle FullHighSideband class
+                self.processSingleData(inp)
             else:
-                print "unknown type, ", type(inp)
+                print "unknown type, ", type(inp), self.__class__.__name__
 
         self.sigClosed.connect(updateFileClose)
 
@@ -276,8 +280,6 @@ class BaseWindow(QtGui.QMainWindow):
 
         return params
 
-
-
     def openFile(self, filename):
         filename = str(filename)
 
@@ -325,7 +327,6 @@ class BaseWindow(QtGui.QMainWindow):
         else:
             return hsg.CCD
 
-
     @staticmethod
     def __PLOT_SPECT_THINGS(): pass
 
@@ -339,8 +340,6 @@ class BaseWindow(QtGui.QMainWindow):
 
         return [x, data[:,1]/self.uisbDivideBy.value()]
 
-
-
     @staticmethod
     def __PLOTTING_FIT_RESUTLS(): pass
     def plotFits(self):
@@ -352,8 +351,6 @@ class BaseWindow(QtGui.QMainWindow):
                      "Position": 1}[want]]
 
         self.ui.gFits.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen("w"), symbol="o")
-
-
 
     @staticmethod
     def __CHANGING_PLOT_CONTROLS(): pass
@@ -476,22 +473,38 @@ class BaseWindow(QtGui.QMainWindow):
 
         self.setWindowTitle("{}: {}".format(pref, val))
 
-
-
-
-
     @staticmethod
     def __DRAGGING_CONTROLS(): pass
 
     def dragEnterEvent(self, event):
+        """
+
+        :param event:
+        :type event: QtGui.QDragEnterEvent
+        :return:
+        """
         event.accept()
 
     def drop(self, event):
+        """
+        :param event:
+        :type event: QtGui.QDropEvent
+        :return:
+        """
         global fileList
         # Dropped something that isn't a link
         if not event.mimeData().hasUrls():
             event.reject()
             return
+
+        # Force Qt to "Copy" the file instead of
+        # "Move", preventing it from removing the
+        # file from the directory.
+        event.setDropAction(QtCore.Qt.CopyAction)
+
+        if event.keyboardModifiers() & QtCore.Qt.ShiftModifier:
+            print "held shift"
+
 
         # Only one file was dropped
         if len(event.mimeData().urls()) == 1:
@@ -510,7 +523,9 @@ class BaseWindow(QtGui.QMainWindow):
             if np.all(["hsg" in ii.fname for ii in objlist]):
                 # Sum them all up if every file is hsg, otherwise
                 # do nothing
-                series = hsg.hsg_sum_spectra(objlist)
+                # series = hsg.hsg_sum_spectra(objlist)
+                series = hsg.proc_n_plotCCD(filelist)
+                # series = hsg.hsg_combine_spectra(series)
             else:
                 series = objlist
 
@@ -534,7 +549,6 @@ class BaseWindow(QtGui.QMainWindow):
                         a.setWindowTitle("Series: {}".format(obj.parameters["series"]))
         if self.dataObj is None: # I'm the first window. Get outta here!
             self.close()
-
 
     def handleFitDragEvent(self, obj, val):
         """
@@ -607,11 +621,6 @@ class BaseWindow(QtGui.QMainWindow):
         # Add it to the list of opened windows
         combinedWindowList.append(a)
 
-
-
-
-
-
     @staticmethod
     def __PROCESSING_CONTROLS(): pass
 
@@ -667,6 +676,7 @@ class BaseWindow(QtGui.QMainWindow):
 
 class HSGWindow(BaseWindow):
     dataClass = hsg.HighSidebandCCD
+    dataSubclasses = [hsg.FullHighSideband]
     def __init__(self, *args, **kwargs):
         self.curveFits = {}
         super(HSGWindow, self).__init__(*args, **kwargs)
@@ -690,6 +700,12 @@ class HSGWindow(BaseWindow):
 
         self.dataObj.guess_sidebands()
         self.dataObj.fit_sidebands()
+        self.dataObj.infer_frequencies()
+
+
+        params = self.genParameters(**dataObj.parameters)
+        self.specParams = Parameter.create(name=dataObj.fname, type='group', children=params)
+        self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
         self.curveFits = {ii: self.ui.gSpectrum.plot(pen='g', name=ii) for
                           ii in self.dataObj.full_dict}
@@ -736,7 +752,11 @@ class HSGWindow(BaseWindow):
             {"name":"NIR Frequency", "type":"list",
                 "values":["{:.3f} nm".format(kwargs.get("nir_lambda", 0)),
                           "{:.2f} cm-1".format(1e7/kwargs.get("nir_lambda", 1))]},
-            {"name":"Center Lambda (nm)", "type":"float", "value":kwargs.get("center_lambda", 0)}
+            {"name":"Center Lambda (nm)", "type":"float", "value":kwargs.get("center_lambda", 0)},
+            {"name": "Fit NIR (cm-1)", "type": "float",
+                "value": kwargs.get("calculated NIR freq (cm-1)", 0)},
+            {"name": "Fit THz (cm-1)", "type": "float",
+                "value": kwargs.get("calculated THz freq (cm-1)", 0)}
             ]})
         params.append(
         {"name":"FEL Settings", "type":"group", "children":[
