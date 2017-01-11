@@ -20,7 +20,8 @@ import scipy.optimize as spo
 import scipy.fftpack as fft
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
-
+import itertools as itt
+np.set_printoptions(linewidth=500)
 
 ####################
 # Objects 
@@ -480,7 +481,12 @@ class HighSidebandCCD(CCD):
         self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
-        self.parameters["thz_power"] = float(self.parameters["fel_power"])
+        try:
+            self.parameters["thz_power"] = float(self.parameters["pulseEnergies"]["mean"])
+        except KeyError:
+            # Happens for data files before 7/19/16 when the pyro was
+            # calibrated
+            self.parameters["thz_power"] = float(self.parameters["fel_power"])
 
     def __add__(self, other):
         """
@@ -824,7 +830,7 @@ class HighSidebandCCD(CCD):
             if octant < 1:
                 octant = 1
 
-            check_max_area = np.sum(check_y[check_max_index - octant:check_max_index + octant + 1])
+            check_max_area = np.sum(check_y[check_max_index - octant-1:check_max_index + octant + 1])
 
 
             if verbose and plot:
@@ -941,7 +947,7 @@ class HighSidebandCCD(CCD):
             p0 = [self.sb_guess[elem, 0], self.sb_guess[elem, 1] * width_guess, width_guess, 0.1]
             # print "Let's fit this shit!"
             if verbose:
-                print "number:", elem, num
+                print "\nnumber:", elem, num
                 # print "data_temp:", data_temp
                 print "p0:", p0
             # plot_guess = True  # This is to disable plotting the guess function
@@ -965,12 +971,19 @@ class HighSidebandCCD(CCD):
             try:
                 if verbose:
                     print "I'm going to try to fit", self.sb_list[elem]
-                coeff, var_list = curve_fit(gauss, data_temp[:, 0], data_temp[:, 1], p0=p0)
-            except:
+                # 11/1/16
+                # needed to bump maxfev up to 2k because a sideband wasn't being fit
+                # Fix for sb 106
+                # 05-23 Loren 10nm\hsg_640_Perp352seq_spectrum.txt
+                coeff, var_list = curve_fit(
+                    gauss, data_temp[:, 0], data_temp[:, 1], p0=p0, maxfev = 2000)
+            except Exception as e:
                 if verbose:
                     print "I couldn't fit", elem
                     print "It's sideband", num
                     print "In file", self.fname
+                    print "because", e
+                    print "wanted to fit xindx", self.sb_index[elem], "+-", window
                 self.sb_list[elem] = None
                 continue # This will ensure the rest of the loop is not run without an actual fit.
 
@@ -1154,7 +1167,7 @@ class PMT(object):
         :type file_name: str
         :return: None
         """
-        print "This started"
+        # print "This started"
         self.fname = file_name
         # self.files_included = [file_name]
         with open(file_name, 'rU') as f:
@@ -1301,7 +1314,7 @@ class HighSidebandPMT(PMT):
             details = np.array([sideband[0], nir_frequency, 1 / 8065.6, area, error, 2 / 8065.6, 1 / 8065.6])
             if area < 0:
                 continue
-            elif area < 2 * error:  # Two seems like a good cutoff?
+            elif area < 1.5 * error:  # Two seems like a good cutoff?
                 if verbose:
                     print "I did not keep sideband ", sideband[0]
                 continue
@@ -1482,7 +1495,7 @@ class HighSidebandPMT(PMT):
         num_lines = parameter_str.count('#')  # Make the number of lines constant so importing is easier
         for num in range(99 - num_lines): parameter_str += '\n#'
 
-        origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
+        origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.\n,{:.3f},'.format(self.parameters["fieldStrength"]["mean"])
         spec_header = '#' + parameter_str + origin_import_spec
 
         origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error\neV,,arb. u.,,eV,,\n,,'  # + marker
@@ -1497,8 +1510,12 @@ class HighSidebandPMT(PMT):
         np.savetxt(os.path.join(folder_str, spectra_fname), complete, delimiter=',',
                    header=spec_header, comments='', fmt='%0.6e')
 
-        np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
-                   header=fits_header, comments='', fmt='%0.6e')
+        try:
+            np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
+                       header=fits_header, comments='', fmt='%0.6e')
+        except AttributeError:
+            # Catch the error that happens if you save something without files
+            print "warning, couldn't save fit file (no sidebands found?)"
 
         print "Saved PMT spectrum.\nDirectory: {}".format(os.path.join(folder_str, spectra_fname))
 
@@ -1563,7 +1580,7 @@ class FullHighSideband(FullSpectrum):
         for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
 
-    def add_CCD(self, ccd_object):
+    def add_CCD(self, ccd_object, verbose=False, force_calc=None):
         """
         This method will be called by the stitch_hsg_results function to add another
         CCD image to the spectrum.
@@ -1574,12 +1591,20 @@ class FullHighSideband(FullSpectrum):
         """
         if self.parameters["gain"] == ccd_object.parameters["gain"]:
             calc = False
-
         else:
             calc = True
+        if force_calc is not None:
+            calc = force_calc
         try:
-            self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict, need_ratio=calc)
+            # self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict,
+            #                                   need_ratio=calc, verbose=verbose)
+            self.full_dict = stitch_hsg_dicts(self, ccd_object, need_ratio=calc,
+                                              verbose=verbose)
             self.parameters['files_here'].append(ccd_object.fname.split('/')[-1])
+            # update sb_results, too
+            sb_results = [[k]+list(v) for k, v in self.full_dict.items()]
+            sb_results = np.array(sb_results)
+            self.sb_results = sb_results[sb_results[:,0].argsort()]
         except AttributeError:
             print 'Error, not enough sidebands to fit here! {}, {}, {}, {}'.format(
                 self.parameters["series"], self.parameters["spec_step"],
@@ -1672,7 +1697,7 @@ class FullHighSideband(FullSpectrum):
         # origin_import_spec = '\nNIR frequency,Signal,Standard error\neV,arb. u.,arb. u.'
         # spec_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_spec
 
-        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + marker
+        origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error,Amplitude\norder,eV,,arb. u.,,meV,,arb. u.\n' + ','.join([marker]*8)
         fits_header = '#' + parameter_str + origin_import_fits
 
         # np.savetxt(os.path.join(folder_str, spectra_fname), self.proc_data, delimiter=',',
@@ -1893,6 +1918,120 @@ def hsg_combine_spectra(spectra_list, verbose = False):
                     spectra_list.remove(piece)
         good_list[-1].make_results_array()
     return good_list
+
+def hsg_combine_spectra_arb_param(spectra_list, param_name="series", verbose = False):
+    """
+    This function is all about smooshing different parts of the same hsg
+    spectrum together.  It takes a list of HighSidebandCCD spectra and turns the
+    zeroth spec_step into a FullHighSideband object.  It then uses the function
+    stitch_hsg_dicts over and over again for the smooshing.
+
+    This is different than hsg_combine_spectra in that you pass which
+    criteria distinguishes the files to be the "same". Since it can be any arbitrary
+    value, things won't be exactly the same (field strength will never be identical
+    between images). It will start with the first (lowest) spec step, then compare the
+    number of images in the next step. Whichever has
+
+    Input:
+    spectra_list = list of HighSidebandCCD objects that have sideband spectra
+                   larger than the spectrometer can see.
+
+    Returns:
+    good_list = A list of FullHighSideband objects that have been combined as
+                much as can be.
+
+    :param spectra_list: randomly-ordered list of HSG spectra, some of which can be stitched together
+    :type spectra_list: list of HighSidebandCCD
+    :return: fully combined list of full hsg spectra.  No PMT business yet.
+    :rtype: list of FullHighSideband
+    """
+    if not spectra_list:
+        raise RuntimeError("Passed an empty spectra list!")
+    if isinstance(param_name, list):
+        # if you pass two things because the param you want
+        # is in a dict (e.g. field strength has mean/std)
+        # do it that way
+        param_name_list = list(param_name)
+        paramGetter = lambda x: x.parameters[param_name_list[0]][param_name_list[1]]
+        param_name = param_name[0]
+    elif isinstance(spectra_list[0].parameters[param_name], dict):
+        paramGetter = lambda x: x.parameters[param_name]["mean"]
+    else:
+        paramGetter = lambda x: x.parameters[param_name]
+
+    good_list = []
+    spectra_list.sort(key=lambda x: x.parameters["spec_step"])
+
+    # keep a dict for each spec step.
+    spec_steps = {}
+    for elem in spectra_list:
+        if verbose:
+            print "Spec_step is", elem.parameters["spec_step"]
+        current_steps = spec_steps.get(elem.parameters["spec_step"], [])
+        current_steps.append(elem)
+        spec_steps[elem.parameters["spec_step"]] = current_steps
+
+
+    # Next, loop over all of the elements. For each element, if it has not
+    # already been added to a spectra, look at all of the combinations from
+    # other spec steps to figure out which has the smallest overall deviation
+    # to make a new full spectrum
+    good_list = []
+    already_added = set()
+    for elem in spectra_list:
+        if elem in already_added: continue
+        already_added.add(elem)
+        good_list.append(FullHighSideband(elem))
+
+        other_spec_steps = [v for k, v in spec_steps.items() if
+                            k != good_list[-1].parameters["spec_step"]]
+        min_distance = np.inf
+        cur_value = paramGetter(good_list[-1])
+        best_match = None
+        for comb in itt.product(*other_spec_steps):
+            new_values = map(paramGetter, comb)
+            all_values = new_values + [cur_value]
+
+            if np.std(all_values) < min_distance:
+                min_distance = np.std(all_values)
+                best_match = list(comb)
+
+        if best_match is None:
+            raise RuntimeError("No matches found. Empty lists passed?")
+
+        best_values = map(paramGetter, best_match)
+        for spec in best_match:
+            print "Adding new spec step\n\tStarted with spec={},series={}".format(
+                good_list[-1].parameters["spec_step"],good_list[-1].parameters["series"]
+            )
+            print "\tAdding with spec={},series={}\n".format(
+                spec.parameters["spec_step"],
+                spec.parameters["series"]
+            )
+            print "\n\nfirst SBs:\n", good_list[-1].sb_results
+            print "\n\nsecond SBs:\n", spec.sb_results
+            good_list[-1].add_CCD(spec, True)
+            print "\n\nEnding SBs:\n", good_list[-1].sb_results
+
+            already_added.add(spec)
+        best_match.append(good_list[-1])
+        best_values.append(cur_value)
+        new_value = np.mean(best_values)
+        new_std = np.std(best_values)
+
+        if isinstance(good_list[-1].parameters[param_name], dict):
+            best_values = np.array(map(lambda x: x.parameters[param_name]["mean"], best_match))
+            best_std = np.array(map(lambda x: x.parameters[param_name]["std"], best_match))
+            new_value = np.average(best_values, weights = best_std)
+            new_std = np.sqrt(np.average((best_values-new_value)**2, weights=best_std))
+
+        good_list[-1].parameters[param_name] = {
+            "mean": new_value,
+            "std": new_std
+        }
+    return good_list
+
+
 
 def pmt_sorter(folder_path):
     """
@@ -2135,9 +2274,9 @@ def stitchData(dataList, plot=False):
         first, second = second, first
 
 
-def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
+def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False):
     """
-    This helper function takes a FullHighSideband.full_dict attribute and a sideband 
+    This helper function takes a FullHighSideband and a sideband
     object, either CCD or PMT and smushes the new sb_results into the full_dict.
 
     The first input doesn't change, so f there's a PMT set of data involved, it 
@@ -2145,6 +2284,21 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
 
     This function almost certainly does not work for stitching many negative orders
     in it's current state
+
+    11/14/16
+    --------
+    This function has been updated to take the CCD objects themselves to be more
+    intelligent about stitching. Consider two scans, (a) spec step 0 with 1 gain, spec
+    step 2 with 110 gain and (b) spec step 0 with 50 gain and spec step 1 with 110 gain.
+    The old version would always take spec step 0 to scale to, so while comparisons
+    between spec step 0 and 1 for either case is valid, comparison between (a) and (b)
+    were not, since they were scaled to different gain parameters. This new code will
+    check what the gain values are and scale to the 110 data set, if present. This seems
+    valid because we currently always have a 110 gain exposure for higher order
+    sidebands.
+    The exception is if the laser is present (sideband 0), as that is an absolute
+    measure to which all else should be related.
+    TODO: run some test cases to test this.
 
     Inputs:
     full = full_dict from FullHighSideband, or HighSidebandPMT.  It's important 
@@ -2157,6 +2311,196 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
 
     Returns:
     full = extended version of the input full.  Overlapping sidebands are 
+           averaged because that makes sense?
+    """
+    if isinstance(full_obj, dict) and isinstance(new_obj, dict):
+        return stitch_hsg_dicts_old(full_obj, new_obj, need_ratio, verbose)
+    full = full_obj.full_dict
+    new_dict = new_obj.full_dict
+
+    scaleTo = ""
+    if need_ratio:
+        if new_obj.parameters["gain"] == 110 and full_obj.parameters["gain"] != 110 \
+            and 0 not in full:
+            scaleTo = "new"
+        else:
+            scaleTo = "full"
+
+    if verbose:
+        print "I'm adding these sidebands", sorted(new_dict.keys())
+    overlap = [] # The list that hold which orders are in both dictionaries
+    missing = [] # How to deal with sidebands that are missing from full but in new.
+    for new_sb in sorted(new_dict.keys()):
+        full_sbs = sorted(full.keys())
+        if new_sb in full_sbs:
+            overlap.append(new_sb)
+        elif new_sb not in full_sbs and new_sb < full_sbs[-1]:
+            # This probably doesn't work with bunches of negative orders
+            missing.append(new_sb)
+
+    if verbose:
+        print "overlap:", overlap
+        print "missing:", missing
+
+
+    # This if-else clause handles how to average together overlapping sidebands
+    # which are seen in both spectra,
+    if need_ratio:
+        # Calculate the appropriate ratio to multiply the new sidebands by.
+        # I'm not entirely sure what to do with the error of this guy.
+        ratio_list = []
+        try:
+            new_starter = overlap[-1]
+            if len(overlap) > 2:
+                overlap = [x for x in overlap if (x % 2 == 0) and (x != min(overlap) and (x != max(overlap)))]
+            if scaleTo == "new":
+                for sb in overlap:
+                    ratio_list.append(new_dict[sb][2]/full[sb][2])
+                new_ratio = 1
+                ratio = np.mean(ratio_list)
+            else:
+                for sb in overlap:
+                    ratio_list.append(full[sb][2] / new_dict[sb][2])
+                new_ratio = np.mean(ratio_list)
+                ratio = np.mean(ratio_list)
+            # print "the ratio is",ratio, "from", ratio_list
+
+            # print
+            # print '-'*15
+            # print "ratio for {}: {}".format(full_obj.parameters["thz_freq"],
+            #                                 np.mean(ratio_list))
+            error = np.std(ratio_list) / np.sqrt(len(ratio_list))
+        except IndexError:
+            # If there's no overlap (which you shouldn't let happen), hardcode a ratio
+            # and error. I looked at all the ratios for the overlaps from 6/15/16
+            # (540ghz para) to get the rough average. Hopefully they hold for all data.
+            if not overlap:
+                ratio = 0.1695
+                error = 0.02
+                # no overlap, so make sure it grabs all the sidebands
+                new_starter = min(new_dict.keys())
+            else:
+                raise
+        if verbose:
+            print "Ratio list","\n", [round(ii, 3) for ii in ratio_list]
+            print "Overlap   ","\n", [round(ii, 3) for ii in overlap]
+            print "Ratio", ratio
+            print "Error", error
+        # Adding the new sidebands to the full set and moving errors around.
+        # I don't know exactly what to do about the other aspects of the sidebands
+        # besides the strength and its error.
+        if scaleTo == "full":
+            for sb in overlap:
+                new_dict[sb][2] = ratio * new_dict[sb][2]
+                new_dict[sb][3] = new_dict[sb][2] * np.sqrt((error / ratio) ** 2 + (new_dict[sb][3] / new_dict[sb][2]) ** 2)
+
+                error = np.sqrt(full[sb][3] ** (-2) + new_dict[sb][3] ** (-2)) ** (-1)
+                avg = (full[sb][2] / (full[sb][3] ** 2) + new_dict[sb][2] / (
+                new_dict[sb][3] ** 2)) / (
+                          full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
+                full[sb][2] = avg
+                full[sb][3] = error
+
+                lw_error = np.sqrt(full[sb][5] ** (-2) + new_dict[sb][5] ** (-2)) ** (-1)
+                lw_avg = (full[sb][4] / (full[sb][5] ** 2) + new_dict[sb][4] / (
+                new_dict[sb][5] ** 2)) / (
+                             full[sb][5] ** (-2) + new_dict[sb][5] ** (-2))
+                full[sb][4] = lw_avg
+                full[sb][5] = lw_error  # This may not be the exactly right way to calculate the error
+        else:
+            for sb in overlap:
+                full[sb][2] = ratio * full[sb][2]
+                full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (new_dict[sb][3] / new_dict[sb][2]) ** 2)
+
+                error = np.sqrt(full[sb][3] ** (-2) + new_dict[sb][3] ** (-2)) ** (-1)
+                avg = (full[sb][2] / (full[sb][3] ** 2) + new_dict[sb][2] / (
+                    new_dict[sb][3] ** 2)) / (full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
+                full[sb][2] = avg
+                full[sb][3] = error
+
+                lw_error = np.sqrt(full[sb][5] ** (-2) + new_dict[sb][5] ** (-2)) ** (-1)
+                lw_avg = (full[sb][4] / (full[sb][5] ** 2) + new_dict[sb][4] / (
+                new_dict[sb][5] ** 2)) / (
+                             full[sb][5] ** (-2) + new_dict[sb][5] ** (-2))
+                full[sb][4] = lw_avg
+                full[sb][5] = lw_error  # This may not be the exactly right way to calculate the error
+
+
+    else:
+        try:
+            new_starter = overlap[-1] # This grabs the sideband order where only the new dictionary has
+                                      # sideband information.  It's not clear why it necessarily has to be
+                                      # at this line.
+            overlap = [x for x in overlap if (x % 2 == 0) and (x != min(overlap) and (x != max(overlap)))]
+            # This cuts out the lowest order sideband in the overlap for mysterious reasons
+            for sb in overlap: # This for loop average two data points weighted by their relative errors
+                if verbose:
+                    print "The sideband", sb
+                    print "Old value", full[sb][4] * 1000
+                    print "Add value", new_dict[sb][4] * 1000
+                error = np.sqrt(full[sb][3] ** (-2) + new_dict[sb][3] ** (-2)) ** (-1)
+                avg = (full[sb][2] / (full[sb][3] ** 2) + new_dict[sb][2] / (new_dict[sb][3] ** 2)) / (
+                    full[sb][3] ** (-2) + new_dict[sb][3] ** (-2))
+                full[sb][2] = avg
+                full[sb][3] = error
+
+                lw_error = np.sqrt(full[sb][5] ** (-2) + new_dict[sb][5] ** (-2)) ** (-1)
+                lw_avg = (full[sb][4] / (full[sb][5] ** 2) + new_dict[sb][4] / (new_dict[sb][5] ** 2)) / (
+                full[sb][5] ** (-2) + new_dict[sb][5] ** (-2))
+                full[sb][4] = lw_avg
+                full[sb][5] = lw_error  # This may not be the exactly right way to calculate the error
+                if verbose:
+                    print "New value", lw_avg * 1000
+        except:
+            new_starter = 0  # I think this makes things work when there's no overlap
+    if verbose:
+        print "appending new elements. new_starter={}".format(new_starter)
+
+
+    for sb in [x for x in new_dict.keys() if ((x >= new_starter) or (x in missing))]:
+        full[sb] = new_dict[sb]
+        if scaleTo == "full":
+            full[sb][2] = ratio * full[sb][2]
+            full[sb][3] = full[sb][2] * np.sqrt((error / ratio) ** 2 + (ratio * full[sb][3] / full[sb][2]) ** 2)
+    if scaleTo == "new":
+        for sb in set(full.keys()) - set(sorted(new_dict.keys())[1:]):
+            full[sb][2] *= ratio
+            # TODO: I think this is an invalid error
+            # propagation (since ratio has error associated with it
+            full[sb][3] *= ratio
+    if verbose:
+        print "I made this dictionary", sorted(full.keys())
+    return full
+
+def stitch_hsg_dicts_old(full, new_dict, need_ratio=False, verbose=False):
+    """
+    This helper function takes a FullHighSideband.full_dict attribute and a sideband
+    object, either CCD or PMT and smushes the new sb_results into the full_dict.
+
+    The first input doesn't change, so f there's a PMT set of data involved, it
+    should be in the full variable to keep the laser normalization intact.
+
+    This function almost certainly does not work for stitching many negative orders
+    in it's current state
+
+    11/14/16
+    --------
+    The original function has been updated to take the full object (instead of
+    the dicts alone) to better handle calculating ratios when stitching. This is called
+    once things have been parsed in the original function (or legacy code where dicts
+    are passed instead of the object)
+
+    Inputs:
+    full = full_dict from FullHighSideband, or HighSidebandPMT.  It's important
+           that it contains lower orders than the new_dict.
+    new_dict = another full_dict.
+    need_ratio = If gain or other parameters aren't equal and must resort to
+                 calculating the ratio instead of the measurements being equivalent.
+                 Changing integration time still means N photons made M counts,
+                 but changing gain or using PMT or whatever does affect things.
+
+    Returns:
+    full = extended version of the input full.  Overlapping sidebands are
            averaged because that makes sense?
     """
     if verbose:
@@ -2174,6 +2518,9 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
     if verbose:
         print "overlap:", overlap
         print "missing:", missing
+
+    # This if-else clause handles how to average together overlapping sidebands
+    # which are seen in both spectra,
     if need_ratio:
         # Calculate the appropriate ratio to multiply the new sidebands by.
         # I'm not entirely sure what to do with the error of this guy.
@@ -2186,18 +2533,21 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
             for sb in overlap:
                 ratio_list.append(full[sb][2] / new_dict[sb][2])
             ratio = np.mean(ratio_list)
+            # print
+            # print '-'*15
+            # print "ratio for {}: {}".format()
             error = np.std(ratio_list) / np.sqrt(len(ratio_list))
         except IndexError:
             # If there's no overlap (which you shouldn't let happen),
-            # hardcode a ratio and error. 
+            # hardcode a ratio and error.
             # I looked at all the ratios for the overlaps from 6/15/16
-            # (540ghz para) to get the rough average. Hopefully they hold 
-            # for all data. 
+            # (540ghz para) to get the rough average. Hopefully they hold
+            # for all data.
             if not overlap:
                 ratio = 0.1695
                 error = 0.02
                 # no overlap, so make sure it grabs
-                # all the sidebands 
+                # all the sidebands
                 new_starter = min(new_dict.keys())
             else:
                 raise
@@ -2247,7 +2597,12 @@ def stitch_hsg_dicts(full, new_dict, need_ratio=False, verbose=False):
                 if verbose:
                     print "New value", lw_avg * 1000
         except:
+
             new_starter = 0  # I think this makes things work when there's no overlap
+    if verbose:
+        print "appending new elements. new_starter={}".format(new_starter)
+
+    # This loop will add the sidebands which were only seen in the second step
     for sb in [x for x in new_dict.keys() if ((x >= new_starter) or (x in missing))]:
         full[sb] = new_dict[sb]
         if need_ratio:
@@ -2563,9 +2918,6 @@ def save_parameter_sweep_no_sb(spectrum_list, file_name, folder_str, param_name,
             os.path.join(folder_str, file_name))
 
 
-
-
-
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
                          wanted_indices = [1, 3, 4], verbose=False):
     """
@@ -2589,7 +2941,16 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     [sb number, Freq (eV), Freq error (eV), Gauss area (arb.), Area error, Gauss linewidth (eV), Linewidth error (eV)]
     [    0    ,      1   ,        2,      ,        3         ,      4    ,         5           ,        6            ]
     """
-    spectrum_list.sort(key=lambda x: x.parameters[param_name])
+    if isinstance(param_name, list):
+        # if you pass two things because the param you want
+        # is in a dict (e.g. field strength has mean/std)
+        # do it that way
+        param_name_list = list(param_name)
+        paramGetter = lambda x: x.parameters[param_name_list[0]][param_name_list[1]]
+        param_name = param_name[0]
+    else:
+        paramGetter = lambda x: x.parameters[param_name]
+    spectrum_list.sort(key=paramGetter)
     included_spectra = dict()
     param_array = None
     sb_included = []
@@ -2603,9 +2964,10 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         # in the list.
         num_params = spectrum_list[0].sb_results.shape[0]
 
+
     for spec in spectrum_list:
         sb_included = sorted(list(set(sb_included + spec.full_dict.keys())))
-        included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
+        included_spectra[spec.fname.split('/')[-1]] = paramGetter(spec)
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
     if verbose:
@@ -2630,7 +2992,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         new_spec[:, 0] = sb_included
         new_spec[found_idx, :] = sb_results
 
-        spec_data = np.insert(new_spec.flatten(), 0, float(spec.parameters[param_name]))
+        spec_data = np.insert(new_spec.flatten(), 0, float(paramGetter(spec)))
 
         try:
             param_array = np.row_stack((param_array, spec_data))
@@ -2677,6 +3039,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     included_spectra_str = included_spectra_str.replace('\n', '\n#')
 
     included_spectra_str += '\n#' * (99 - included_spectra_str.count('\n'))
+
+    # this will make the header chunk for the full, un-sliced data set
+    # TODO: fix naming so you aren't looping twice
     origin_import1 = param_name
     origin_import2 = unit
     origin_import3 = ""
@@ -2686,6 +3051,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         origin_import3 += ",,{0},,{0},,{0},".format(order)
     origin_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
 
+
+    # This little chunk will make a chunk block of header strings for the sliced
+    # data set which can be looped over
     origin_import1 = param_name
     origin_import2 = unit
     origin_import3 = ""
@@ -2719,7 +3087,8 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
             os.path.join(folder_str, file_name))
 
 def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
-                                     folder_str, param_name, unit, verbose=False):
+                                     folder_str, param_name, unit, verbose=False,
+                                     wanted_indices = [1, 3, 4]):
     """
     Similar to save_parameter_sweep, but the data[:,0] column is sideband number instead of
     series, and each set of columns correspond to a series step. Pretty much compiles
@@ -2731,6 +3100,12 @@ def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
     :param param_name:
     :param unit:
     :param verbose:
+
+    sb number is automatically prepended, so do not include in slicing list
+
+    [sb number, Freq (eV), Freq error (eV), Gauss area (arb.), Area error, Gauss linewidth (eV), Linewidth error (eV)]
+    [    0    ,      1   ,        2,      ,        3         ,      4    ,         5           ,        6            ]
+
     :return:
     """
     spectrum_list.sort(key=lambda x: x.parameters[param_name])
@@ -2783,7 +3158,7 @@ def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
 
     # the indices we want from the param array
     # 1- freq, 3-area, 4-area error
-    snip = [1, 3, 4]
+    snip = wanted_indices
     N = len(spectrum_list)
     # run it out across all of the points across the param_array
     snipped_indices = [0] + list( np.array(snip*N) + 6*np.array(sorted(range(N)*len(snip))) )
@@ -2817,13 +3192,32 @@ def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
     origin_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
     # print "origin import:",
     # print origin_total
+    # origin_import1 = "Sideband"
+    # origin_import2 = "Order"
+    # origin_import3 = "SB"
+    # for param in params:
+    #     origin_import1 += ",Frequency,Sideband strength,error"
+    #     origin_import2 += ",eV,arb. u.,"
+    #     origin_import3 += ",{0},{0},".format(param)
+    # origin_snip = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
+
+    # This little chunk will make a chunk block of header strings for the sliced
+    # data set which can be looped over
     origin_import1 = "Sideband"
     origin_import2 = "Order"
     origin_import3 = "SB"
+    wanted_titles = ["Sideband", "Frequency", "error", "Sideband strength", "error",
+                     "Linewidth", "error"]
+    wanted_units = ["order", "eV", "eV", "arb. u.", "arb. u.", "eV", "eV"]
+    wanted_comments = ["", "{0}", "", "{0}", "", "{0}", ""]
+    wanted_titles = ",".join([wanted_titles[ii] for ii in wanted_indices])
+    wanted_units = ",".join([wanted_units[ii] for ii in wanted_indices])
+    wanted_comments = ",".join([wanted_comments[ii] for ii in wanted_indices])
+
     for param in params:
-        origin_import1 += ",Frequency,Sideband strength,error"
-        origin_import2 += ",eV,arb. u.,"
-        origin_import3 += ",{0},{0},".format(param)
+        origin_import1 += "," + wanted_titles
+        origin_import2 += "," + wanted_units
+        origin_import3 += "," + wanted_comments.format(param)
     origin_snip = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
 
     header_total = '#' + included_spectra_str + '\n' + origin_total
@@ -3721,14 +4115,16 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
 def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     """
     This function will take a pmt object, process it completely.
+
+    :rtype: list of HighSidebandPMT
     """
     pmt_data = pmt_sorter(folder_path)
 
+    index = 0
     for spectrum in pmt_data:
         spectrum.integrate_sidebands(verbose=verbose)
         spectrum.laser_line()  # This function is broken because process sidebands can't handle the laser line
-        print spectrum.full_dict
-        index = 0
+        # print spectrum.full_dict
         if plot:
             plt.figure('PMT data')
             for elem in spectrum.sb_dict.values():
@@ -3738,6 +4134,7 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
                          label=spectrum.parameters['series'], marker='o')
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1], index=index)
+            index += 1
     plt.legend()
     return pmt_data
 

@@ -17,7 +17,10 @@ import newhsganalysis as hsg
 
 from UI.mainWin_ui import Ui_MainWindow
 from UI.draggablePlotWidget import DraggablePlotWidget
-
+try:
+    import interactivePG as ipg
+except:
+    raise
 # fileList = dict()
 fileList = []
 combinedWindowList = []
@@ -108,7 +111,7 @@ class BaseWindow(QtGui.QMainWindow):
         self.sbLine.sigPositionChanged.connect(self.updateSBCalc)
         self.ui.splitSpectrum.setStretchFactor(1, 10)
 
-        self.fitsPlot = self.ui.gFits.plot()
+        self.fitsPlot = self.ui.gFits.plot(fmt='o')
         self.ui.splitFits.setStretchFactor(0, 100)
         self.ui.splitFits.setStretchFactor(1, 1)
 
@@ -330,7 +333,7 @@ class BaseWindow(QtGui.QMainWindow):
     @staticmethod
     def __PLOT_SPECT_THINGS(): pass
 
-    def plotSpectrum(self, ):
+    def plotSpectrum(self):
         self.curveSpectrum.setData(*self.convertDataForPlot(self.dataObj.proc_data))
     def convertDataForPlot(self, data):
         # Assumes data[:,0] is in eV
@@ -344,13 +347,21 @@ class BaseWindow(QtGui.QMainWindow):
     def __PLOTTING_FIT_RESUTLS(): pass
     def plotFits(self):
         data = self.dataObj.sb_results
-        want = [str(i.text()) for i in self.menuFitY.actions() if i.isChecked() and str(i.text())!="Log"][0]
-        x = data[:,0]
+        wantX = [str(i.text()) for i in self.menuFitX.actions() if i.isChecked()][0]
+        if wantX == "SB Num":
+            x = data[:,0]
+        else:
+            x = data[:,1]
+            x = converter["eV"][wantX](x)
+
+        wantY = [str(i.text()) for i in self.menuFitY.actions() if
+                 i.isChecked() and str(i.text()) != "Log"][0]
         y = data[:, {"Height":   3,
                      "Sigma":    5,
-                     "Position": 1}[want]]
+                     "Position": 1}[wantY]]
 
-        self.ui.gFits.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen("w"), symbol="o")
+
+        self.fitsPlot.setData(x, y/self.uisbDivideBy.value())
 
     @staticmethod
     def __CHANGING_PLOT_CONTROLS(): pass
@@ -397,21 +408,19 @@ class BaseWindow(QtGui.QMainWindow):
         if not val: # ignore if you uncheck
             sent.setChecked(True)
             return
-        else:
-            sent.setChecked(False)
-            return
         oldName = [str(i.text()) for i in self.menuFitX.actions() if i is not sent and i.isChecked()][0]
         newName = str(sent.text())
         [i.setChecked(False) for i in self.menuFitX.actions() if i is not sent]
-        if self.hsgObj is not None:
+        if self.dataObj is not None:
             self.plotFits()
 
     def scaleData(self, sb):
         if self.dataObj is not None:
-            self.ui.gSpectrum.getPlotItem().clear()
-            self.plotSpectrum(self.dataObj.proc_data)
-            self.plotSBFits(self.dataObj)
-            self.ui.gSpectrum.addItem(self.sbLine)
+            # self.ui.gSpectrum.getPlotItem().clear()
+            # self.ui.gSpectrum.plotItem.removeItem(self.sbLine)
+            self.plotSpectrum()
+            self.plotSBFits()
+            # self.ui.gSpectrum.addItem(self.sbLine)
 
     @staticmethod
     def __CHANGING_WINDOW_TITLE(): pass
@@ -565,18 +574,19 @@ class BaseWindow(QtGui.QMainWindow):
 		
         if self.dataObj is None:
             return
-        data = self.dataObj.sb_results
-        want = [str(i.text()) for i in self.menuFitY.actions() if i.isChecked() and str(i.text())!="Log"][0]
-        x = data[:,0]
-        y = data[:, {"Height":   3,
-                     "Sigma":    5,
-                     "Position": 1}[want]]
-
-        #self.ui.gFits.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen("w"), symbol="o")
-		
-        #d = [self.ui.gFits.plotItem.curves[2].xData,
-        #     self.ui.gFits.plotItem.curves[2].yData]
-        d = [x, y/self.uisbDivideBy.value()]
+        # data = self.dataObj.sb_results
+        # want = [str(i.text()) for i in self.menuFitY.actions() if i.isChecked() and str(i.text())!="Log"][0]
+        # x = data[:,0]
+        # y = data[:, {"Height":   3,
+        #              "Sigma":    5,
+        #              "Position": 1}[want]]
+        #
+        # #self.ui.gFits.plot(x, y/self.uisbDivideBy.value(), pen=pg.mkPen("w"), symbol="o")
+        #
+        # #d = [self.ui.gFits.plotItem.curves[2].xData,
+        # #     self.ui.gFits.plotItem.curves[2].yData]
+        # d = [x, y/self.uisbDivideBy.value()]
+        d = self.fitsPlot.getData()
         self.createCompWindow(data = d, p = val)
 
     def handleSpecDragEvent(self, obj, val):
@@ -761,10 +771,30 @@ class HSGWindow(BaseWindow):
         params.append(
         {"name":"FEL Settings", "type":"group", "children":[
             {"name":"SB Number", "type":"float", "value":0},
-            {"name":"FEL Energy (mJ)", "type":"float", "value":kwargs.get("fel_power", 0)},
-            {"name":"FEL Frequency (cm-1)", "type":"float", "value":kwargs.get("fel_lambda", 0)},
             {"name":"Pulses", "type":"int", "value":np.mean(kwargs.get("fel_pulses", 0))},
-            {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0)}
+            {"name":"FEL Energy (mJ)", "type": "str",
+                "value": "{:.1f} +/- {:.1f}".format(
+                    kwargs.get("pulseEnergies", {"mean":-1})["mean"],
+                    kwargs.get("pulseEnergies", {"std": -1})["std"])},
+            {"name":"Field Strength (kV/cm)", "type": "str",
+                "value": "{:.2f} +/- {:.2f}".format(
+                    kwargs.get("fieldStrength", {"mean":-1})["mean"],
+                    kwargs.get("fieldStrength", {"std": -1})["std"])},
+            {"name": "Transmission", "type": "float", "value": kwargs.get("fel_transmission", 0)},
+            {"name": "Pyro Voltage", "type": "str",
+                "value": "{:.1f} +/- {:.1f} mV".format(
+                    kwargs.get("pyroVoltage", {"mean":-1})["mean"]*1e3,
+                    kwargs.get("pyroVoltage", {"std": -1})["std"]*1e3)},
+            {"name": "CD Ratio", "type": "str",
+                "value": "{:.1f} +/- {:.1f}".format(
+                    kwargs.get("cdRatios", {"mean":-1})["mean"]*1e2,
+                    kwargs.get("cdRatios", {"std": -1})["std"]*1e2)},
+            {"name": "FP Time", "type": "str",
+                "value": "{:.0f} +/- {:.0f} ns".format(
+                    kwargs.get("fpTime", {"mean":-1})["mean"]*1e3,
+                    kwargs.get("fpTime", {"std": -1})["std"]*1e3)},
+            {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0)},
+            {"name":"FEL Frequency (cm-1)", "type":"float", "value":kwargs.get("fel_lambda", 0)}
             ]})
         return params
 
@@ -811,15 +841,17 @@ class ComparisonWindow(QtGui.QMainWindow):
         self.gPlot.focusInEvent = self.focusInEvent
         self.gPlot.changeEvent = self.changeEvent
 
-        self.gPlot.plotItem.vb.sigClickedEvent.connect(self.handleMouseClick)
+        # self.gPlot.plotItem.vb.sigClickedEvent.connect(self.handleMouseClick)
 
         #line = pg.LineSegmentROI()
 
     def initUI(self):
-        self.gPlot = DraggablePlotWidget()
+        # self.gPlot = DraggablePlotWidget()
+        self.gPlot = ipg.PlotWidget()
+        self.gPlot.addLegend()
         self.setCentralWidget(self.gPlot)
-        self.legend = pg.LegendItem()
-        self.legend.setParentItem(self.gPlot.plotItem)
+        # self.legend = pg.LegendItem()
+        # self.legend.setParentItem(self.gPlot.plotItem)
         self.menuBar().setNativeMenuBar(False)
 
         removeItems = QtGui.QAction("Remove Selected Items", self.menuBar())
@@ -845,14 +877,18 @@ class ComparisonWindow(QtGui.QMainWindow):
         symbol = None
         if len(data[0])<100:
             symbol = 'o'
-        p = self.gPlot.plotItem.plot(data[0], data[1],
+        # if label is not None:
+            # self.curveList[p] = label
+            # self.legend.addItem(p, label)
+        p = self.gPlot.plot(data[0], data[1],
                                      pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)),
-                                     symbol=symbol)
-        if label is not None:
-            self.curveList[p] = label
-            self.legend.addItem(p, label)
-        p.curve.setClickable(True)
-        p.sigClicked.connect(self.handleMouseClick)
+                                     symbol=symbol,
+                                    name=label)
+        # p = self.gPlot.plotItem.plot(data[0], data[1],
+        #                              pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)),
+        #                              symbol=symbol)
+        # p.curve.setClickable(True)
+        # p.sigClicked.connect(self.handleMouseClick)
 
     def removeSelectedLines(self):
         for line in self.selectedList:
@@ -863,7 +899,6 @@ class ComparisonWindow(QtGui.QMainWindow):
             self.selectedList.remove(line)
         self.legend.updateSize()
 
-
     def closeEvent(self, event):
         self.sigClosed.emit(self)
         super(ComparisonWindow, self).closeEvent(event)
@@ -873,10 +908,13 @@ class ComparisonWindow(QtGui.QMainWindow):
         self.sigGotFocus.emit(self)
 
     def changeEvent(self, ev):
-        ev.accept()
         if ev.type() == QtCore.QEvent.ActivationChange:
+            ev.accept()
             if self.isActiveWindow():
                 self.sigGotFocus.emit(self)
+        else:
+            ev.ignore()
+            ipg.PlotWidget.changeEvent(self.gPlot, ev)
 
     def handleMouseClick(self, obj, pos = None):
         """
