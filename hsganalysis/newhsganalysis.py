@@ -481,13 +481,12 @@ class HighSidebandCCD(CCD):
         self.parameters["nir_freq"] = 1239.84 / float(self.parameters["nir_lambda"])
         self.parameters["thz_freq"] = 0.000123984 * float(self.parameters["fel_lambda"])
         self.parameters["nir_power"] = float(self.parameters["nir_power"])
-        try:
-            self.parameters["thz_power"] = float(self.parameters["pulseEnergies"]["mean"])
-        except KeyError:
-            # Happens for data files before 7/19/16 when the pyro was
-            # calibrated
-            self.parameters["thz_power"] = float(self.parameters["fel_power"])
-
+        try: # This is the new way of doing things.  Also, now it's power
+            self.parameters["thz_energy"] = float(self.parameters["pulseEnergies"]["mean"])
+            self.parameters["thz_energy_std"] = float(self.parameters["pulseEnergies"]["std"])
+        except: # This is the old way TODO: DEPRECATE THIS
+            self.parameters["thz_energy"] = float(self.parameters["fel_power"])
+            
     def __add__(self, other):
         """
         Add together the image data from self.proc_data, or add a constant to 
@@ -1313,6 +1312,8 @@ class HighSidebandPMT(PMT):
                 print "ratio", area / error
             details = np.array([sideband[0], nir_frequency, 1 / 8065.6, area, error, 2 / 8065.6, 1 / 8065.6])
             if area < 0:
+                if verbose:
+                    print "area less than 0", sideband[0]
                 continue
             elif area < 1.5 * error:  # Two seems like a good cutoff?
                 if verbose:
@@ -1325,6 +1326,7 @@ class HighSidebandPMT(PMT):
             self.full_dict[sideband[0]] = details[1:]
         try:
             self.sb_results = self.sb_results[self.sb_results[:, 0].argsort()]
+
         except (IndexError, AttributeError):
             # IndexError where there's only one sideband
             # AttributeError when there aren't any (one sb which wasn't fit)
@@ -4112,7 +4114,7 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
 # Complete functions 
 ####################
 
-def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
+def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbose=False):
     """
     This function will take a pmt object, process it completely.
 
@@ -4130,8 +4132,15 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
             for elem in spectrum.sb_dict.values():
                 plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
             plt.figure('Sideband strengths')
-            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+            plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
                          label=spectrum.parameters['series'], marker='o')
+        if plot and confirm_fits:
+            plt.figure('PMT confirm fits')
+            for elem in spectrum.sb_dict.values():
+                plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2], marker='o')
+            plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+                         label=spectrum.parameters['series'], marker='o')
+            plt.ylim([-0.005, 0.025])
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1], index=index)
             index += 1
@@ -4139,7 +4148,7 @@ def proc_n_plotPMT(folder_path, plot=False, save=None, verbose=False):
     return pmt_data
 
 
-def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, verbose=False):
+def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=False, save=None, verbose=False):
     """
     This function will take a list of ccd files and process it completely.
     save_name is a tuple (file_base, folder_path)
@@ -4173,10 +4182,18 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, save=None, ve
             plt.legend()
             # plt.yscale('log')
             plt.figure('Sideband strengths')
-            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+            plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
                          label=spectrum.parameters['series'], marker='o')
             plt.legend()
             plt.yscale('log')
+        if plot and confirm_fits:
+            plt.figure('CCD confirm fits')
+            plt.plot(spectrum.proc_data[:, 0], spectrum.proc_data[:, 1],# spectrum.proc_data[:, 2],
+                         label=spectrum.parameters['series'])
+            plt.plot(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3] / spectrum.sb_results[:, 5],# spectrum.sb_results[:, 4],
+                         label=spectrum.parameters['series'], marker='o')
+            plt.legend()
+            plt.ylim([-0.1, 1])
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1],
                                      marker=spectrum.parameters["series"] + '_' + str(spectrum.parameters["spec_step"]),
