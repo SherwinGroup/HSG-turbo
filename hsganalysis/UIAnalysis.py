@@ -25,7 +25,7 @@ except:
 fileList = []
 combinedWindowList = []
 
-
+saveLoc = r"Z:\~Darren\Analysis\2017"
 class ComboParameter(pTypes.WidgetParameterItem):
     # sigTreeStateChanged = QtCore.pyqtSignal(object, object)
     def __init__(self, param, depth, itemList, name=None):
@@ -102,7 +102,7 @@ class BaseWindow(QtGui.QMainWindow):
         # p = Parameter.create(name='Open a File', type='group', children=params)
         p = Parameter.create(name='Open a File', type='group')
         params = self.genParameters(parent=p)
-        p.addChildren(params)
+        # p.addChildren(params)
         self.ui.ptFile.setParameters(p, showTop=True)
         self.specParams = p
 
@@ -252,6 +252,9 @@ class BaseWindow(QtGui.QMainWindow):
         self.ret = ret
 
 
+        save = self.ui.menubar.addAction("Save Processed...")
+        save.triggered.connect(self.saveProcessed)
+
         self.show()
 
     def changeToolbars(self):
@@ -268,19 +271,31 @@ class BaseWindow(QtGui.QMainWindow):
     @staticmethod
     def __OPENTHINGS(): pass
 
-    @staticmethod
-    def genParameters(**kwargs):
+    def genParameters(self, **kwargs):
         params = [
         {'name': "General Settings", "type":"group", "children":[
-            {"name": "Exposure (s)", "type": "float", "value": kwargs.get("exposure", 0)},
-            {"name": "Gain", "type": "int", "value": kwargs.get("gain", 0)},
-            {"name": "CCD Temp (C)", "type": "str", "value": kwargs.get("ccd_temperature", 0)},
-            {"name": "Spec Grating", "type": "int", "value": kwargs.get("grating", 0)},
-            {"name": "Series", "type": "str", "value": kwargs.get("series", 0)},
-            {"name": "Spec Sweep", "type": "int", "value": kwargs.get("spec_step", 0)},
+            {"name": "Date", "type": "str", "value": kwargs.get("date", "01/01/79"), "readonly":True},
+            {"name": "Series", "type": "str", "value": kwargs.get("series", 0), "readonly":True},
+            {"name": "Comments", "type": "text", "value": kwargs.get("comments", "NA"), "readonly":True},
+            {"name": "Exposure (s)", "type": "float", "value": kwargs.get("exposure", 0), "readonly":True},
+            {"name": "Gain", "type": "int", "value": kwargs.get("gain", 0), "readonly":True},
+            {"name": "CCD Image", "type": "str", "value": "[{}, {}, {}]".format(
+                *np.array(kwargs.get("ccd_image_settings", [-1]*6))[[1, 4, 5]]), "readonly":True},
+            {"name": "CCD Temp (C)", "type": "str", "value": kwargs.get("ccd_temperature", 0), "readonly":True},
+            {"name": "Spec Grating", "type": "int", "value": kwargs.get("grating", 0), "readonly":True},
+            {"name": "Spec Sweep", "type": "int", "value": kwargs.get("spec_step", 0), "readonly":True},
+            {"name":"Center Lambda (nm)", "type":"float", "value":kwargs.get("center_lambda", 0), "readonly":True},
+            {"name":"Offset (nm)", "type":"float", "value":kwargs.get("offset", 0)}
             ]},
         ]
-
+        try:
+            if self.__class__ == BaseWindow:
+                kwargs["parent"].addChildren(params)
+                kwargs["parent"].child("General Settings", "Offset (nm)").sigValueChanged.connect(
+                    self.updateOffset
+                )
+        except KeyError:
+            pass
         return params
 
     def openFile(self, filename):
@@ -300,17 +315,23 @@ class BaseWindow(QtGui.QMainWindow):
         # self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
         self.processSingleData(dataObj)
+        self.ui.ptFile.setToolTip(filename)
 
     def processSingleData(self, dataObj):
         self.dataObj = dataObj
         self.plotSpectrum()
-        params = self.genParameters(**dataObj.parameters)
-        self.specParams = Parameter.create(name=dataObj.fname, type='group', children=params)
-        self.ui.ptFile.setParameters(self.specParams, showTop=True)
+        p = Parameter.create(
+            name=dataObj.fname,
+            type='group')
+        params = self.genParameters(parent=p, **dataObj.parameters)
+        self.ui.ptFile.setParameters(p, showTop=True)
+
 
     @staticmethod
     def getWindowClass(fname):
         if 'hsg' in fname:
+            if "Images" in fname:
+                return HSGImageWindow
             return HSGWindow
         elif 'abs' in fname:
             return AbsWindow
@@ -336,6 +357,12 @@ class BaseWindow(QtGui.QMainWindow):
     def plotSpectrum(self):
         self.curveSpectrum.setData(*self.convertDataForPlot(self.dataObj.proc_data))
     def convertDataForPlot(self, data):
+        """
+        Return the proper units on the x-values to be used for plotting.
+        Takes the desired values from the GUI selection.
+        :param data:
+        :return:
+        """
         # Assumes data[:,0] is in eV
         x = data[:,0].copy()
         xType = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
@@ -421,6 +448,21 @@ class BaseWindow(QtGui.QMainWindow):
             self.plotSpectrum()
             self.plotSBFits()
             # self.ui.gSpectrum.addItem(self.sbLine)
+
+    def updateOffset(self, paramObj, val):
+        if self.dataObj is None: return
+        self.dataObj.parameters["offset"] = val
+
+        # convert back to nm, add the offset, reconvert
+        self.dataObj.ccd_data[:, 0] = 1239.84/ (self.dataObj.raw_data[:,0] + val)
+
+        if hasattr(self.dataObj, "proc_data"):
+            self.dataObj.proc_data[:, 0] = 1239.84 / (self.dataObj.raw_data[:, 0] + val)
+
+        self.processSingleData(self.dataObj)
+        if self.titlePath is not None:
+            self.updateTitle(path=self.titlePath)
+
 
     @staticmethod
     def __CHANGING_WINDOW_TITLE(): pass
@@ -519,8 +561,12 @@ class BaseWindow(QtGui.QMainWindow):
         if len(event.mimeData().urls()) == 1:
             filename = str(event.mimeData().urls()[0].toLocalFile())
             c = BaseWindow.getWindowClass(filename)
-            a = c(filename, parentWin=self)
-            fileList.append(a)
+            try:
+                a = c(filename, parentWin=self)
+            except Exception as e:
+                raise
+            else:
+                fileList.append(a)
         # Multiple files were dropped
         else:
             # Make a list of all of them, cuttingout the "seriesed" ones
@@ -652,7 +698,19 @@ class BaseWindow(QtGui.QMainWindow):
         wantedWN = 10000000./linenm
         sbn = (wantedWN-laserL)/FELL
 
-        self.specParams.childs[2].childs[0].setValue(sbn)
+        self.specParams.child("General Settings", "SB Number").setValue(sbn)
+
+    def saveProcessed(self):
+        global saveLoc
+        print "Saved Clicked"
+        if not self.dataObj:
+            print "Load a file first"
+        path = QtGui.QFileDialog.getSaveFileName(self, "Save File", saveLoc, "Text File (*.txt)")
+        if not path:
+            return
+        path = str(path)
+        saveLoc = path
+        self.dataObj.save_processing(os.path.basename(path), os.path.dirname(path))
 
     def calcFELFreq(self, sbList):
         params = self.specParams
@@ -703,6 +761,16 @@ class HSGWindow(BaseWindow):
             params.child("Laser Settings", "NIR Frequency").setValue(
                 params.child("Laser Settings", "NIR Frequency").opts["values"][idx]
             )
+            self.ui.tabWidget.setCurrentIndex(parent.ui.tabWidget.currentIndex())
+            [i.setChecked(False) for i in self.menuFitX.actions()]
+            [i.setChecked(True) for (i,j) in
+                zip(self.menuFitX.actions(), parent.menuFitX.actions()) if j.isChecked()]
+            self.plotFits()
+
+            # [i.setChecked(False) for i in self.menuSpecX.actions()]
+            # [i.setChecked(True) for (i,j) in
+            #     zip(self.menuSpecX.actions(), parent.menuSpecX.actions()) if j.isChecked()]
+            # self.plotFits()
         super(HSGWindow, self).inheritParent(parent)
 
     def processSingleData(self, dataObj):
@@ -713,9 +781,15 @@ class HSGWindow(BaseWindow):
         self.dataObj.infer_frequencies()
 
 
-        params = self.genParameters(**dataObj.parameters)
-        self.specParams = Parameter.create(name=dataObj.fname, type='group', children=params)
+        self.specParams = Parameter.create(
+            name=dataObj.fname,
+            type='group')
+        params = self.genParameters(parent=self.specParams, **dataObj.parameters)
         self.ui.ptFile.setParameters(self.specParams, showTop=True)
+
+        self.specParams.child("General Settings", "SB Number").sigValueChanging.connect(
+            self.updateSBLine
+        )
 
         self.curveFits = {ii: self.ui.gSpectrum.plot(pen='g', name=ii) for
                           ii in self.dataObj.full_dict}
@@ -730,7 +804,6 @@ class HSGWindow(BaseWindow):
         self.ui.ptFits.setParameters(self.fitParams)
 
         self.plotFits()
-
 
     def plotSBFits(self):
         xType = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
@@ -747,6 +820,26 @@ class HSGWindow(BaseWindow):
             y = hsg.gauss(x, *args)
             curve.setData(units(x), y/self.uisbDivideBy.value())
 
+    def updateSBLine(self, paramObj, val):
+        # print "updating line", self.sender(), args, kwargs
+
+        params = self.specParams
+        # see notes in calcFELFreq for explaination
+        # of following two lines
+        NIRL = float(
+            params.child("Laser Settings", "NIR Frequency").opts["values"][1].split()[0])
+        FELL = float(
+            params.child("FEL Settings", "FEL Frequency (cm-1)").opts["value"])
+
+        units = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
+
+        sbWN = NIRL + FELL*val
+        line = converter["wavenumber"][units](sbWN)
+
+        paramObj.blockSignals(True)
+        self.sbLine.setValue(line)
+        paramObj.blockSignals(False)
+
     def genParameters(self, **kwargs):
         if kwargs.get("nir_lambda", None) is not None:
             kwargs["nir_lambda"] = float(kwargs["nir_lambda"])
@@ -755,49 +848,63 @@ class HSGWindow(BaseWindow):
         # print "22recasting NIR_LAMBDA"
         # kwargs["nir_lambda"] = float(kwargs["nir_lambda"])
         # print 22, kwargs["nir_lambda"], type(kwargs["nir_lambda"])
-
+        params[-1]["children"].append(
+            {"name":"SB Number", "type":"float", "value":0, "step":0.05}
+        )
+        params.append(
+        {"name":"Sample Parameters", "type":"group", "children":[
+            {"name":"Sample", "type":"str", "value":kwargs.get("sample_name", "None?"), "readonly":True},
+            {"name":"Sample Temp", "type":"float", "value":kwargs.get("sample_Temp", -1), "readonly":True}
+            ]})
         params.append(
         {"name":"Laser Settings", "type":"group", "children":[
-            {"name":"NIR Power (mW)", "type":"float", "value":kwargs.get("nir_power", 0)},
+            {"name":"NIR Power (mW)", "type":"float", "value":kwargs.get("nir_power", 0), "readonly":True},
             {"name":"NIR Frequency", "type":"list",
                 "values":["{:.3f} nm".format(kwargs.get("nir_lambda", 0)),
                           "{:.2f} cm-1".format(1e7/kwargs.get("nir_lambda", 1))]},
-            {"name":"Center Lambda (nm)", "type":"float", "value":kwargs.get("center_lambda", 0)},
+            {"name":"NIR Polarization", "type":"str", "value":kwargs.get("nir_pol", "?"), "readonly":True},
+            {"name": "Detector Pol", "type": "float",
+                "value": kwargs.get("detectorHWP", "-1"), "readonly":True},
             {"name": "Fit NIR (cm-1)", "type": "float",
-                "value": kwargs.get("calculated NIR freq (cm-1)", 0)},
+                "value": kwargs.get("calculated NIR freq (cm-1)", 0), "readonly":True},
             {"name": "Fit THz (cm-1)", "type": "float",
-                "value": kwargs.get("calculated THz freq (cm-1)", 0)}
+                "value": kwargs.get("calculated THz freq (cm-1)", 0), "readonly":True}
             ]})
         params.append(
         {"name":"FEL Settings", "type":"group", "children":[
-            {"name":"SB Number", "type":"float", "value":0},
-            {"name":"Pulses", "type":"int", "value":np.mean(kwargs.get("fel_pulses", 0))},
+            {"name":"Pulses", "type":"int", "value":np.mean(kwargs.get("fel_pulses", 0)), "readonly":True},
             {"name":"FEL Energy (mJ)", "type": "str",
                 "value": "{:.1f} +/- {:.1f}".format(
                     kwargs.get("pulseEnergies", {"mean":-1})["mean"],
-                    kwargs.get("pulseEnergies", {"std": -1})["std"])},
+                    kwargs.get("pulseEnergies", {"std": -1})["std"]), "readonly":True},
             {"name":"Field Strength (kV/cm)", "type": "str",
                 "value": "{:.2f} +/- {:.2f}".format(
                     kwargs.get("fieldStrength", {"mean":-1})["mean"],
-                    kwargs.get("fieldStrength", {"std": -1})["std"])},
-            {"name": "Transmission", "type": "float", "value": kwargs.get("fel_transmission", 0)},
+                    kwargs.get("fieldStrength", {"std": -1})["std"]), "readonly":True},
+            {"name": "Transmission", "type": "float", "value": kwargs.get("fel_transmission", 0), "readonly":True},
             {"name": "Pyro Voltage", "type": "str",
                 "value": "{:.1f} +/- {:.1f} mV".format(
                     kwargs.get("pyroVoltage", {"mean":-1})["mean"]*1e3,
-                    kwargs.get("pyroVoltage", {"std": -1})["std"]*1e3)},
+                    kwargs.get("pyroVoltage", {"std": -1})["std"]*1e3), "readonly":True},
             {"name": "CD Ratio", "type": "str",
                 "value": "{:.1f} +/- {:.1f}".format(
                     kwargs.get("cdRatios", {"mean":-1})["mean"]*1e2,
-                    kwargs.get("cdRatios", {"std": -1})["std"]*1e2)},
+                    kwargs.get("cdRatios", {"std": -1})["std"]*1e2), "readonly":True},
             {"name": "FP Time", "type": "str",
                 "value": "{:.0f} +/- {:.0f} ns".format(
                     kwargs.get("fpTime", {"mean":-1})["mean"]*1e3,
-                    kwargs.get("fpTime", {"std": -1})["std"]*1e3)},
-            {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0)},
-            {"name":"FEL Frequency (cm-1)", "type":"float", "value":kwargs.get("fel_lambda", 0)}
+                    kwargs.get("fpTime", {"std": -1})["std"]*1e3), "readonly":True},
+            {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0), "readonly":True},
+            {"name":"FEL Frequency (cm-1)", "type":"float", "value":kwargs.get("fel_lambda", 0), "readonly":True}
             ]})
+        try:
+            kwargs["parent"].addChildren(params)
+            kwargs["parent"].child("General Settings", "Offset (nm)").sigValueChanged.connect(
+                self.updateOffset
+            )
+        except KeyError:
+            raise
         return params
-
 
     def genFitParams(self, sbList):
         p = []
@@ -815,6 +922,11 @@ class HSGWindow(BaseWindow):
             ]}
             p.append(d)
         return p
+
+    def updateOffset(self, paramObj, val):
+        [self.ui.gSpectrum.getPlotItem().removeItem(ii) for ii in self.curveFits.values()]
+        super(HSGWindow, self).updateOffset(paramObj, val)
+        self.updateSBCalc()
 
 
 class AbsWindow(BaseWindow):
@@ -854,13 +966,13 @@ class ComparisonWindow(QtGui.QMainWindow):
         # self.legend.setParentItem(self.gPlot.plotItem)
         self.menuBar().setNativeMenuBar(False)
 
-        removeItems = QtGui.QAction("Remove Selected Items", self.menuBar())
-        removeItems.triggered.connect(self.removeSelectedLines)
-        self.menuBar().addAction(removeItems)
+        # removeItems = QtGui.QAction("Remove Selected Items", self.menuBar())
+        # removeItems.triggered.connect(self.removeSelectedLines)
+        # self.menuBar().addAction(removeItems)
 
-        changeColor = QtGui.QAction("Change Line Color", self.menuBar())
-        changeColor.triggered.connect(self.changeLineColor)
-        self.menuBar().addAction(changeColor)
+        # changeColor = QtGui.QAction("Change Line Color", self.menuBar())
+        # changeColor.triggered.connect(self.changeLineColor)
+        # self.menuBar().addAction(changeColor)
 
         self.show()
 
@@ -878,12 +990,15 @@ class ComparisonWindow(QtGui.QMainWindow):
         if len(data[0])<100:
             symbol = 'o'
         # if label is not None:
-            # self.curveList[p] = label
             # self.legend.addItem(p, label)
+        color = pg.intColor(len(self.curveList), hues=20)
         p = self.gPlot.plot(data[0], data[1],
-                                     pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)),
+                                     pen=color,
                                      symbol=symbol,
+                                    symbolPen=color,
+                                    symbolBrush=color,
                                     name=label)
+        self.curveList[p] = label
         # p = self.gPlot.plotItem.plot(data[0], data[1],
         #                              pen=pg.mkPen(pg.intColor(len(self.curveList), hues=20)),
         #                              symbol=symbol)
@@ -961,18 +1076,70 @@ class ComparisonWindow(QtGui.QMainWindow):
         pen.setColor(color)
         p.setPen(pen)
 
+class HSGImageWindow(HSGWindow):
+    # dataClass = object
+    def __init__(self, *args, **kwargs):
+        super(HSGImageWindow, self).__init__(*args, **kwargs)
+
+    def inheritParent(self, parent):
+        if isinstance(parent, HSGImageWindow):
+            self.ui.gSpectrum.setLevels(*parent.ui.gSpectrum.ui.histogram.getLevels())
+
+
+    def initUI(self):
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+
+        # Set arbitrary parent for garbage colection
+        self.ui.gSpectrum.setParent(QtGui.QWidget())
+
+        # add image plot to it.
+        self.ui.gSpectrum = ipg.ImageView(self.ui.splitSpectrum)
+        self.ui.gSpectrum.view.setAspectLocked(False)
+        self.ui.splitSpectrum.setStretchFactor(1, 10)
+        p = Parameter.create(name='Open a File', type='group')
+        params = self.genParameters(parent=p)
+        # p.addChildren(params)
+        self.ui.ptFile.setParameters(p, showTop=True)
+        self.specParams = p
+        ret = self.makeTitleActionList()
+        self.ui.menubar.addMenu(ret)
+        self.ret = ret
+
+
+        self.show()
+
+    def processSingleData(self, dataObj):
+        super(HSGWindow, self).processSingleData(dataObj)
+        # Compensate for the baseclass (which I'm too lazy to
+        # subclass and correct) converting nm to eV in a typical file
+        self.dataObj.proc_data[:, 0] = 1239.84/self.dataObj.proc_data[:,0]
+        self.plotSpectrum()
+
+        # params = self.genParameters(**dataObj.parameters)
+        # self.specParams = Parameter.create(name=dataObj.fname, type='group',
+        #                                    children=params)
+        # self.ui.ptFile.setParameters(self.specParams, showTop=True)
+
+
+    def plotSpectrum(self):
+        self.ui.gSpectrum.setImage(self.dataObj.proc_data)
+
 def updateFileClose(obj):
     try:
         fileList.remove(obj)
     except Exception as e:
         print "Error removing file from fileList:", e, obj
-
+    if not fileList and not combinedWindowList:
+        ex.exit(0)
 
 def updateCompClose(obj):
     try:
         combinedWindowList.remove(obj)
     except Exception as e:
         print "error removign from list,", e
+    if not fileList and not combinedWindowList:
+        ex.exit(0)
 
 def updateFocusList(obj):
     if obj not in combinedWindowList:
@@ -1015,4 +1182,4 @@ if __name__=="__main__":
     consoleWindow.lower()
 
     sys.exit(ex.exec_())
-    ex.exec_()
+    # ex.exec_()

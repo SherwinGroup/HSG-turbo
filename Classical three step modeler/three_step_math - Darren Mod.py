@@ -15,6 +15,7 @@ import pyqtgraph as pg
 from three_step_first_ui import Ui_Form
 import numpy as np
 import scipy.interpolate as spi
+import scipy.optimize as spo
 
 import matplotlib.pyplot as plt
 
@@ -68,6 +69,11 @@ class Window(QtGui.QWidget):
         self.ui.lineEdit_thz_field.editingFinished.connect(self.get_changes)
         self.ui.lineEdit_e_bind.editingFinished.connect(self.get_changes)
         self.ui.lineEdit_phase.editingFinished.connect(self.get_changes)
+
+        self.ui.lineEdit_tot_ke_rec.editingFinished.connect(self.calculatePhaseFromEnergy)
+        self.ui.lineEdit_approx_sb.editingFinished.connect(self.calculatePhaseFromSBNum)
+        self.ui.lineEdit_ionization_time.editingFinished.connect(self.calculatePhaseFromIonizationTime)
+        self.ui.lineEdit_recollision_time.editingFinished.connect(self.calculatePhaseFromRecollisionTime)
 
         self.ui.lineEdit_slew_rate_time_fs.editingFinished.connect(self.get_slew_rate)
         self.ui.lineEdit_splitting_meV.editingFinished.connect(self.get_slew_rate)
@@ -129,6 +135,92 @@ class Window(QtGui.QWidget):
         self.ui.lineEdit_slew_rate.setText('{:.3f}'.format(self.data.energy_slew_rate_meV_fs))
         self.ui.lineEdit_diabatic_prob.setText('{:.3f}'.format(self.data.diabatic_probability))
 
+    def calculatePhaseFromIonizationTime(self):
+        thz_freq = float(self.ui.lineEdit_thz_freq.text())
+        ion_time = float(self.ui.lineEdit_ionization_time.text())*1e-3
+
+        phi = (2*np.pi*thz_freq * ion_time + np.pi/2)*180./np.pi
+
+        self.ui.lineEdit_ionization_time.blockSignals(True)
+        self.ui.lineEdit_phase.setText("{:.3f}".format(phi))
+        self.ui.lineEdit_ionization_time.blockSignals(False)
+        self.get_changes()
+
+    def calculatePhaseFromRecollisionTime(self):
+        recoltime = float(self.ui.lineEdit_recollision_time.text())*1e-3
+
+        m_e_eff = float(self.ui.lineEdit_m_e_eff.text())
+        m_h_eff = float(self.ui.lineEdit_m_h_eff.text())
+        thz_freq = float(self.ui.lineEdit_thz_freq.text())
+        thz_field = float(self.ui.lineEdit_thz_field.text())
+        e_bind = float(self.ui.lineEdit_e_bind.text())
+
+        def minir(phi):
+            try:
+                data = Trajectories(m_e_eff, m_h_eff, thz_freq, thz_field, e_bind, phi)
+                ion_time = (phi*np.pi/180. - np.pi / 2) / (2 * np.pi * thz_freq)
+            except IndexError:
+                return np.inf
+            return float(data.recollision_time_ps) + ion_time
+
+        f = lambda ph: np.abs(recoltime-minir(ph))
+        p = spo.minimize(f, 60, method="Nelder-Mead")
+
+        self.ui.lineEdit_recollision_time.blockSignals(True)
+        self.ui.lineEdit_phase.setText("{:.3f}".format(p.x[0]))
+        self.ui.lineEdit_recollision_time.blockSignals(False)
+        self.get_changes()
+
+    def calculatePhaseFromEnergy(self):
+        energy = float(self.ui.lineEdit_tot_ke_rec.text())
+
+        m_e_eff = float(self.ui.lineEdit_m_e_eff.text())
+        m_h_eff = float(self.ui.lineEdit_m_h_eff.text())
+        thz_freq = float(self.ui.lineEdit_thz_freq.text())
+        thz_field = float(self.ui.lineEdit_thz_field.text())
+        e_bind = float(self.ui.lineEdit_e_bind.text())
+
+        def minir(phi):
+            try:
+                data = Trajectories(m_e_eff, m_h_eff, thz_freq, thz_field, e_bind, phi)
+            except IndexError:
+                return np.inf
+            return float(data.total_kenergy_rec_meV)
+
+        f = lambda ph: np.abs(energy-minir(ph))
+
+        p = spo.minimize(f, 60, method="Nelder-Mead")
+
+        self.ui.lineEdit_tot_ke_rec.blockSignals(True)
+        self.ui.lineEdit_phase.setText("{:.3f}".format(p.x[0]))
+        self.ui.lineEdit_tot_ke_rec.blockSignals(False)
+        self.get_changes()
+
+    def calculatePhaseFromSBNum(self):
+        sb = float(self.ui.lineEdit_approx_sb.text())
+
+        m_e_eff = float(self.ui.lineEdit_m_e_eff.text())
+        m_h_eff = float(self.ui.lineEdit_m_h_eff.text())
+        thz_freq = float(self.ui.lineEdit_thz_freq.text())
+        thz_field = float(self.ui.lineEdit_thz_field.text())
+        e_bind = float(self.ui.lineEdit_e_bind.text())
+
+        def minir(phi):
+            try:
+                data = Trajectories(m_e_eff, m_h_eff, thz_freq, thz_field, e_bind, phi)
+            except IndexError:
+                return np.inf
+            return float(data.approx_sb)
+
+        f = lambda ph: np.abs(sb-minir(ph))
+
+        p = spo.minimize(f, 60, method="Nelder-Mead")
+
+        # self.ui.lineEdit_tot_ke_rec.blockSignals(True)
+        self.ui.lineEdit_phase.setText("{:.3f}".format(p.x[0]))
+        # self.ui.lineEdit_tot_ke_rec.blockSignals(False)
+        self.get_changes()
+
     def choose_folder(self):
         hint = 'Choose save directory'
         self.file_dir = str(QtGui.QFileDialog.getExistingDirectory(self, hint))
@@ -165,7 +257,7 @@ class Trajectories(object):
         self.thz_freq = thz_freq * 1e12 # in Hz
         self.thz_field = thz_field * 1e5 # in V/m
         self.e_bind = e_bind * q_e * 1e-3 # in J
-        self.phi = phi * np.pi / 180 # in rad
+        self.phi = float(phi) * np.pi / 180 # in rad
 
         self.parts_dict = {'eff. electron mass': '{:.4f}'.format(m_e_eff),
                            'eff. hole mass': '{:.4f}'.format(m_h_eff),
@@ -173,7 +265,7 @@ class Trajectories(object):
                            'thz field (kV/cm)': '{:.2f}'.format(thz_field),
                            'thz frequency (THz)': '{:.3f}'.format(thz_freq),
                            'exciton binding energy (eV)': '{:.3f}'.format(e_bind),
-                           'tunneling phase (deg)': '{:.3f}'.format(phi)}
+                           'tunneling phase (deg)': '{:.3f}'.format(self.phi)}
         self.results_dict = {}
         self.update_stuff()
 
