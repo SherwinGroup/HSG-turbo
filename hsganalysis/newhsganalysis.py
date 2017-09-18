@@ -4362,7 +4362,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.plot(x_vals, y_vals, label="Non-nan Data")
 
     zeroPadding = len(x_vals)
-    print "zero padding", zeroPadding  # This needs to be this way because truncation is bad and actually zero padding
+    # print "zero padding", zeroPadding  # This needs to be this way because truncation is bad and actually zero padding
     N = len(x_vals)
     onePerc = int(0.01 * N)
     x1 = np.mean(x_vals[:onePerc])
@@ -4413,7 +4413,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
     y_fourier[smoothIdx] *= smoothr
     '''
 
-    print abs(y_fourier[-10:])
+    # print abs(y_fourier[-10:])
     butterworth = np.sqrt(1 / (1 + (x_fourier / cutoff) ** 100))
     y_fourier *= butterworth
 
@@ -4421,7 +4421,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
         plt.plot(x_fourier, np.abs(y_fourier), label="FFT with removed parts")
         a = plt.legend()
         a.draggable(True)
-        print "y_fourier", len(y_fourier)
+        # print "y_fourier", len(y_fourier)
 
     # invert the FFT
     y_vals = fft.ifft(y_fourier, n=zeroPadding)
@@ -4438,7 +4438,7 @@ def low_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
 
     if inspectPlots:
         plt.figure("Real Space")
-        print x_vals.size, y_vals.size
+        # print x_vals.size, y_vals.size
         plt.plot(x_vals, y_vals, linewidth=3, label="Smoothed Data")
         a = plt.legend()
         a.draggable(True)
