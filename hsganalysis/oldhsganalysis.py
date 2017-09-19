@@ -308,7 +308,7 @@ class CCD(object):
                     consecutive_null_odd = 0
             else:
                 print "I could not find sideband with order", order
-                last_sb = last_sb - thz_freq
+                last_sb = last_sb + thz_freq
                 consecutive_null_sb += 1
                 if order % 2 == 1:
                     consecutive_null_odd += 1
@@ -710,7 +710,7 @@ class CCD(object):
         
         origin_import_fits = '\nSideband,Center energy,error,Sideband strength,error,Linewidth,error\norder,eV,,arb. u.,,meV,,arb. u.,\n' + marker
         fits_header = '#' + parameter_str + '\n#' + self.description[:-2] + origin_import_fits
-
+        
         np.savetxt(os.path.join(folder_str, spectra_fname), self.hsg_data, delimiter=',',
                    header=spec_header, comments='', fmt='%f')
         np.savetxt(os.path.join(folder_str, fit_fname), self.sb_results, delimiter=',',
