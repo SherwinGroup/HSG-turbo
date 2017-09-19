@@ -25,6 +25,15 @@ except:
 fileList = []
 combinedWindowList = []
 
+class myDict(dict):
+    def get(self, k, d=None):
+        try:
+            return super(myDict, self).get(k, d)
+        except Exception as e:
+            print "AN ERROR IN GOT", e
+            return {"mean":-1,"std":-1}
+
+
 saveLoc = r"Z:\~Darren\Analysis\2017"
 class ComboParameter(pTypes.WidgetParameterItem):
     # sigTreeStateChanged = QtCore.pyqtSignal(object, object)
@@ -106,9 +115,6 @@ class BaseWindow(QtGui.QMainWindow):
         self.ui.ptFile.setParameters(p, showTop=True)
         self.specParams = p
 
-        self.sbLine = pg.InfiniteLine(pos = 750, movable=True)
-        self.ui.gSpectrum.addItem(self.sbLine)
-        self.sbLine.sigPositionChanged.connect(self.updateSBCalc)
         self.ui.splitSpectrum.setStretchFactor(1, 10)
 
         self.fitsPlot = self.ui.gFits.plot(fmt='o')
@@ -323,7 +329,10 @@ class BaseWindow(QtGui.QMainWindow):
         p = Parameter.create(
             name=dataObj.fname,
             type='group')
-        params = self.genParameters(parent=p, **dataObj.parameters)
+        try:
+            params = self.genParameters(parent=p, **dataObj.parameters)
+        except TypeError:
+            params = self.genParametersOldFormat(parent=p, **dataObj.parameters)
         self.ui.ptFile.setParameters(p, showTop=True)
 
 
@@ -333,10 +342,12 @@ class BaseWindow(QtGui.QMainWindow):
             if "Images" in fname:
                 return HSGImageWindow
             return HSGWindow
-        elif 'abs' in fname:
+        elif 'abs' in os.path.basename(fname):
             return AbsWindow
-        elif 'pl' in fname:
+        elif 'pl' in os.path.basename(fname):
             return PLWindow
+        elif 'PMT' in fname:
+            return HSGPMTWindow
         else:
             return BaseWindow
 
@@ -356,6 +367,7 @@ class BaseWindow(QtGui.QMainWindow):
 
     def plotSpectrum(self):
         self.curveSpectrum.setData(*self.convertDataForPlot(self.dataObj.proc_data))
+
     def convertDataForPlot(self, data):
         """
         Return the proper units on the x-values to be used for plotting.
@@ -403,15 +415,15 @@ class BaseWindow(QtGui.QMainWindow):
         [i.setChecked(False) for i in self.menuSpecX.actions() if i is not sent] #uncheck the other one
 
         if self.dataObj is not None: #reupdate plots if we've already loaded some data
-            sb = self.sbLine.value()
+            # sb = self.sbLine.value()
             # self.ui.gSpectrum.getPlotItem().clear()
 
             self.plotSpectrum()
-            self.plotSBFits()
+            # self.plotSBFits()
 
-
-            sb = converter[oldName][newName](sb)
-            self.sbLine.setValue(sb)
+            # sb = converter[oldName][newName](sb)
+            # self.sbLine.setValue(sb)
+        return oldName, newName
 
     def parseSpecYChange(self, val=None):
         self.ui.gSpectrum.getPlotItem().setLogMode(x=False, y=val)
@@ -462,7 +474,6 @@ class BaseWindow(QtGui.QMainWindow):
         self.processSingleData(self.dataObj)
         if self.titlePath is not None:
             self.updateTitle(path=self.titlePath)
-
 
     @staticmethod
     def __CHANGING_WINDOW_TITLE(): pass
@@ -644,6 +655,7 @@ class BaseWindow(QtGui.QMainWindow):
         """
         # d = [self.ui.gSpectrum.plotItem.curves[1].xData,
         #      self.ui.gSpectrum.plotItem.curves[1].yData]
+        if self.dataObj is None: return
         self.createCompWindow(data = self.convertDataForPlot(self.dataObj.proc_data), p = val)
 
     def createCompWindow(self, data, p, label=None):
@@ -656,8 +668,8 @@ class BaseWindow(QtGui.QMainWindow):
                 a = inners[-1] # last focused window
                 # Data may not be passed if you make a comparision window
                 # Before loading any files, don't throw errors
-                if not None in data:
-                    a.addCurve(data, str(self.windowTitle()))
+                # if not None in data:
+                a.addCurve(data, str(self.windowTitle()))
                 return
 
         # If there's no window or not dragged on top of something,
@@ -670,8 +682,8 @@ class BaseWindow(QtGui.QMainWindow):
 
         # Data may not be passed if you make a comparision window
         # Before loading any files, don't throw errors
-        if not None in data:
-            a.addCurve(data, str(self.windowTitle()))
+        # if not None in data:
+        a.addCurve(data, str(self.windowTitle()))
         # Move the window to the drag point
         a.move(p.toQPoint() - QtCore.QPoint(a.geometry().width()/2, a.geometry().height()/2))
         # Add it to the list of opened windows
@@ -680,29 +692,8 @@ class BaseWindow(QtGui.QMainWindow):
     @staticmethod
     def __PROCESSING_CONTROLS(): pass
 
-    def updateSBCalc(self):
-        params = self.specParams
-        # see notes in calcFELFreq for explaination
-        # of following two lines
-        NIRL = float(
-            params.child("Laser Settings", "NIR Frequency").opts["values"][0].split()[0])
-        FELL = float(
-            params.child("FEL Settings", "FEL Frequency (cm-1)").opts["value"])
-        rawVal = self.sbLine.value()
-        units = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
-        linenm = converter[units]["nm"](rawVal)
-
-
-
-        laserL = 10000000./NIRL
-        wantedWN = 10000000./linenm
-        sbn = (wantedWN-laserL)/FELL
-
-        self.specParams.child("General Settings", "SB Number").setValue(sbn)
-
     def saveProcessed(self):
         global saveLoc
-        print "Saved Clicked"
         if not self.dataObj:
             print "Load a file first"
         path = QtGui.QFileDialog.getSaveFileName(self, "Save File", saveLoc, "Text File (*.txt)")
@@ -730,9 +721,17 @@ class BaseWindow(QtGui.QMainWindow):
 
         for sb in sbList:
             peakPos = 10000000*sb[1]/1239.84
-            spacings.append(round(peakPos-laserL)/sb[0])
-
-        return np.mean(spacings)
+            try:
+                spacings.append(round(peakPos-laserL)/sb[0])
+            except RuntimeWarning:
+                # divide by zero on 0th order sideband (laser line)
+                pass
+        try:
+            felFreq = np.mean(spacings)
+        except RuntimeWarning:
+            # Warning when no sidebands
+            felFreq = 0
+        return felFreq
 
     @staticmethod
     def __CLEANING_UP(): pass
@@ -742,13 +741,36 @@ class BaseWindow(QtGui.QMainWindow):
         super(BaseWindow, self).closeEvent(event)
 
 
+class HSGPMTWindow(BaseWindow):
+    dataClass = hsg.HighSidebandPMT
+
+    def processSingleData(self, dataObj):
+        dataObj.process_sidebands()
+        super(HSGPMTWindow, self).processSingleData(dataObj)
+        self.plotFits()
+
+    def plotSpectrum(self):
+        self.curveSpectrum.setData(
+            *self.convertDataForPlot(
+                self.dataObj.sb_dict[self.dataObj.initial_sb]
+            )
+        )
+
+    def plotFits(self):
+        self.fitsPlot.setData(
+            *self.dataObj.initial_data[:,[0,-1]].T
+        )
+
+
 class HSGWindow(BaseWindow):
     dataClass = hsg.HighSidebandCCD
     dataSubclasses = [hsg.FullHighSideband]
     def __init__(self, *args, **kwargs):
         self.curveFits = {}
         super(HSGWindow, self).__init__(*args, **kwargs)
-
+        self.sbLine = pg.InfiniteLine(pos = 750, movable=True)
+        self.ui.gSpectrum.addItem(self.sbLine)
+        self.sbLine.sigPositionChanged.connect(self.updateSBCalc)
 
     def inheritParent(self, parent):
         if isinstance(parent, HSGWindow):
@@ -784,10 +806,13 @@ class HSGWindow(BaseWindow):
         self.specParams = Parameter.create(
             name=dataObj.fname,
             type='group')
-        params = self.genParameters(parent=self.specParams, **dataObj.parameters)
+        try:
+            params = self.genParameters(parent=self.specParams, **dataObj.parameters)
+        except TypeError:
+            params = self.genParametersOldFormat(parent=self.specParams, **dataObj.parameters)
         self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
-        self.specParams.child("General Settings", "SB Number").sigValueChanging.connect(
+        self.specParams.child("General Settings", "SB Number").sigValueChanged.connect(
             self.updateSBLine
         )
 
@@ -820,8 +845,24 @@ class HSGWindow(BaseWindow):
             y = hsg.gauss(x, *args)
             curve.setData(units(x), y/self.uisbDivideBy.value())
 
+    def updateSBCalc(self):
+        params = self.specParams
+        # see notes in calcFELFreq for explaination
+        # of following two lines
+        NIRL = float(
+            params.child("Laser Settings", "NIR Frequency").opts["values"][1].split()[0])
+        FELL = float(
+            params.child("FEL Settings", "FEL Frequency (cm-1)").opts["value"])
+        rawVal = self.sbLine.value()
+        units = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
+        currentWN = converter[units]["wavenumber"](rawVal)
+
+        sbn = (currentWN-NIRL)/FELL
+
+        self.specParams.child("General Settings", "SB Number").setValue(sbn,
+                                    blockSignal = self.updateSBLine)
+
     def updateSBLine(self, paramObj, val):
-        # print "updating line", self.sender(), args, kwargs
 
         params = self.specParams
         # see notes in calcFELFreq for explaination
@@ -833,8 +874,10 @@ class HSGWindow(BaseWindow):
 
         units = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
 
+
         sbWN = NIRL + FELL*val
         line = converter["wavenumber"][units](sbWN)
+        print "Setting to", line, "from", units
 
         paramObj.blockSignals(True)
         self.sbLine.setValue(line)
@@ -845,9 +888,9 @@ class HSGWindow(BaseWindow):
             kwargs["nir_lambda"] = float(kwargs["nir_lambda"])
         params = super(HSGWindow, self).genParameters(**kwargs)
 
-        # print "22recasting NIR_LAMBDA"
-        # kwargs["nir_lambda"] = float(kwargs["nir_lambda"])
-        # print 22, kwargs["nir_lambda"], type(kwargs["nir_lambda"])
+        kwargs = myDict(kwargs)
+
+
         params[-1]["children"].append(
             {"name":"SB Number", "type":"float", "value":0, "step":0.05}
         )
@@ -870,6 +913,7 @@ class HSGWindow(BaseWindow):
             {"name": "Fit THz (cm-1)", "type": "float",
                 "value": kwargs.get("calculated THz freq (cm-1)", 0), "readonly":True}
             ]})
+
         params.append(
         {"name":"FEL Settings", "type":"group", "children":[
             {"name":"Pulses", "type":"int", "value":np.mean(kwargs.get("fel_pulses", 0)), "readonly":True},
@@ -904,7 +948,34 @@ class HSGWindow(BaseWindow):
             )
         except KeyError:
             raise
+
         return params
+
+    def genParametersOldFormat(self, **kwargs):
+        """
+        Generate parameter tree from old version of the head file. Force/coerce header
+        information to match what we currently need.
+        :param kwargs:
+        :return:
+        """
+
+        # if, for some reason, you don't want to be changign the new dict
+        newDict = dict(kwargs)
+        # One big change was only saving statistical information of the FEL pulses
+        # etc. Caclulate that information and update the dict.
+        if isinstance(kwargs.get("fieldStrength", {}), list):
+            stats = ["kurtosis", "mean", "skew", "std"]
+            sets = ["fieldStrength", "fieldInt", "cdRatios", "fpTime", "pyroVoltage"]
+            newDict["fel_pulses"] = sum(kwargs["fel_pulses"])
+
+            newDict.update(
+                {set: {stat: np.mean(
+                                    map(lambda x:x.get(stat, '-1'), kwargs[set]) )
+                                for stat in stats}
+                for set in sets}
+            )
+
+        return self.genParameters(**newDict)
 
     def genFitParams(self, sbList):
         p = []
@@ -928,6 +999,65 @@ class HSGWindow(BaseWindow):
         super(HSGWindow, self).updateOffset(paramObj, val)
         self.updateSBCalc()
 
+    def parseSpecXChange(self, val=None):
+        names = super(HSGWindow, self).parseSpecXChange(val=val)
+        if names is None: return
+        oldName, newName = names
+
+        if self.dataObj is not None: #reupdate plots if we've already loaded some data
+            sb = self.sbLine.value()
+            self.plotSBFits()
+            sb = converter[oldName][newName](sb)
+            self.sbLine.setValue(sb)
+
+        return oldName, newName
+
+
+class HSGImageWindow(HSGWindow):
+    # dataClass = object
+    def __init__(self, *args, **kwargs):
+        super(HSGImageWindow, self).__init__(*args, **kwargs)
+        self.ui.gSpectrum.removeItem(self.sbLine)
+
+
+    def inheritParent(self, parent):
+        if isinstance(parent, HSGImageWindow):
+            self.ui.gSpectrum.setLevels(*parent.ui.gSpectrum.ui.histogram.getLevels())
+
+
+    def initUI(self):
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+
+        # Set arbitrary parent for garbage colection
+        self.ui.gSpectrum.setParent(QtGui.QWidget())
+
+        # add image plot to it.
+        self.ui.gSpectrum = ipg.ImageView(self.ui.splitSpectrum)
+        self.ui.gSpectrum.view.setAspectLocked(False)
+        self.ui.splitSpectrum.setStretchFactor(1, 10)
+        p = Parameter.create(name='Open a File', type='group')
+        params = self.genParameters(parent=p)
+        # p.addChildren(params)
+        self.ui.ptFile.setParameters(p, showTop=True)
+        self.specParams = p
+        ret = self.makeTitleActionList()
+        self.ui.menubar.addMenu(ret)
+        self.ret = ret
+
+
+        self.show()
+
+    def processSingleData(self, dataObj):
+        # Reload the data to correct for base HSG class removing first few lines
+        dataObj.proc_data = np.genfromtxt(dataObj.fname, delimiter=',')
+        super(HSGWindow, self).processSingleData(dataObj)
+        self.plotSpectrum()
+
+
+
+    def plotSpectrum(self):
+        self.ui.gSpectrum.setImage(self.dataObj.proc_data)
 
 class AbsWindow(BaseWindow):
     dataClass = hsg.Absorbance
@@ -1076,55 +1206,6 @@ class ComparisonWindow(QtGui.QMainWindow):
         pen.setColor(color)
         p.setPen(pen)
 
-class HSGImageWindow(HSGWindow):
-    # dataClass = object
-    def __init__(self, *args, **kwargs):
-        super(HSGImageWindow, self).__init__(*args, **kwargs)
-
-    def inheritParent(self, parent):
-        if isinstance(parent, HSGImageWindow):
-            self.ui.gSpectrum.setLevels(*parent.ui.gSpectrum.ui.histogram.getLevels())
-
-
-    def initUI(self):
-        self.ui = Ui_MainWindow()
-        self.ui.setupUi(self)
-
-        # Set arbitrary parent for garbage colection
-        self.ui.gSpectrum.setParent(QtGui.QWidget())
-
-        # add image plot to it.
-        self.ui.gSpectrum = ipg.ImageView(self.ui.splitSpectrum)
-        self.ui.gSpectrum.view.setAspectLocked(False)
-        self.ui.splitSpectrum.setStretchFactor(1, 10)
-        p = Parameter.create(name='Open a File', type='group')
-        params = self.genParameters(parent=p)
-        # p.addChildren(params)
-        self.ui.ptFile.setParameters(p, showTop=True)
-        self.specParams = p
-        ret = self.makeTitleActionList()
-        self.ui.menubar.addMenu(ret)
-        self.ret = ret
-
-
-        self.show()
-
-    def processSingleData(self, dataObj):
-        super(HSGWindow, self).processSingleData(dataObj)
-        # Compensate for the baseclass (which I'm too lazy to
-        # subclass and correct) converting nm to eV in a typical file
-        self.dataObj.proc_data[:, 0] = 1239.84/self.dataObj.proc_data[:,0]
-        self.plotSpectrum()
-
-        # params = self.genParameters(**dataObj.parameters)
-        # self.specParams = Parameter.create(name=dataObj.fname, type='group',
-        #                                    children=params)
-        # self.ui.ptFile.setParameters(self.specParams, showTop=True)
-
-
-    def plotSpectrum(self):
-        self.ui.gSpectrum.setImage(self.dataObj.proc_data)
-
 def updateFileClose(obj):
     try:
         fileList.remove(obj)
@@ -1159,10 +1240,12 @@ converterArr = [               #nm                        #eV                   
                  [lambda x: 10000000./x, lambda x: 1239.84/x/10000000., lambda x: x                   ]  # wn
 ]
 
+# converter[A][B](x):
+#    convert x from A to B.
 converter = {
     "nm":         {"nm": lambda x: x,           "eV": lambda x:1239.84/x,            "wavenumber": lambda x: 10000000./x},
-    "eV":         {"nm": lambda x: 1239.84/x,   "eV": lambda x: x,                   "wavenumber":lambda x: 10000000. * x/1239.84},
-    "wavenumber": {"nm": lambda x: 10000000./x, "eV": lambda x: 1239.84/x/10000000., "wavenumber": lambda x: x}
+    "eV":         {"nm": lambda x: 1239.84/x,   "eV": lambda x: x,                   "wavenumber":lambda x: 8065.56 * x},
+    "wavenumber": {"nm": lambda x: 10000000./x, "eV": lambda x: x/8065.56, "wavenumber": lambda x: x}
 }
 
 
@@ -1177,7 +1260,10 @@ if __name__=="__main__":
     print "made window"
 
     import pyqtgraph.console as pgc
-    consoleWindow = pgc.ConsoleWidget(namespace={"fl":fileList,"np": np, "cl":combinedWindowList, "pg":pg})
+    consoleWindow = pgc.ConsoleWidget(namespace={"fl":fileList,"np": np,
+                                                 "cl":combinedWindowList,
+                                                 "pg":pg,
+                                                 "conv":converter})
     consoleWindow.show()
     consoleWindow.lower()
 
