@@ -6,7 +6,7 @@ Created on Mon Jan 18 09:53:27 2016
 
 "Brevity required, prurience preferred"
 """
-from __future__ import division
+
 import sys
 import json
 from PyQt4 import QtGui

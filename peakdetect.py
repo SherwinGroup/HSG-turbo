@@ -7,13 +7,13 @@ Created on Sat Feb  7 11:11:28 2015
 "Brevity required, prurience preferred"
 """
 
-from __future__ import division
+
 import numpy as np
 import matplotlib.pyplot as plt
 
 test = np.genfromtxt("fullNIRpower000deg128.txt")
 
-print test
+print(test)
 plt.close('all')
 
 plt.plot(test[:,0], test[:,1])
@@ -42,7 +42,7 @@ def peak_detect(x_axis, y_axis, window=10):
         check_ave = np.mean(abs(check_y[np.isfinite(check_y)]))
         check_value = y_axis_temp[test_value]
         if check_value == check_max and check_value > 4 * check_ave:
-            print check_ave
+            print(check_ave)
             max_x.append(x_axis[index])
             max_y.append(y_axis[index])
             if check_value > 8 * check_ave:
@@ -61,6 +61,6 @@ plt.show()
 
 newx = [10000000/elem for elem in x]
 plt.figure()
-plt.plot(range(len(x)), newx, 'o')
+plt.plot(list(range(len(x))), newx, 'o')
 plt.show()
-print x, y
+print(x, y)

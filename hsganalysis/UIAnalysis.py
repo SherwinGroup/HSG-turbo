@@ -13,10 +13,10 @@ from PyQt4 import QtCore, QtGui
 from pyqtgraph.parametertree import Parameter
 
 # import hsganalysis as hsg # local file, not global, no hsg.hsg
-import newhsganalysis as hsg
+from . import newhsganalysis as hsg
 
-from UI.mainWin_ui import Ui_MainWindow
-from UI.draggablePlotWidget import DraggablePlotWidget
+from .UI.mainWin_ui import Ui_MainWindow
+from .UI.draggablePlotWidget import DraggablePlotWidget
 try:
     import interactivePG as ipg
 except:
@@ -30,7 +30,7 @@ class myDict(dict):
         try:
             return super(myDict, self).get(k, d)
         except Exception as e:
-            print "AN ERROR IN GOT", e
+            print("AN ERROR IN GOT", e)
             return {"mean":-1,"std":-1}
 
 
@@ -94,7 +94,7 @@ class BaseWindow(QtGui.QMainWindow):
                 # to handle FullHighSideband class
                 self.processSingleData(inp)
             else:
-                print "unknown type, ", type(inp), self.__class__.__name__
+                print("unknown type, ", type(inp), self.__class__.__name__)
 
         self.sigClosed.connect(updateFileClose)
 
@@ -526,9 +526,9 @@ class BaseWindow(QtGui.QMainWindow):
         try:
             val = params.child(*path).value()
         except Exception as e:
-            print "ERROR updating window title"
-            print "\tbool=",bool
-            print "path=",path
+            print("ERROR updating window title")
+            print("\tbool=",bool)
+            print("path=",path)
         name = path[1]
         # cut out units if they're present
         pref = name[:name.find("(")-1] if "(" in name else name
@@ -565,7 +565,7 @@ class BaseWindow(QtGui.QMainWindow):
         event.setDropAction(QtCore.Qt.CopyAction)
 
         if event.keyboardModifiers() & QtCore.Qt.ShiftModifier:
-            print "held shift"
+            print("held shift")
 
 
         # Only one file was dropped
@@ -695,7 +695,7 @@ class BaseWindow(QtGui.QMainWindow):
     def saveProcessed(self):
         global saveLoc
         if not self.dataObj:
-            print "Load a file first"
+            print("Load a file first")
         path = QtGui.QFileDialog.getSaveFileName(self, "Save File", saveLoc, "Text File (*.txt)")
         if not path:
             return
@@ -877,7 +877,7 @@ class HSGWindow(BaseWindow):
 
         sbWN = NIRL + FELL*val
         line = converter["wavenumber"][units](sbWN)
-        print "Setting to", line, "from", units
+        print("Setting to", line, "from", units)
 
         paramObj.blockSignals(True)
         self.sbLine.setValue(line)
@@ -970,7 +970,7 @@ class HSGWindow(BaseWindow):
 
             newDict.update(
                 {set: {stat: np.mean(
-                                    map(lambda x:x.get(stat, '-1'), kwargs[set]) )
+                                    [x.get(stat, '-1') for x in kwargs[set]] )
                                 for stat in stats}
                 for set in sets}
             )
@@ -995,7 +995,7 @@ class HSGWindow(BaseWindow):
         return p
 
     def updateOffset(self, paramObj, val):
-        [self.ui.gSpectrum.getPlotItem().removeItem(ii) for ii in self.curveFits.values()]
+        [self.ui.gSpectrum.getPlotItem().removeItem(ii) for ii in list(self.curveFits.values())]
         super(HSGWindow, self).updateOffset(paramObj, val)
         self.updateSBCalc()
 
@@ -1149,7 +1149,7 @@ class ComparisonWindow(QtGui.QMainWindow):
         super(ComparisonWindow, self).closeEvent(event)
 
     def focusInEvent(self, *args, **kwargs):
-        print "got focus", args, kwargs
+        print("got focus", args, kwargs)
         self.sigGotFocus.emit(self)
 
     def changeEvent(self, ev):
@@ -1188,7 +1188,7 @@ class ComparisonWindow(QtGui.QMainWindow):
             obj.setPen(pen)
         # Clicked not a curve, so un-bold all the plots
         else:
-            for obj in self.curveList.keys():
+            for obj in list(self.curveList.keys()):
                 pen = obj.opts['pen']
                 pen.setWidth(1)
                 obj.setPen(pen)
@@ -1210,7 +1210,7 @@ def updateFileClose(obj):
     try:
         fileList.remove(obj)
     except Exception as e:
-        print "Error removing file from fileList:", e, obj
+        print("Error removing file from fileList:", e, obj)
     if not fileList and not combinedWindowList:
         ex.exit(0)
 
@@ -1218,7 +1218,7 @@ def updateCompClose(obj):
     try:
         combinedWindowList.remove(obj)
     except Exception as e:
-        print "error removign from list,", e
+        print("error removign from list,", e)
     if not fileList and not combinedWindowList:
         ex.exit(0)
 
@@ -1229,7 +1229,7 @@ def updateFocusList(obj):
         combinedWindowList.remove(obj)
         combinedWindowList.append(obj)
     except Exception as e:
-        print "error updating focus list", e
+        print("error updating focus list", e)
 
 
 # converter[<inp>][<out>]
@@ -1252,12 +1252,12 @@ converter = {
 
 if __name__=="__main__":
     import sys
-    print "argv:", sys.argv
-    print len(sys.argv)
+    print("argv:", sys.argv)
+    print(len(sys.argv))
     ex = QtGui.QApplication(sys.argv)
     win = BaseWindow()
     # win.openFile(sys.argv[1])
-    print "made window"
+    print("made window")
 
     import pyqtgraph.console as pgc
     consoleWindow = pgc.ConsoleWidget(namespace={"fl":fileList,"np": np,

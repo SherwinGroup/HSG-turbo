@@ -7,7 +7,7 @@ Created on Mon Jan 18 09:53:27 2016
 Changed it to add a graph showing the trace of the THz field with arrows
 indicating the creation/recollision times.
 """
-from __future__ import division
+
 import sys
 import json
 from PyQt4 import QtGui
