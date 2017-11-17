@@ -1,5 +1,5 @@
 __author__ = 'dvalovcin'
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtWidgets, QtCore
 import pyqtgraph as pg
 import interactivePG as cpg
 
@@ -27,7 +27,7 @@ class DraggableViewBox(pg.ViewBox):
         super(DraggableViewBox, self).__init__(parent, border, lockAspect, enableMouse, invertY, enableMenu, name, invertX)
 
     def mouseDragEvent(self, ev, axis=None):
-        # if QtGui.QApplication.queryKeyboardModifiers() & QtCore.Qt.ShiftModifier:
+        # if QtWidgets.QApplication.queryKeyboardModifiers() & QtCore.Qt.ShiftModifier:
         if ev.modifiers() & QtCore.Qt.ShiftModifier:
             ev.accept()
             if not ev.isFinish(): return

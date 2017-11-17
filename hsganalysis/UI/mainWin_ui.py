@@ -7,7 +7,7 @@
 #
 # WARNING! All changes made in this file will be lost!
 
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtWidgets
 
 try:
     _fromUtf8 = QtCore.QString.fromUtf8
@@ -16,28 +16,28 @@ except AttributeError:
         return s
 
 try:
-    _encoding = QtGui.QApplication.UnicodeUTF8
+    _encoding = QtWidgets.QApplication.UnicodeUTF8
     def _translate(context, text, disambig):
-        return QtGui.QApplication.translate(context, text, disambig, _encoding)
+        return QtWidgets.QApplication.translate(context, text, disambig, _encoding)
 except AttributeError:
     def _translate(context, text, disambig):
-        return QtGui.QApplication.translate(context, text, disambig)
+        return QtWidgets.QApplication.translate(context, text, disambig)
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName(_fromUtf8("MainWindow"))
         MainWindow.resize(800, 600)
-        self.centralwidget = QtGui.QWidget(MainWindow)
+        self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.centralwidget.setObjectName(_fromUtf8("centralwidget"))
-        self.horizontalLayout = QtGui.QHBoxLayout(self.centralwidget)
+        self.horizontalLayout = QtWidgets.QHBoxLayout(self.centralwidget)
         self.horizontalLayout.setObjectName(_fromUtf8("horizontalLayout"))
-        self.tabWidget = QtGui.QTabWidget(self.centralwidget)
+        self.tabWidget = QtWidgets.QTabWidget(self.centralwidget)
         self.tabWidget.setObjectName(_fromUtf8("tabWidget"))
-        self.tabSpectrum = QtGui.QWidget()
+        self.tabSpectrum = QtWidgets.QWidget()
         self.tabSpectrum.setObjectName(_fromUtf8("tabSpectrum"))
-        self.horizontalLayout_2 = QtGui.QHBoxLayout(self.tabSpectrum)
+        self.horizontalLayout_2 = QtWidgets.QHBoxLayout(self.tabSpectrum)
         self.horizontalLayout_2.setObjectName(_fromUtf8("horizontalLayout_2"))
-        self.splitSpectrum = QtGui.QSplitter(self.tabSpectrum)
+        self.splitSpectrum = QtWidgets.QSplitter(self.tabSpectrum)
         self.splitSpectrum.setOrientation(QtCore.Qt.Horizontal)
         self.splitSpectrum.setObjectName(_fromUtf8("splitSpectrum"))
         self.ptFile = ParameterTree(self.splitSpectrum)
@@ -46,11 +46,11 @@ class Ui_MainWindow(object):
         self.gSpectrum.setObjectName(_fromUtf8("gSpectrum"))
         self.horizontalLayout_2.addWidget(self.splitSpectrum)
         self.tabWidget.addTab(self.tabSpectrum, _fromUtf8(""))
-        self.tabFits = QtGui.QWidget()
+        self.tabFits = QtWidgets.QWidget()
         self.tabFits.setObjectName(_fromUtf8("tabFits"))
-        self.horizontalLayout_3 = QtGui.QHBoxLayout(self.tabFits)
+        self.horizontalLayout_3 = QtWidgets.QHBoxLayout(self.tabFits)
         self.horizontalLayout_3.setObjectName(_fromUtf8("horizontalLayout_3"))
-        self.splitFits = QtGui.QSplitter(self.tabFits)
+        self.splitFits = QtWidgets.QSplitter(self.tabFits)
         self.splitFits.setOrientation(QtCore.Qt.Vertical)
         self.splitFits.setObjectName(_fromUtf8("splitFits"))
         self.gFits = DraggablePlotWidget(self.splitFits)
@@ -61,11 +61,11 @@ class Ui_MainWindow(object):
         self.tabWidget.addTab(self.tabFits, _fromUtf8(""))
         self.horizontalLayout.addWidget(self.tabWidget)
         MainWindow.setCentralWidget(self.centralwidget)
-        self.menubar = QtGui.QMenuBar(MainWindow)
+        self.menubar = QtWidgets.QMenuBar(MainWindow)
         self.menubar.setGeometry(QtCore.QRect(0, 0, 800, 21))
         self.menubar.setObjectName(_fromUtf8("menubar"))
         MainWindow.setMenuBar(self.menubar)
-        self.statusbar = QtGui.QStatusBar(MainWindow)
+        self.statusbar = QtWidgets.QStatusBar(MainWindow)
         self.statusbar.setObjectName(_fromUtf8("statusbar"))
         MainWindow.setStatusBar(self.statusbar)
 

@@ -9,14 +9,14 @@ import os
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.parametertree.parameterTypes as pTypes
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtWidgets
 from pyqtgraph.parametertree import Parameter
 
 # import hsganalysis as hsg # local file, not global, no hsg.hsg
-from . import newhsganalysis as hsg
+import newhsganalysis as hsg
 
-from .UI.mainWin_ui import Ui_MainWindow
-from .UI.draggablePlotWidget import DraggablePlotWidget
+from UI.mainWin_ui import Ui_MainWindow
+from UI.draggablePlotWidget import DraggablePlotWidget
 try:
     import interactivePG as ipg
 except:
@@ -44,7 +44,7 @@ class ComboParameter(pTypes.WidgetParameterItem):
         self._name = name
         super(ComboParameter, self).__init__(param, depth)
     def makeWidget(self):
-        w = QtGui.QComboBox()
+        w = QtWidgets.QComboBox()
         [w.addItem(str(i)) for i in self.itemList]
         w.sigChanged = w.currentIndexChanged
         w.value = lambda: w.currentText()
@@ -56,7 +56,7 @@ class ComboParameter(pTypes.WidgetParameterItem):
         pass
 
 
-class BaseWindow(QtGui.QMainWindow):
+class BaseWindow(QtWidgets.QMainWindow):
     """
     A note on parameter trees:
     They're not the most convenient things to navigate. You can't reference by name,
@@ -129,7 +129,7 @@ class BaseWindow(QtGui.QMainWindow):
 
 
 
-        self.menuSpec = QtGui.QMenu("Plot")
+        self.menuSpec = QtWidgets.QMenu("Plot")
 
 
         #################################
@@ -137,7 +137,7 @@ class BaseWindow(QtGui.QMainWindow):
         # Spectrum menu, x-axis
         #
         #################################
-        self.menuSpecX = QtGui.QMenu("x")
+        self.menuSpecX = QtWidgets.QMenu("x")
         act = self.menuSpecX.addAction("nm")
         act.setCheckable(True)
         act.setChecked(True)
@@ -156,15 +156,15 @@ class BaseWindow(QtGui.QMainWindow):
         #
         #################################
 
-        self.menuSpecY = QtGui.QMenu("y")
+        self.menuSpecY = QtWidgets.QMenu("y")
         act = self.menuSpecY.addAction("Log")
         act.setCheckable(True)
         act.triggered.connect(self.parseSpecYChange)
 
-        self.menuSpecScaleY = QtGui.QMenu("Divide By")
+        self.menuSpecScaleY = QtWidgets.QMenu("Divide By")
 
         self.uisbDivideBy = pg.SpinBox(value=1, step=1.0)
-        self.uisbDivideByAction = QtGui.QWidgetAction(None)
+        self.uisbDivideByAction = QtWidgets.QWidgetAction(None)
         self.uisbDivideByAction.setDefaultWidget(self.uisbDivideBy)
         self.menuSpecScaleY.addAction(self.uisbDivideByAction)
         self.menuSpecY.addMenu(self.menuSpecScaleY)
@@ -175,7 +175,7 @@ class BaseWindow(QtGui.QMainWindow):
 
 
 
-        self.menuFit = QtGui.QMenu("Plot")
+        self.menuFit = QtWidgets.QMenu("Plot")
 
 
         #################################
@@ -183,7 +183,7 @@ class BaseWindow(QtGui.QMainWindow):
         # Fit menu, x-axis
         #
         #################################
-        self.menuFitX = QtGui.QMenu("x")
+        self.menuFitX = QtWidgets.QMenu("x")
         act = self.menuFitX.addAction("SB Num")
         act.setCheckable(True)
         act.setChecked(True)
@@ -208,14 +208,14 @@ class BaseWindow(QtGui.QMainWindow):
         #
         #################################
 
-        self.menuFitY = QtGui.QMenu("y")
+        self.menuFitY = QtWidgets.QMenu("y")
         act = self.menuFitY.addAction("Log")
         act.setCheckable(True)
         act.triggered.connect(self.parseFitYChange)
 
-        # self.menuFitScaleY = QtGui.QMenu("Divide By")
+        # self.menuFitScaleY = QtWidgets.QMenu("Divide By")
         # self.uisbDivideByF = pg.SpinBox()
-        # self.uisbDivideByActionF = QtGui.QWidgetAction(None)
+        # self.uisbDivideByActionF = QtWidgets.QWidgetAction(None)
         # self.uisbDivideByActionF.setDefaultWidget(self.uisbDivideByF)
         # self.menuFitScaleY.addAction(self.uisbDivideByActionF)
         # self.menuFitY.addMenu(self.menuFitScaleY)
@@ -480,7 +480,7 @@ class BaseWindow(QtGui.QMainWindow):
     def makeTitleActionList(self, group=None, actions=None):
         if group is None:
             group = self.specParams
-            actions = QtGui.QMenu("Set Window Title")
+            actions = QtWidgets.QMenu("Set Window Title")
             a = actions.addAction("Filename")
             a.triggered.connect(self.updateTitle)
             a = actions.addAction("Other...")
@@ -511,10 +511,10 @@ class BaseWindow(QtGui.QMainWindow):
                 if child.text() == "Filename" and self.dataObj is not None:
                     self.setWindowTitle(os.path.basename(self.dataObj.fname))
                 elif child.text() == "Other...":
-                    text, ok = QtGui.QInputDialog.getText(self,
+                    text, ok = QtWidgets.QInputDialog.getText(self,
                                                       "Enter Window Name",
                                                       "Title:",
-                                                      QtGui.QLineEdit.Normal,
+                                                      QtWidgets.QLineEdit.Normal,
                                                       self.windowTitle())
                     if ok: self.setWindowTitle(text)
                 self.path=None
@@ -542,7 +542,7 @@ class BaseWindow(QtGui.QMainWindow):
         """
 
         :param event:
-        :type event: QtGui.QDragEnterEvent
+        :type event: QtWidgets.QDragEnterEvent
         :return:
         """
         event.accept()
@@ -550,7 +550,7 @@ class BaseWindow(QtGui.QMainWindow):
     def drop(self, event):
         """
         :param event:
-        :type event: QtGui.QDropEvent
+        :type event: QtWidgets.QDropEvent
         :return:
         """
         global fileList
@@ -696,7 +696,8 @@ class BaseWindow(QtGui.QMainWindow):
         global saveLoc
         if not self.dataObj:
             print("Load a file first")
-        path = QtGui.QFileDialog.getSaveFileName(self, "Save File", saveLoc, "Text File (*.txt)")
+        path = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", saveLoc, "Text File (*.txt)")[0]
+        print("asvepath", path)
         if not path:
             return
         path = str(path)
@@ -1030,7 +1031,7 @@ class HSGImageWindow(HSGWindow):
         self.ui.setupUi(self)
 
         # Set arbitrary parent for garbage colection
-        self.ui.gSpectrum.setParent(QtGui.QWidget())
+        self.ui.gSpectrum.setParent(QtWidgets.QWidget())
 
         # add image plot to it.
         self.ui.gSpectrum = ipg.ImageView(self.ui.splitSpectrum)
@@ -1067,7 +1068,7 @@ class PLWindow(BaseWindow):
 
 penList = [pg.intColor(i, 20) for i in range(20)]
 
-class ComparisonWindow(QtGui.QMainWindow):
+class ComparisonWindow(QtWidgets.QMainWindow):
     sigClosed = QtCore.pyqtSignal(object) #emit oneself when closed
     sigGotFocus = QtCore.pyqtSignal(object)
     def __init__(self, parent = None,  data = None):
@@ -1096,11 +1097,11 @@ class ComparisonWindow(QtGui.QMainWindow):
         # self.legend.setParentItem(self.gPlot.plotItem)
         self.menuBar().setNativeMenuBar(False)
 
-        # removeItems = QtGui.QAction("Remove Selected Items", self.menuBar())
+        # removeItems = QtWidgets.QAction("Remove Selected Items", self.menuBar())
         # removeItems.triggered.connect(self.removeSelectedLines)
         # self.menuBar().addAction(removeItems)
 
-        # changeColor = QtGui.QAction("Change Line Color", self.menuBar())
+        # changeColor = QtWidgets.QAction("Change Line Color", self.menuBar())
         # changeColor.triggered.connect(self.changeLineColor)
         # self.menuBar().addAction(changeColor)
 
@@ -1200,7 +1201,7 @@ class ComparisonWindow(QtGui.QMainWindow):
     def changeLineColor(self):
         if not self.selectedList:
             return
-        color = QtGui.QColorDialog.getColor()
+        color = QtWidgets.QColorDialog.getColor()
         p = self.selectedList[-1]
         pen = p.opts["pen"]
         pen.setColor(color)
@@ -1254,7 +1255,7 @@ if __name__=="__main__":
     import sys
     print("argv:", sys.argv)
     print(len(sys.argv))
-    ex = QtGui.QApplication(sys.argv)
+    ex = QtWidgets.QApplication(sys.argv)
     win = BaseWindow()
     # win.openFile(sys.argv[1])
     print("made window")

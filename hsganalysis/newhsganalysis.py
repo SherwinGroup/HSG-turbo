@@ -37,7 +37,7 @@ class sbarr(object):
     WIDTHERR = 6
 
 # cast warnings as errors because they shouldn't happen
-warnings.filterwarnings("error")
+# warnings.filterwarnings("error")
 
 ####################
 # Objects
@@ -516,6 +516,13 @@ class HighSidebandCCD(CCD):
             self.parameters["thz_energy_std"] = float(self.parameters["pulseEnergies"]["std"])
         except: # This is the old way TODO: DEPRECATE THIS
             self.parameters["thz_energy"] = float(self.parameters.get("fel_power", -1))
+
+        # things used in fitting/guessing
+        self.sb_list = np.array([])
+        self.sb_index = np.array([])
+        self.sb_dict = {}
+        self.sb_results = np.array([])
+        self.full_dict = {}
 
     def __add__(self, other):
         """
@@ -3571,7 +3578,7 @@ def save_parameter_sweep_no_sb(spectrum_list, file_name, folder_str, param_name,
 
 
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
-                         wanted_indices = [1, 3, 4], verbose=False):
+                         wanted_indices = [1, 3, 4], skip_empties = False, verbose=False):
     """
     This function will take a fully processed list of spectrum objects and
     slice Spectrum.sb_fits appropriately to get an output like:
@@ -3589,6 +3596,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 
     Thus function has been update to pass a list of indices to slice for the return
     values
+
+    skip_empties: If False, will add a row of zeroes for the parameter even if no sidebands
+    are found. If True, will not add a line for that parameter
 
     [sb number, Freq (eV), Freq error (eV), Gauss area (arb.), Area error, Gauss linewidth (eV), Linewidth error (eV)]
     [    0    ,      1   ,        2,      ,        3         ,      4    ,         5           ,        6            ]
@@ -3618,7 +3628,11 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 
 
     for spec in spectrum_list:
-        sb_included = sorted(list(set(sb_included + list(spec.full_dict.keys()))))
+        try:
+            sb_included = sorted(list(set(sb_included + list(spec.full_dict.keys()))))
+        except AttributeError:
+            print("No full dict?", spec.fname)
+            print(spec.sb_list)
         included_spectra[spec.fname.split('/')[-1]] = paramGetter(spec)
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
@@ -3628,21 +3642,33 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         print("sb_included:", sb_included)
 
     for spec in spectrum_list:
+        # Flag to keep whethere there are no sidebands or not. Used to skip
+        # issues when trying to index on empty arrays
+        noSidebands = False
         if verbose:
             print("the sb_results:", spec.sb_results)
         # if no sidebands were found, skip this one
-        if spec.sb_results.ndim == 1: continue
+        try:
+            if not spec or spec.sb_results.ndim == 1:
+                if skip_empties:
+                    continue
+                else:
+                    noSidebands = True
+        except AttributeError:
+            raise
+            continue
 
         # Make an sb_results of all zeroes where we'll fill
         # in the sideband info we found
-        sb_results = spec.sb_results.copy()
-        saw_sbs = sb_results[:, 0]
-        found_sb = sorted(list(set(sb_included) & set(saw_sbs)))
-        found_idx = [sb_included.index(ii) for ii in found_sb]
-
         new_spec = np.zeros((len(sb_included), num_params))
-        new_spec[:, 0] = sb_included
-        new_spec[found_idx, :] = sb_results
+        if not noSidebands:
+            sb_results = spec.sb_results.copy()
+            saw_sbs = sb_results[:, 0]
+            found_sb = sorted(list(set(sb_included) & set(saw_sbs)))
+            found_idx = [sb_included.index(ii) for ii in found_sb]
+
+            new_spec[:, 0] = sb_included
+            new_spec[found_idx, :] = sb_results
 
         spec_data = np.insert(new_spec.flatten(), 0, float(paramGetter(spec)))
 
@@ -4136,7 +4162,8 @@ def get_data_and_header(fname, returnOrigin = False):
             oh += fh.readline()
             oh += fh.readline()[:-1] #remove final \n
 
-        data = np.genfromtxt(fh, delimiter=',')
+        # data = np.genfromtxt(fh, delimiter=',')
+    data = np.genfromtxt(fname, delimiter=',')[3:]
 
     header = json.loads(header_string)
 
@@ -4807,10 +4834,14 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
     return pmt_data
 
 
-def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=False, save=None, verbose=False, **kwargs):
+def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=False,
+                   save=None, keep_empties = False, verbose=False, **kwargs):
     """
     This function will take a list of ccd files and process it completely.
     save_name is a tuple (file_base, folder_path)
+
+    keep_empties: If True, keep the HighSidebandCCD object in the list if no sidebands
+    are found. Else, cut it off.
 
     The cutoff of 8 is too high, but I don't know what to change it to
     :rtype: list of HighSidebandCCD
@@ -4833,7 +4864,9 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=
             spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose, plot=plot)
         except RuntimeError:
             print("\n\n\nNo sidebands??\n\n")
-            raw_list.pop(raw_list.index(spectrum))
+            # No sidebands, say it's empty
+            if not keep_empties:
+                raw_list.pop(raw_list.index(spectrum))
             continue
         spectrum.fit_sidebands(plot=plot, verbose=verbose)
         if "calculated NIR freq (cm-1)" not in list(spectrum.parameters.keys()):
