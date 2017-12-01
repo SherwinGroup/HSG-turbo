@@ -16,7 +16,7 @@ from pyqtgraph.parametertree import Parameter
 import newhsganalysis as hsg
 
 from UI.mainWin_ui import Ui_MainWindow
-from UI.draggablePlotWidget import DraggablePlotWidget
+from UI.draggablePlotWidget import DraggablePlotWidget, DraggableViewBox
 try:
     import interactivePG as ipg
 except:
@@ -24,6 +24,7 @@ except:
 # fileList = dict()
 fileList = []
 combinedWindowList = []
+combinedWindowImageList = []
 
 class myDict(dict):
     def get(self, k, d=None):
@@ -602,10 +603,10 @@ class BaseWindow(QtWidgets.QMainWindow):
                 # to the spectrometer wavelength is kinda random
                 if obj.parameters["series"] == "":
                     c = BaseWindow.getWindowClass(obj.fname)
-                    fileList[obj.fname] = c(obj, parentWin=self)
+                    fileList.append(c(obj, parentWin=self))
                     if self.titlePath is None:
                         # default to center for window title unless we've been messing around
-                        fileList[obj.fname].setWindowTitle(str(obj.parameters["center_lambda"]))
+                        fileList[-1].setWindowTitle(str(obj.parameters["center_lambda"]))
                 else:
                     c = BaseWindow.getWindowClass(obj.fname)
                     a = c(obj, parentWin=self)
@@ -1034,7 +1035,10 @@ class HSGImageWindow(HSGWindow):
         self.ui.gSpectrum.setParent(QtWidgets.QWidget())
 
         # add image plot to it.
-        self.ui.gSpectrum = ipg.ImageView(self.ui.splitSpectrum)
+        view = DraggableViewBox()
+        view.sigDropEvent.connect(self.handleSpecDragEvent)
+        pi = pg.PlotItem(viewBox=view)
+        self.ui.gSpectrum = ipg.ImageView(self.ui.splitSpectrum, view=pi)
         self.ui.gSpectrum.view.setAspectLocked(False)
         self.ui.splitSpectrum.setStretchFactor(1, 10)
         p = Parameter.create(name='Open a File', type='group')
@@ -1055,6 +1059,31 @@ class HSGImageWindow(HSGWindow):
         super(HSGWindow, self).processSingleData(dataObj)
         self.plotSpectrum()
 
+    def handleSpecDragEvent(self, obj, val):
+        """
+        See comments on handleFitDragEvent
+        :param obj:
+        :param val:
+        :return:
+        """
+        # d = [self.ui.gSpectrum.plotItem.curves[1].xData,
+        #      self.ui.gSpectrum.plotItem.curves[1].yData]
+        if self.dataObj is None: return
+        self.createCompWindow(data = self.dataObj.proc_data, p = val)
+
+    def createCompWindow(self, data, p, label=None):
+        # This really should be worked on to behave like the other one
+        if not combinedWindowImageList:
+            combinedWindowImageList.append(ComparisonImageWindow())
+            combinedWindowImageList[-1].show()
+            combinedWindowImageList[-1].view.setAspectLocked(False)
+            img = self.ui.gSpectrum.image.transpose(0,2,1)
+        else:
+            img = combinedWindowImageList[-1].image
+            print("img", img.shape)
+            print("\t", self.ui.gSpectrum.image.shape)
+            img = np.vstack((img, self.ui.gSpectrum.image))
+        combinedWindowImageList[-1].setImage(img)
 
 
     def plotSpectrum(self):
@@ -1207,6 +1236,9 @@ class ComparisonWindow(QtWidgets.QMainWindow):
         pen.setColor(color)
         p.setPen(pen)
 
+class ComparisonImageWindow(ipg.ImageView):
+    pass
+
 def updateFileClose(obj):
     try:
         fileList.remove(obj)
@@ -1263,6 +1295,7 @@ if __name__=="__main__":
     import pyqtgraph.console as pgc
     consoleWindow = pgc.ConsoleWidget(namespace={"fl":fileList,"np": np,
                                                  "cl":combinedWindowList,
+                                                 "ci":combinedWindowImageList,
                                                  "pg":pg,
                                                  "conv":converter})
     consoleWindow.show()
