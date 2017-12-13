@@ -10,7 +10,7 @@ indicating the creation/recollision times.
 
 import sys
 import json
-from PyQt4 import QtGui
+from PyQt5 import QtWidgets
 import pyqtgraph as pg
 from three_step_first_ui import Ui_Form
 import numpy as np
@@ -25,7 +25,7 @@ hbar = 1.055e-34 # Reduced Planck's constant in J*s
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
-class Window(QtGui.QWidget):
+class Window(QtWidgets.QWidget):
     def __init__(self):
         """
         I have no real understanding of the things that are happening, but I know
@@ -340,6 +340,7 @@ class Trajectories(object):
         self.results_dict['maximum order sideband'] = '{:.1f}'.format(self.max_sb_order)
 
 if __name__ == '__main__':
+    from PyQt5 import QtGui
     app = QtGui.QApplication(sys.argv)
     ex = Window()
     #ex.show()

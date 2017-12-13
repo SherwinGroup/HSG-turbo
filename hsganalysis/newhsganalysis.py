@@ -2530,6 +2530,9 @@ def hsg_combine_spectra(spectra_list, verbose = False):
     spectra_list.sort(key=lambda x: x.parameters["spec_step"])
 
     # keep a dict for each series' spec step
+    # This allows you to combine spectra whose spec steps
+    # change by values other than 1 (2, if you skip, or 0.5 if you
+    # decide to insert things, or arbitary strings)
     spec_steps = {}
 
     for elem in spectra_list:
@@ -2538,6 +2541,9 @@ def hsg_combine_spectra(spectra_list, verbose = False):
         current_steps = spec_steps.get(elem.parameters["series"], [])
         current_steps.append(elem.parameters["spec_step"])
         spec_steps[elem.parameters["series"]] = current_steps
+    if verbose:
+        print("I found these spec steps for each series:")
+        print("\n\t".join("{}: {}".format(*ii) for ii in spec_steps.items()))
 
     # sort the list of spec steps
     for series in spec_steps:
