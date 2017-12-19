@@ -9,6 +9,7 @@ Brevity required, prurience preferred
 
 
 import os
+import io
 import glob
 import errno
 import copy
@@ -1057,7 +1058,7 @@ class HighSidebandCCD(CCD):
                 if verbose:
                     print("\tThe fit failed:")
                     print("\t\t", e)
-                    print("\tFitting region: {}->{}".format(peakIdx-window))
+                    print("\tFitting region: {}->{}".format(peakIdx-window, peakIdx+window))
                     # print "I couldn't fit", elem
                     # print "It's sideband", num
                     # print "In file", self.fname
@@ -1115,8 +1116,6 @@ class HighSidebandCCD(CCD):
             sb_fits = sb_fits_temp[:, reorder]
             # if verbose: print "The abs. error guess is", sb_fits[:, 0:5]
         except:
-            print("The file is:", self.fname)
-            print("\n!!!!!\nSHIT WENT WRONG\n!!!!!\n")
             raise RuntimeError("No sidebands to fit?")
 
         # Going to label the appropriate row with the sideband
@@ -2443,69 +2442,6 @@ def gaussWithBackground(x, *p):
 ####################
 # Collection functions
 ####################
-
-'''
-def hsg_sum_spectra(object_list, do_fvb_crr=False):
-    """
-    This function will add all the things that should be added.  Obvs.  It will
-    also calculate the standard error of the mean for every NIR frequency.  The
-    standard error is the sum of the dark noise and the "shot" noise.
-
-    Also, remember, we're adding together and averaging the counts per pulse.
-    Hence why we use self.proc_data after it has been divided by the number of
-    fel pulses.
-
-    This function should not need to be called anymore.  This should be handled
-    in the GUI.
-
-    object_list: A list of spectrum objects
-
-    :rtype: list of HighSidebandCCD
-    """
-    print "I'm trying!"
-
-    good_list = []
-    for index in xrange(len(object_list)):
-        # dark_var = 0
-        num_images = 1
-        try:
-            temp = object_list.pop(0)
-            # var_holder = np.array(temp.proc_data[:, 2])**2
-            crr_holder = np.array(temp.proc_data[:, 1]).reshape((1600, 1))
-
-        except Exception as E:
-            # print "God damn it, Leroy"
-            break
-        #print "temp has series: {}.\ttemp has cl: {}.\ttemp has series: {}".format(temp.parameters['series'], temp.parameters['center_lambda'], temp.parameters['series'])
-        for spec in list(object_list):
-            #print "\tspec has series: {}.\tspec has cl: {}.\tspec has fn: {}".format(spec.parameters['series'], spec.parameters['center_lambda'], spec.fname[-16:-13])
-            #print "I am trying to add", temp.parameters['FELP'], spec.parameters['FELP']
-            if temp.parameters['series'] == spec.parameters['series']:
-                if temp.parameters['center_lambda'] == spec.parameters['center_lambda']:
-                    temp += spec
-                    num_images += 1
-
-                    crr_holder = np.hstack((crr_holder, spec.proc_data[:, 1].reshape((1600,1))))
-
-                    object_list.remove(spec)
-        if do_fvb_crr and num_images > 1:
-            print "\nI am doing cosmic ray removal!!\n"
-            crr_holder = fvb_crr(crr_holder, debugging=False)
-            temp.proc_data[:, 1] = np.mean(crr_holder, axis=1)
-        else:
-            print "\nI did not do anything bad, I think\n"
-        # std_error = np.sqrt(np.var(stderr_holder, axis=1, dtype=np.float64) + dark_var) / np.sqrt(spec_number) # Checking some sigma stuff from curve_fit
-        # This standard error is for every point.  I think it actually overestimates
-        # the error at places with no signal because we add the dark variance
-        # effectively twice.
-        #print "final dark_stdev:", np.sqrt(dark_var)
-        # temp.add_std_error(std_error)
-        temp.image_normalize(num_images)
-        good_list.append(temp)
-    return good_list
-'''
-
-
 def hsg_combine_spectra(spectra_list, verbose = False):
     """
     This function is all about smooshing different parts of the same hsg
@@ -2761,6 +2697,313 @@ def pmt_sorter(folder_path, plot_individual = True):
 def stitch_abs_results(main, new):
     raise NotImplementedError
 
+def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
+    """
+    Given a path to data taken from rotating the QWP (doing polarimetry),
+    process the data (fit peaks), and parse it into a matrix of sb strength vs
+    QWP angle vs sb number.
+
+    By default, saves the file into "Processed QWP Dependence"
+
+    Return should be passed directly into fitting
+
+         -1     |     SB1     |   SB1  |     SB2     |   SB2  |    ...    |   ...  |     SBn     |   SBn  |
+      angle1    | SB Strength | SB err | SB Strength | SB Err |
+      angle2    |     ...     |    .   |
+      .
+      .
+      .
+
+    :param path: Path to load
+    :param loadNorm: if true, load the normalized data
+    :param save: Save the processed file or not
+    :param verbose:
+    :return:
+    """
+    def getData(fname):
+        """
+        Helper function for loading the data and getting the header information for incident NIR stuff
+        :param fname:
+        :return:
+        """
+        if isinstance(fname, str):
+            header = ''
+            with open(os.path.join("Processed QWP Dependence", fname + "_snip.txt")) as fh:
+                ln = fh.readline()
+                while ln[0] == '#':
+                    header += ln[1:]
+                    ln = fh.readline()
+            data = np.genfromtxt(os.path.join("Processed QWP Dependence", fname + "_snip.txt"),
+                                 delimiter=',', dtype=str)
+        if isinstance(fname, io.BytesIO):
+            header = b''
+            ln = fname.readline()
+            while ln.decode()[0] == '#':
+                header += ln[1:]
+                ln = fname.readline()
+            fname.seek(0)
+            data = np.genfromtxt(fname,
+                                 delimiter=',', dtype=str)
+
+        header = json.loads(header)
+        return data, float(header["lAlpha"]), float(header["lGamma"]), float(header["nir"]), float(header["thz"])
+        ######### End getData
+
+    try:
+        assert False
+        sbData, lAlpha, lGamma, nir, thz = getData(path)
+    except:
+        # Do the processing on all the files
+        specs = proc_n_plotCCD(path, keep_empties=True, verbose=verbose)
+        if not save:
+            # If you don't want to save them, set everything up for doing Bytes objects
+            # to replacing saving files
+            full, snip, norm = io.BytesIO(), io.BytesIO(), io.BytesIO()
+            save_parameter_sweep(specs, [full, snip, norm], None,
+                                     "rotatorAngle", "deg", wanted_indices=[3, 4],
+                                     header_dict={
+                                         "lAlpha": specs[0].parameters["nir_pola"],
+                                         "lGamma": specs[0].parameters["nir_polg"],
+                                         "nir": specs[0].parameters["nir_lambda"],
+                                         "thz": specs[0].parameters["fel_lambda"], })
+            if loadNorm:
+                sbData, lAlpha, lGamma, nir, thz = getData(norm)
+            else:
+                sbData, lAlpha, lGamma, nir, thz = getData(snip)
+        else:
+            save_parameter_sweep(specs, os.path.basename(path), "Processed QWP Dependence",
+                                 "rotatorAngle", "deg", wanted_indices=[3, 4],
+                                 header_dict={
+                                     "lAlpha": specs[0].parameters["nir_pola"],
+                                     "lGamma": specs[0].parameters["nir_polg"],
+                                     "nir": specs[0].parameters["nir_lambda"],
+                                     "thz": specs[0].parameters["fel_lambda"], })
+            sbData, lAlpha, lGamma, nir, thz = getData(path)
+
+        laserParams = {
+            "lAlpha": lAlpha,
+            "lGamma": lGamma,
+            "nir": nir,
+            "thz": thz
+        }
+
+    # get which sidebands were found in this data set
+    # first two rows are origin header, second is sideband number
+    # (and empty strings, which is why the "if ii" below, to prevent
+    # ValueErrors on int('').
+    foundSidebands = np.array(sorted([float(ii) for ii in set(sbData[2]) if ii]))
+
+    # Remove first 3 rows, which are strings for origin header, and cast it to floats
+    sbData = sbData[3:].astype(float)
+
+    # double the sb numbers (to account for sb strength/error) and add a dummy
+    # number so the array is the same shape
+    foundSidebands = np.insert(foundSidebands, range(len(foundSidebands)), foundSidebands)
+    foundSidebands = np.insert(foundSidebands, 0, -1)
+    return laserParams, np.row_stack((foundSidebands, sbData))
+
+def makeCurve(eta, isVertical):
+    """
+
+    :param eta: QWP retardance at the wavelength
+    :return:
+    """
+    cosd = lambda x: np.cos(x * np.pi / 180)
+    sind = lambda x: np.sin(x * np.pi / 180)
+    eta = eta * 2 * np.pi
+    if isVertical:
+        # vertical polarizer
+        def analyzerCurve(x, *S):
+            S0, S1, S2, S3 = S
+            return S0-S1/2*(1+np.cos(eta)) \
+                   + S3*np.sin(eta)*sind(2*x) \
+                   + S1/2*(np.cos(eta)-1)*cosd(4*x) \
+                   + S2/2*(np.cos(eta)-1)*sind(4*x)
+    else:
+        # vertical polarizer
+        def analyzerCurve(x, *S):
+            S0, S1, S2, S3 = S
+            return S0+S1/2*(1+np.cos(eta)) \
+                   - S3*np.sin(eta)*sind(2*x) \
+                   + S1/2*(1-np.cos(eta))*cosd(4*x) \
+                   + S2/2*(1-np.cos(eta))*sind(4*x)
+    return analyzerCurve
+
+def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], anaDir = "V", plot=False,
+                        save = False, plotRaw = lambda x, y: False, series = ''):
+    """
+    Fit a set of sideband data vs QWP angle to get the stoke's parameters
+    :param data: data in the form of the return of hsg_combine_qwp_sweep
+    :param laserParams: dictionary of the parameters of the laser, the angles and frequencies. See function for
+                expected keys. I don't think the errors are used (except for plotting?), or the wavelengths (but
+                left in for potential future use (wavelength dependent stuff?))
+    :param wantedSBs: List of the wanted sidebands to fit out.
+    :param anaDir: direction of the analyzer ("V" or "H")
+    :param plot: True/False to plot alpha/gamma/dop. Alternatively, a list of "a", "g", "d" to only plot selected ones
+    :param save: filename to save the files. Accepts BytesIO
+    :param plotRaw: callable that takes an index of the sb and sb number, returns true to plot the raw curve
+    :param series: a string to be put in the header for the origin files
+    :return:
+    """
+    defaultLaserParams = {
+        "lAlpha": 90,
+        "ldAlpha": 0.2,
+        "lGamma": 0.0,
+        "ldGamma": 0.2,
+        "lDOP": 1,
+        "ldDOP": 0.02,
+        "nir": 765.7155,
+        "thz": 21.1
+    }
+    defaultLaserParams.update(laserParams)
+    lAlpha, ldAlpha, lGamma, ldGamma, lDOP, ldDOP = defaultLaserParams["lAlpha"], \
+                                                    defaultLaserParams["ldAlpha"], \
+                                                    defaultLaserParams["lGamma"], \
+                                                    defaultLaserParams["ldGamma"], \
+                                                    defaultLaserParams["lDOP"], \
+                                                    defaultLaserParams["ldDOP"]
+    allSbData = data
+    angles = allSbData[1:, 0]
+
+    allSbData = allSbData[:, 1:] # trim out the angles
+    # Make an array to keep all of the sideband information.
+    # Start it off by keeping the NIR information (makes for easier plotting into origin)
+    sbFits = [[0] + [-1] * 8 + [lAlpha, ldAlpha, lGamma, ldGamma, lDOP, ldDOP]]
+    # Also, for convenience, keep a dictionary of the information.
+    # This is when I feel like someone should look at porting this over to pandas
+    sbFitsDict = {}
+    sbFitsDict["S0"] = [[0, -1, -1]]
+    sbFitsDict["S1"] = [[0, -1, -1]]
+    sbFitsDict["S2"] = [[0, -1, -1]]
+    sbFitsDict["S3"] = [[0, -1, -1]]
+    sbFitsDict["alpha"] = [[0, lAlpha, ldAlpha]]
+    sbFitsDict["gamma"] = [[0, lGamma, ldGamma]]
+    sbFitsDict["DOP"] = [[0, lDOP, ldDOP]]
+
+    # Iterate over all sb data. Skip by 2 because error bars are included
+    for sbIdx in range(0, allSbData.shape[1], 2):
+        sbNum = allSbData[0, sbIdx]
+        if sbNum not in wantedSBs: continue
+        # if verbose:
+        #     print("\tlooking at sideband", sbNum)
+        sbData = allSbData[1:, sbIdx]
+        sbDataErr = allSbData[1:, sbIdx + 1]
+
+        try:
+            p0 = sbFits[-1][1:8:2]
+        except:
+            p0 = [1, 1, 0, 0]
+
+        eta = 0.25 # QWP retardence, assume perfect for now
+        p, pcov = curve_fit(makeCurve(0.25, anaDir), angles, sbData, p0=p0)
+
+        if plot and plotRaw(sbIdx, sbNum):
+            # pg.figure("{}: sb {}".format(dataName, sbNum))
+            plt.figure("All Curves")
+            plt.errorbar(angles, sbData, sbDataErr, 'o-', name=series)
+            # plt.plot(angles, sbData,'o-', label="Data")
+            fineAngles = np.linspace(angles.min(), angles.max(), 300)
+            # plt.plot(fineAngles,
+            #         makeCurve(eta, "V" in dataName)(fineAngles, *p0), name="p0")
+            # plt.plot(fineAngles,
+            #         makeCurve(eta, "V" in dataName)(fineAngles, *p))
+            # plt.show()
+            plt.ylim(0, 1)
+            plt.xlim(0, 360)
+            plt.ylabel("Normalized Intensity")
+            plt.xlabel("QWP Angle (&theta;)")
+
+        # get the errors
+        d = np.sqrt(np.diag(pcov))
+        thisData = [sbNum] + list(p) + list(d)
+        d0, d1, d2, d3 = d
+        S0, S1, S2, S3 = p
+        # reorder so errors are after values
+        thisData = [thisData[i] for i in [0, 1, 5, 2, 6, 3, 7, 4, 8]]
+
+        sbFitsDict["S0"].append([sbNum, S0, d0])
+        sbFitsDict["S1"].append([sbNum, S1, d1])
+        sbFitsDict["S2"].append([sbNum, S2, d2])
+        sbFitsDict["S3"].append([sbNum, S3, d3])
+
+        # append alpha value
+        thisData.append(np.arctan2(S2, S1) / 2 * 180. / np.pi)
+        # append alpha error
+        variance = (d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2) ** 2
+        thisData.append(np.sqrt(variance) * 180. / np.pi)
+
+        sbFitsDict["alpha"].append([sbNum, thisData[-2], thisData[-1]])
+
+        # append gamma value
+        thisData.append(np.arctan2(S3, np.sqrt(S1 ** 2 + S2 ** 2)) / 2 * 180. / np.pi)
+        # append gamma error
+        variance = (d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + (d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
+        (S1 ** 2 + S2 ** 2) * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2)
+        thisData.append(np.sqrt(variance) * 180. / np.pi)
+        sbFitsDict["gamma"].append([sbNum, thisData[-2], thisData[-1]])
+
+        # append degree of polarization
+        thisData.append(np.sqrt(S1 ** 2 + S2 ** 2 + S3 ** 2) / S0)
+        variance = ((d1 ** 2 * S0 ** 2 * S1 ** 2 + d0 ** 2 * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2 + S0 ** 2 * (
+        d2 ** 2 * S2 ** 2 + d3 ** 2 * S3 ** 2)) / (S0 ** 4 * (S1 ** 2 + S2 ** 2 + S3 ** 2)))
+        thisData.append(np.sqrt(variance))
+        sbFitsDict["DOP"].append([sbNum, thisData[-2], thisData[-1]])
+
+        sbFits.append(thisData)
+
+    sbFits = np.array(sbFits)
+    sbFitsDict = {k: np.array(v) for k, v in sbFitsDict.items()}
+    # This chunk used to insert the "alpha deviation", the difference between the angles and the
+    # nir. I don't think I use this anymore, so stop saving it
+                # origin_header = 'Sideband,S0,S0 err,S1,S1 err,S2,S2 err,S3,S3 err,alpha,alpha deviation,alpha err,gamma,gamma err,DOP,DOP err\n'
+                # origin_header += 'Order,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,deg,deg,deg,deg,deg,arb.u.,arb.u.\n'
+                # origin_header += 'Sideband,{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}'.format(*["{}".format(series)] * 15)
+                # sbFits = np.array(sbFits)
+                # sbFits = np.insert(sbFits, 10, sbFits[:, 9] - lAlpha, axis=1)
+                # sbFits = sbFits[sbFits[:, 0].argsort()]
+
+    origin_header = 'Sideband,S0,S0 err,S1,S1 err,S2,S2 err,S3,S3 err,alpha,alpha err,gamma,gamma err,DOP,DOP err\n'
+    origin_header += 'Order,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,deg,deg,deg,deg,arb.u.,arb.u.\n'
+    origin_header += 'Sideband,{},{},{},{},{},{},{},{},{},{},{},{},{},{}'.format(*["{}".format(series)] * 14)
+    sbFits = sbFits[sbFits[:, 0].argsort()]
+
+    if isinstance(save, str):
+        np.savetxt(dataFileName, np.array(sbFits), delimiter=',', header=origin_header,
+                   comments='', fmt='%.6e')
+
+    print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 10]))
+    print("g = {:.2f} ± {:.2f}".format(sbFits[1, 11], sbFits[1, 12]))
+
+    if plot:
+        raise NotImplementedError("Sorry! You need to sort this out")
+    # pg.figure("{} - deviationalpha".format(dataName))
+    # pg.errorbar(sbFits[:,0], sbFits[:,10], sbFits[:,11], 'o-', label="")
+    # # pg.plot(sbFits[:,0], sbFits[:,10], label="")
+    # # pg.plot(sbs, [lAlpha-ldAlpha, lAlpha-ldAlpha])
+    # # pg.plot(sbs, [lAlpha+ldAlpha, lAlpha+ldAlpha])
+    #
+    # pg.xlabel("Sideband (order)")
+    # pg.ylabel("&alpha; deviation (&deg;)")
+    # # pg.ylim(-10, 10)
+    #
+    # pg.figure("{} - gamma".format(dataName))
+    # pg.errorbar(sbFits[:,0], sbFits[:,12], sbFits[:,13], 'o-', label="")
+    # pg.plot(sbs, [lGamma-ldGamma, lGamma-ldGamma])
+    # pg.plot(sbs, [lGamma+ldGamma, lGamma+ldGamma])
+    # # pg.plot(sbFits[:,0], sbFits[:,12], label="")
+    # pg.xlabel("Sideband (order)")
+    # pg.ylabel("&gamma; (&deg;)")
+
+    print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 11]))
+    print("g = {:.2f} ± {:.2f}".format(sbFits[1, 12], sbFits[1, 13]))
+
+    # pg.figure("{} - DOP".format(dataName))
+    # pg.errorbar(sbFits[:,0], sbFits[:,14], sbFits[:,15], label=str("")+"")
+    # pg.plot(sbs, [lDOP-ldDOP, lDOP-ldDOP])
+    # pg.plot(sbs, [lDOP+ldDOP, lDOP+ldDOP])
+    # # pg.plot(sbFits[:,0], sbFits[:,14], label=str("")+"")
+    # pg.xlabel("Sideband (order)")
+    # pg.ylabel("DOP")
 
 ####################
 # Helper functions
@@ -3357,6 +3600,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     Currently I'm thinking fuck the offset y0
     After constructing this large matrix, it will save it somewhere.
     """
+    raise NotImplementedError("Replaced by functino below. ")
     spectrum_list.sort(key=lambda x: x.parameters[param_name])
     included_spectra = dict()
     param_array = None
@@ -3443,14 +3687,13 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 
     try:
         os.mkdir(folder_str)
+    except TypeError:
+        pass # if you pass None as folder_str (for using byteIO)
     except OSError as e:
         if e.errno == errno.EEXIST:
             pass
         else:
             raise
-    norm_name = file_name + '_norm.txt'
-    snip_name = file_name + '_snip.txt'
-    file_name = file_name + '.txt'
 
     try:
         included_spectra_str = json.dumps(included_spectra, sort_keys=True, indent=4, separators=(',', ': '))
@@ -3484,14 +3727,34 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     # print "Spec header: ", spec_header
     if verbose:
         print("the param_array is:", param_array)
-    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
-               header=header_total, comments='', fmt='%0.6e')
-    np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
-               header=header_snip, comments='', fmt='%0.6e')
-    np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
-               header=header_snip, comments='', fmt='%0.6e')
-    if verbose:
-        print("Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)))
+
+    if isinstance(file_name, list):
+        if isinstance(file_name[0], io.BytesIO):
+            np.savetxt(file_name[0], param_array, delimiter=',',
+                       header=header_total, comments='', fmt='%0.6e')
+            np.savetxt(file_name[1], snipped_array, delimiter=',',
+                       header=header_snip, comments='', fmt='%0.6e')
+            np.savetxt(file_name[2], norm_array, delimiter=',',
+                       header=header_snip, comments='', fmt='%0.6e')
+            # Need to reset the file position if you want to read them immediately
+            # Is it better to do that here, or assume you'll do it later?
+            # I'm gonna assume here, because I can't currently think of a time when I'd want
+            # to be at the end of the file
+            [ii.seek(0) for ii in file_name]
+            if verbose:
+                print("Saved the file to bytes objects")
+    else:
+        norm_name = file_name + '_norm.txt'
+        snip_name = file_name + '_snip.txt'
+        file_name = file_name + '.txt'
+        np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+                   header=header_total, comments='', fmt='%0.6e')
+        np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
+                   header=header_snip, comments='', fmt='%0.6e')
+        np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
+                   header=header_snip, comments='', fmt='%0.6e')
+        if verbose:
+            print("Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)))
 
 
 def save_parameter_sweep_no_sb(spectrum_list, file_name, folder_str, param_name, unit,
@@ -3682,11 +3945,19 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         param_name = param_name[0]
     else:
         paramGetter = lambda x: x.parameters[param_name]
+    
+    # Sort all of the spectra based on the desired key
     spectrum_list.sort(key=paramGetter)
+    
+    # keep track of which file name corresponds to which parameter which gets put in
     included_spectra = dict()
+    
+    # The big array which will be stacked up to keep all of the sideband details vs desired parameter
     param_array = None
+    
+    # list of which sidebands are seen throughout.
     sb_included = []
-    # how many parameters are there?
+    # how many parameters (area, strength, linewidth, pos, etc.) are there?
     # Here incase software changes and more things are kept in
     # sb results
     try:
@@ -3695,10 +3966,16 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         # There's a file with only 1 sb and it happens to be first
         # in the list.
         num_params = spectrum_list[0].sb_results.shape[0]
+    # Rarely, there's an issue where I'm doing some testing and there's a set
+    # where the first file has no sidebands in it, so the above thing returns 0
+    # It seems really silly to do a bunch of testing to try and correct for that..
+    if num_params == 0:
+        num_params = 7
 
-
+    # loop through all of them once to figure out which sidebands are seen in all spectra
     for spec in spectrum_list:
         try:
+            # use sets to keep track of only unique sidebands
             sb_included = sorted(list(set(sb_included + list(spec.full_dict.keys()))))
         except AttributeError:
             print("No full dict?", spec.fname)
@@ -3707,7 +3984,6 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
     if verbose:
-        # print "full name:", spectrum_list[0].fname
         print("included names:", included_spectra)
         print("sb_included:", sb_included)
 
@@ -3717,6 +3993,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         noSidebands = False
         if verbose:
             print("the sb_results:", spec.sb_results)
+            
         # if no sidebands were found, skip this one
         try:
             if not spec or spec.sb_results.ndim == 1:
@@ -3736,8 +4013,11 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
             saw_sbs = sb_results[:, 0]
             found_sb = sorted(list(set(sb_included) & set(saw_sbs)))
             found_idx = [sb_included.index(ii) for ii in found_sb]
-
-            new_spec[:, 0] = sb_included
+            try:
+                new_spec[:, 0] = sb_included
+            except:
+                print("new_spec", new_spec)
+                raise
             new_spec[found_idx, :] = sb_results
 
         spec_data = np.insert(new_spec.flatten(), 0, float(paramGetter(spec)))
@@ -3769,14 +4049,13 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 
     try:
         os.mkdir(folder_str)
+    except TypeError:
+        pass # if you pass None as folder_str (for using byteIO)
     except OSError as e:
         if e.errno == errno.EEXIST:
             pass
         else:
             raise
-    norm_name = file_name + '_norm.txt'
-    snip_name = file_name + '_snip.txt'
-    file_name = file_name + '.txt'
 
     included_spectra.update(header_dict)
     try:
@@ -3825,12 +4104,33 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     # print "Spec header: ", spec_header
     if verbose:
         print("the param_array is:", param_array)
-    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
-               header=header_total, comments='', fmt='%0.6e')
-    np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
-               header=header_snip, comments='', fmt='%0.6e')
-    np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
-               header=header_snip, comments='', fmt='%0.6e')
+    if isinstance(file_name, list):
+        if isinstance(file_name[0], io.BytesIO):
+            np.savetxt(file_name[0], param_array, delimiter=',',
+                       header=header_total, comments='', fmt='%0.6e')
+            np.savetxt(file_name[1], snipped_array, delimiter=',',
+                       header=header_snip, comments='', fmt='%0.6e')
+            np.savetxt(file_name[2], norm_array, delimiter=',',
+                       header=header_snip, comments='', fmt='%0.6e')
+            # Need to reset the file position if you want to read them immediately
+            # Is it better to do that here, or assume you'll do it later?
+            # I'm gonna assume here, because I can't currently think of a time when I'd want
+            # to be at the end of the file
+            [ii.seek(0) for ii in file_name]
+            if verbose:
+                print("Saved the file to bytes objects")
+    else:
+        norm_name = file_name + '_norm.txt'
+        snip_name = file_name + '_snip.txt'
+        file_name = file_name + '.txt'
+        np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+                   header=header_total, comments='', fmt='%0.6e')
+        np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
+                   header=header_snip, comments='', fmt='%0.6e')
+        np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
+                   header=header_snip, comments='', fmt='%0.6e')
+        if verbose:
+            print("Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)))
     if verbose:
         print("Saved the file.\nDirectory: {}".format(
             os.path.join(folder_str, file_name)))
@@ -4939,7 +5239,14 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=
             if not keep_empties:
                 raw_list.pop(raw_list.index(spectrum))
             continue
-        spectrum.fit_sidebands(plot=plot, verbose=verbose)
+        try:
+            spectrum.fit_sidebands(plot=plot, verbose=verbose)
+        except RuntimeError:
+            print("\n\n\nNo sidebands??\n\n")
+            # No sidebands, say it's empty
+            if not keep_empties:
+                raw_list.pop(raw_list.index(spectrum))
+            continue
         if "calculated NIR freq (cm-1)" not in list(spectrum.parameters.keys()):
             spectrum.infer_frequencies()
         if plot:
