@@ -896,8 +896,8 @@ class HighSidebandCCD(CCD):
             no_peak = (2 * len(check_y)) // 6 # The denominator is in flux, used to be 5
             # if verbose: print "\tcheck_y length", len(check_y)
 
-            check_ave = np.mean(np.take(check_y, np.concatenate((list(range(no_peak)), list(range(-no_peak, 0))))))
-            check_stdev = np.std(np.take(check_y, np.concatenate((list(range(no_peak)), list(range(-no_peak, 0))))))
+            check_ave = np.mean(np.take(check_y, np.concatenate((np.arange(no_peak), np.arange(-no_peak, 0)))))
+            check_stdev = np.std(np.take(check_y, np.concatenate((np.arange(no_peak), np.arange(-no_peak, 0)))))
             # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
             # check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
             check_ratio = (check_max_area - (2 * octant + 1) * check_ave) / check_stdev
@@ -2759,13 +2759,24 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
             # If you don't want to save them, set everything up for doing Bytes objects
             # to replacing saving files
             full, snip, norm = io.BytesIO(), io.BytesIO(), io.BytesIO()
+            if "nir_pola" not in specs[0].parameters:
+                # in the olden days. Force them. Hopefully making them outside of ±360
+                # makes it obvious
+                specs[0].parameters["nir_pola"] = 361
+                specs[0].parameters["nir_polg"] = 361
+            keyName = "rotatorAngle"
+            if keyName not in specs[0].parameters:
+                # from back before I changed the name
+                keyName = "detectorHWP"
+
             save_parameter_sweep(specs, [full, snip, norm], None,
-                                     "rotatorAngle", "deg", wanted_indices=[3, 4],
+                                     keyName, "deg", wanted_indices=[3, 4],
                                      header_dict={
                                          "lAlpha": specs[0].parameters["nir_pola"],
                                          "lGamma": specs[0].parameters["nir_polg"],
                                          "nir": specs[0].parameters["nir_lambda"],
                                          "thz": specs[0].parameters["fel_lambda"], })
+
             if loadNorm:
                 sbData, lAlpha, lGamma, nir, thz = getData(norm)
             else:
@@ -2829,7 +2840,7 @@ def makeCurve(eta, isVertical):
                    + S2/2*(1-np.cos(eta))*sind(4*x)
     return analyzerCurve
 
-def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], anaDir = "V", plot=False,
+def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], vertAnaDir = True, plot=False,
                         save = False, plotRaw = lambda x, y: False, series = ''):
     """
     Fit a set of sideband data vs QWP angle to get the stoke's parameters
@@ -2838,7 +2849,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], anaDir = "V
                 expected keys. I don't think the errors are used (except for plotting?), or the wavelengths (but
                 left in for potential future use (wavelength dependent stuff?))
     :param wantedSBs: List of the wanted sidebands to fit out.
-    :param anaDir: direction of the analyzer ("V" or "H")
+    :param vertAnaDir: direction of the analzyer. True if vertical, false if horizontal.
     :param plot: True/False to plot alpha/gamma/dop. Alternatively, a list of "a", "g", "d" to only plot selected ones
     :param save: filename to save the files. Accepts BytesIO
     :param plotRaw: callable that takes an index of the sb and sb number, returns true to plot the raw curve
@@ -2895,7 +2906,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], anaDir = "V
             p0 = [1, 1, 0, 0]
 
         eta = 0.25 # QWP retardence, assume perfect for now
-        p, pcov = curve_fit(makeCurve(0.25, anaDir), angles, sbData, p0=p0)
+        p, pcov = curve_fit(makeCurve(0.25, vertAnaDir), angles, sbData, p0=p0)
 
         if plot and plotRaw(sbIdx, sbNum):
             # pg.figure("{}: sb {}".format(dataName, sbNum))
@@ -2971,8 +2982,8 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], anaDir = "V
         np.savetxt(dataFileName, np.array(sbFits), delimiter=',', header=origin_header,
                    comments='', fmt='%.6e')
 
-    print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 10]))
-    print("g = {:.2f} ± {:.2f}".format(sbFits[1, 11], sbFits[1, 12]))
+    # print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 10]))
+    # print("g = {:.2f} ± {:.2f}".format(sbFits[1, 11], sbFits[1, 12]))
 
     if plot:
         raise NotImplementedError("Sorry! You need to sort this out")
@@ -2994,8 +3005,8 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], anaDir = "V
     # pg.xlabel("Sideband (order)")
     # pg.ylabel("&gamma; (&deg;)")
 
-    print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 11]))
-    print("g = {:.2f} ± {:.2f}".format(sbFits[1, 12], sbFits[1, 13]))
+    # print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 11]))
+    # print("g = {:.2f} ± {:.2f}".format(sbFits[1, 12], sbFits[1, 13]))
 
     # pg.figure("{} - DOP".format(dataName))
     # pg.errorbar(sbFits[:,0], sbFits[:,14], sbFits[:,15], label=str("")+"")
@@ -3004,6 +3015,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], anaDir = "V
     # # pg.plot(sbFits[:,0], sbFits[:,14], label=str("")+"")
     # pg.xlabel("Sideband (order)")
     # pg.ylabel("DOP")
+    return sbFits, sbFitsDict
 
 ####################
 # Helper functions
