@@ -384,7 +384,6 @@ class NeonNoiseAnalysis(CCD):
         # self.results = np.array([self.high_noise, self.low_noise1, self.low_noise2, self.low_noise3, self.high_noise/average])
         self.results = np.array([self.high_noise_sig, self.high_noise_std, self.low_noise_sig, self.low_noise_std])
 
-
 def collect_noise(neon_list, param_name, folder_name, file_name, name='Signal'):
     """
     This function acts like save parameter sweep.
@@ -441,7 +440,6 @@ def collect_noise(neon_list, param_name, folder_name, file_name, name='Signal'):
     np.savetxt(os.path.join(folder_name, file_name), param_array, delimiter=',',
                header=header_total, comments='', fmt='%0.6e')
     print("Saved the file.\nDirectory: {}".format(os.path.join(folder_name, file_name)))
-
 
 class HighSidebandCCD(CCD):
     def __init__(self, hsg_thing, parameter_dict=None, spectrometer_offset=None):
@@ -1335,7 +1333,6 @@ class PMT(object):
 
             self.parameters = json.loads(param_str)
 
-
 class HighSidebandPMT(PMT):
     def __init__(self, file_path, verbose=False):
         """
@@ -1757,7 +1754,6 @@ class HighSidebandPMT(PMT):
             print("Saved PMT spectrum.\nDirectory: {}".format(
                 os.path.join(folder_str, spectra_fname)))
 
-
 class HighSidebandPMTOld(PMT):
     """
     Old version: Replaced March 01, 2017
@@ -2132,20 +2128,16 @@ class HighSidebandPMTOld(PMT):
         print("Saved PMT spectrum.\nDirectory: {}".format(
             os.path.join(folder_str, spectra_fname)))
 
-
 class TimeTrace(PMT):
     """
     This class will be able to handle time traces output by the PMT softare.
     """
-
     def __init__(self, file_path):
         super(HighSidebandPMT, self).__init__(file_path)
-
 
 class FullSpectrum(object):
     def __init__(self):
         pass
-
 
 class FullAbsorbance(FullSpectrum):
     """
@@ -2155,7 +2147,6 @@ class FullAbsorbance(FullSpectrum):
 
     def __init__(self):
         pass
-
 
 class FullHighSideband(FullSpectrum):
     """
@@ -2358,11 +2349,9 @@ class FullHighSideband(FullSpectrum):
         if verbose:
             print("Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname)))
 
-
 ####################
 # Fitting functions
 ####################
-
 def gauss(x, *p):
     """
     Gaussian fit function.
@@ -2405,7 +2394,6 @@ def lorentzian(x, *p):
     mu, A, gamma, y0 = p
     return (A / np.pi) * (gamma / ((x - mu) ** 2 + gamma ** 2)) + y0
 
-
 def background(x, *p):
     """
     Arbitrary pink-noise model background data for absorbance FFT
@@ -2422,7 +2410,6 @@ def background(x, *p):
     a, b = p
     return a * (1 / x) ** b
 
-
 def gaussWithBackground(x, *p):
     """
     Gaussian with pink-noise background function
@@ -2437,7 +2424,6 @@ def gaussWithBackground(x, *p):
     pGauss = p[:4]
     a, b = p[4:]
     return gauss(x, *pGauss) + background(x, a, b)
-
 
 ####################
 # Collection functions
@@ -3026,7 +3012,6 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], vertAnaDir 
 ####################
 # Helper functions
 ####################
-
 def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
     """
 
@@ -3164,7 +3149,6 @@ def fvb_crr(raw_array, offset=0, medianRatio=1, noiseCoeff=5, debugging=False):
 
     return np.array(d)
 
-
 def stitchData(dataList, plot=False):
     """
     Attempt to stitch together absorbance data. Will translate the second data set
@@ -3205,7 +3189,6 @@ def stitchData(dataList, plot=False):
     if max(first[:, 0]) > max(second[:, 0]):
         flipped = True
         first, second = second, first
-
 
 def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=[1,1]):
     """
@@ -3602,179 +3585,6 @@ def stitch_hsg_dicts_old(full, new_dict, need_ratio=False, verbose=False):
         print("I made this dictionary", sorted(full.keys()))
     return full
 
-
-def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit, verbose=False):
-    """
-    This function will take a fully processed list of spectrum objects and
-    slice Spectrum.sb_fits appropriately to get an output like:
-
-    "Parameter" | SB1 freq | err | SB1 amp | error | SB1 linewidth | error | SB2...| SBn...|
-    param1      |    .     |
-    param2      |    .     |
-      .
-      .
-      .
-
-    Currently I'm thinking fuck the offset y0
-    After constructing this large matrix, it will save it somewhere.
-    """
-    raise NotImplementedError("Replaced by functino below. ")
-    spectrum_list.sort(key=lambda x: x.parameters[param_name])
-    included_spectra = dict()
-    param_array = None
-    sb_included = []
-
-    for spec in spectrum_list:
-        sb_included = sorted(list(set(sb_included + list(spec.full_dict.keys()))))
-        included_spectra[spec.fname.split('/')[-1]] = spec.parameters[param_name]
-        # If these are from summed spectra, then only the the first file name
-        # from that sum will show up here, which should be fine?
-    if verbose:
-        # print "full name:", spectrum_list[0].fname
-        print("included names:", included_spectra)
-        print("sb_included:", sb_included)
-
-    for spec in spectrum_list:
-        temp_dict = {}  # This is different from full_dict in that the list has the
-        # sideband order as the zeroth element.
-        if verbose:
-            print("the sb_results:", spec.sb_results)
-        if spec.sb_results.ndim==1: continue
-        for index in range(len(spec.sb_results[:, 0])):
-            if verbose:
-                print("my array slice:", spec.sb_results[index, :])
-            temp_dict[int(round(spec.sb_results[index, 0]))] = np.array(spec.sb_results[index, :])
-
-        if verbose:
-            print(temp_dict)
-
-        for sb in sb_included:
-            blank = np.zeros(7)
-            blank[0] = float(sb)
-            # print "checking sideband order:", sb
-            # print "blank", blank
-            if sb not in temp_dict:
-                # print "\nNeed to add sideband order:", sb
-                temp_dict[sb] = blank
-        try:  # Why is this try-except here?
-            spec_data = np.array([float(spec.parameters[param_name])])
-        except:
-            spec_data = np.array([float(spec.parameters[param_name][:2])])
-        for key in sorted(temp_dict.keys()):
-            # print "I am going to hstack this:", temp_dict[key]
-            spec_data = np.hstack((spec_data, temp_dict[key]))
-
-        try:
-            param_array = np.vstack((param_array, spec_data))
-        except:
-            param_array = np.array(spec_data)
-        if verbose:
-            print("The shape of the param_array is:", param_array.shape)
-            # print "The param_array itself is:", param_array
-    '''
-    param_array_norm = np.array(param_array).T # python iterates over rows
-    for elem in [x for x in xrange(len(param_array_norm)) if (x-1)%7 == 3]:
-        temp_max = np.max(param_array_norm[elem])
-        param_array_norm[elem] = param_array_norm[elem] / temp_max
-        param_array_norm[elem + 1] = param_array_norm[elem + 1] / temp_max
-    '''
-    snipped_array = param_array[:, 0]
-    norm_array = param_array[:, 0]
-    if verbose:
-        print("Snipped_array is", snipped_array)
-    for ii in range(len(param_array.T)):
-        if (ii - 1) % 7 == 0:
-            if verbose:
-                print("param_array shape", param_array[:, ii])
-            snipped_array = np.vstack((snipped_array, param_array[:, ii]))
-            norm_array = np.vstack((norm_array, param_array[:, ii]))
-        elif (ii - 1) % 7 == 1:
-            snipped_array = np.vstack((snipped_array, param_array[:, ii]))
-            norm_array = np.vstack((norm_array, param_array[:, ii]))
-        elif (ii - 1) % 7 == 3:
-            snipped_array = np.vstack((snipped_array, param_array[:, ii]))
-
-            temp_max = np.max(param_array[:, ii])
-            norm_array = np.vstack((norm_array, param_array[:, ii] / temp_max))
-        elif (ii - 1) % 7 == 4:
-            snipped_array = np.vstack((snipped_array, param_array[:, ii]))
-            norm_array = np.vstack((norm_array, param_array[:, ii] / temp_max))
-
-    snipped_array = snipped_array.T
-    norm_array = norm_array.T
-
-    try:
-        os.mkdir(folder_str)
-    except TypeError:
-        pass # if you pass None as folder_str (for using byteIO)
-    except OSError as e:
-        if e.errno == errno.EEXIST:
-            pass
-        else:
-            raise
-
-    try:
-        included_spectra_str = json.dumps(included_spectra, sort_keys=True, indent=4, separators=(',', ': '))
-    except:
-        print("Source: save_parameter_sweep\nJSON FAILED")
-        return
-    included_spectra_str = included_spectra_str.replace('\n', '\n#')
-
-    included_spectra_str += '\n#' * (99 - included_spectra_str.count('\n'))
-    origin_import1 = param_name
-    origin_import2 = unit
-    origin_import3 = ""
-    for order in sb_included:
-        origin_import1 += ",Sideband,Frequency,error,Sideband strength,error,Linewidth,error"
-        origin_import2 += ",order,eV,,arb. u.,,meV,"
-        origin_import3 += ",,{0},,{0},,{0},".format(order)
-    origin_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
-
-    origin_import1 = param_name
-    origin_import2 = unit
-    origin_import3 = ""
-    for order in sb_included:
-        origin_import1 += ",Sideband,Frequency,Sideband strength,error"
-        origin_import2 += ",order,eV,arb. u.,"
-        origin_import3 += ",,{0},{0},".format(order)
-    origin_snip = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
-
-    header_total = '#' + included_spectra_str + '\n' + origin_total
-    header_snip = '#' + included_spectra_str + '\n' + origin_snip
-
-    # print "Spec header: ", spec_header
-    if verbose:
-        print("the param_array is:", param_array)
-
-    if isinstance(file_name, list):
-        if isinstance(file_name[0], io.BytesIO):
-            np.savetxt(file_name[0], param_array, delimiter=',',
-                       header=header_total, comments='', fmt='%0.6e')
-            np.savetxt(file_name[1], snipped_array, delimiter=',',
-                       header=header_snip, comments='', fmt='%0.6e')
-            np.savetxt(file_name[2], norm_array, delimiter=',',
-                       header=header_snip, comments='', fmt='%0.6e')
-            # Need to reset the file position if you want to read them immediately
-            # Is it better to do that here, or assume you'll do it later?
-            # I'm gonna assume here, because I can't currently think of a time when I'd want
-            # to be at the end of the file
-            [ii.seek(0) for ii in file_name]
-            if verbose:
-                print("Saved the file to bytes objects")
-    else:
-        norm_name = file_name + '_norm.txt'
-        snip_name = file_name + '_snip.txt'
-        file_name = file_name + '.txt'
-        np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
-                   header=header_total, comments='', fmt='%0.6e')
-        np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
-                   header=header_snip, comments='', fmt='%0.6e')
-        np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
-                   header=header_snip, comments='', fmt='%0.6e')
-        if verbose:
-            print("Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)))
-
-
 def save_parameter_sweep_no_sb(spectrum_list, file_name, folder_str, param_name, unit,
                          verbose=False):
     """
@@ -3926,7 +3736,6 @@ def save_parameter_sweep_no_sb(spectrum_list, file_name, folder_str, param_name,
         print("Saved the file.\nDirectory: {}".format(
             os.path.join(folder_str, file_name)))
 
-
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
                          wanted_indices = [1, 3, 4], skip_empties = False, verbose=False,
                          header_dict = {}):
@@ -3958,8 +3767,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         # if you pass two things because the param you want
         # is in a dict (e.g. field strength has mean/std)
         # do it that way
-        param_name_list = list(param_name)
+        param_name_list = list(param_name) # keep reference to old one
         paramGetter = lambda x: x.parameters[param_name_list[0]][param_name_list[1]]
+        # Keep the name for labeling things later on
         param_name = param_name[0]
     else:
         paramGetter = lambda x: x.parameters[param_name]
@@ -3977,7 +3787,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
     sb_included = []
     # how many parameters (area, strength, linewidth, pos, etc.) are there?
     # Here incase software changes and more things are kept in
-    # sb results
+    # sb results. Needed to handle how to slice the arrays
     try:
         num_params = spectrum_list[0].sb_results.shape[1]
     except IndexError:
@@ -3986,7 +3796,8 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         num_params = spectrum_list[0].sb_results.shape[0]
     # Rarely, there's an issue where I'm doing some testing and there's a set
     # where the first file has no sidebands in it, so the above thing returns 0
-    # It seems really silly to do a bunch of testing to try and correct for that..
+    # It seems really silly to do a bunch of testing to try and correct for that, so
+    # I'm going to hardcode the number of parameters.
     if num_params == 0:
         num_params = 7
 
@@ -3998,9 +3809,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         except AttributeError:
             print("No full dict?", spec.fname)
             print(spec.sb_list)
-        included_spectra[spec.fname.split('/')[-1]] = paramGetter(spec)
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
+        included_spectra[spec.fname.split('/')[-1]] = paramGetter(spec)
     if verbose:
         print("included names:", included_spectra)
         print("sb_included:", sb_included)
@@ -4037,7 +3848,6 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
                 print("new_spec", new_spec)
                 raise
             new_spec[found_idx, :] = sb_results
-
         spec_data = np.insert(new_spec.flatten(), 0, float(paramGetter(spec)))
 
         try:
@@ -4045,7 +3855,8 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         except:
             param_array = np.array(spec_data)
 
-
+    if param_array.ndim == 1: # if you only pass one spectra
+        param_array = param_array[None, :] # recast it to 2D for slicing
     # the indices we want from the param array from the passed argument
     snip = wanted_indices
     N = len(sb_included)
@@ -4088,6 +3899,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 
     # this will make the header chunk for the full, un-sliced data set
     # TODO: fix naming so you aren't looping twice
+    ### 1/9/18 This isn't needed, right? Why isn't it deleted?
     origin_import1 = param_name
     origin_import2 = unit
     origin_import3 = ""
@@ -4138,20 +3950,23 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
             if verbose:
                 print("Saved the file to bytes objects")
     else:
-        norm_name = file_name + '_norm.txt'
-        snip_name = file_name + '_snip.txt'
-        file_name = file_name + '.txt'
-        np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
-                   header=header_total, comments='', fmt='%0.6e')
-        np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
-                   header=header_snip, comments='', fmt='%0.6e')
-        np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
-                   header=header_snip, comments='', fmt='%0.6e')
-        if verbose:
-            print("Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)))
-    if verbose:
-        print("Saved the file.\nDirectory: {}".format(
-            os.path.join(folder_str, file_name)))
+        if file_name:
+            norm_name = file_name + '_norm.txt'
+            snip_name = file_name + '_snip.txt'
+            file_name = file_name + '.txt'
+            np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+                       header=header_total, comments='', fmt='%0.6e')
+            np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
+                       header=header_snip, comments='', fmt='%0.6e')
+            np.savetxt(os.path.join(folder_str, norm_name), norm_array, delimiter=',',
+                       header=header_snip, comments='', fmt='%0.6e')
+            if verbose:
+                print("Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)))
+        else:
+            if verbose:
+                print("Didn't save")
+    
+    return sb_included, param_array, snipped_array, norm_array
 
 def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
                                      folder_str, param_name, unit, verbose=False,
@@ -4194,7 +4009,6 @@ def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
         print("sb_included:", sb_included)
 
     param_array = np.array(sb_included)
-
 
     for spec in spectrum_list:
         temp_dict = spec.full_dict.copy()
@@ -4257,16 +4071,6 @@ def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
         origin_import2 += ",eV,,arb. u.,,meV,"
         origin_import3 += ",{0},,{0},,{0},".format(param)
     origin_total = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
-    # print "origin import:",
-    # print origin_total
-    # origin_import1 = "Sideband"
-    # origin_import2 = "Order"
-    # origin_import3 = "SB"
-    # for param in params:
-    #     origin_import1 += ",Frequency,Sideband strength,error"
-    #     origin_import2 += ",eV,arb. u.,"
-    #     origin_import3 += ",{0},{0},".format(param)
-    # origin_snip = origin_import1 + "\n" + origin_import2 + "\n" + origin_import3
 
     # This little chunk will make a chunk block of header strings for the sliced
     # data set which can be looped over
@@ -4293,12 +4097,14 @@ def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
     # print "Spec header: ", spec_header
     if verbose:
         print("the param_array is:", param_array)
-    np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
-               header=header_total, comments='', fmt='%0.6e')
-    np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
-               header=header_snip, comments='', fmt='%0.6e')
+    if file_name: # allow passing false (or empty string) to prevent saving
+        np.savetxt(os.path.join(folder_str, file_name), param_array, delimiter=',',
+                   header=header_total, comments='', fmt='%0.6e')
+        np.savetxt(os.path.join(folder_str, snip_name), snipped_array, delimiter=',',
+                   header=header_snip, comments='', fmt='%0.6e')
     if verbose:
         print("Saved the file.\nDirectory: {}".format(os.path.join(folder_str, file_name)))
+    return None
 
 def stitchData(dataList, plot=False):
     """
