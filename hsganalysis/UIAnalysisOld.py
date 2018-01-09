@@ -3,6 +3,10 @@
 Created on Mon Jun 01 16:01:43 2015
 
 @author: dvalovcin
+
+01/02/18
+This file is before I'm trying to update it to do more processing on QWP sweeps and
+other various sweeps
 """
 import os
 
@@ -15,14 +19,8 @@ from pyqtgraph.parametertree import Parameter
 # import hsganalysis as hsg # local file, not global, no hsg.hsg
 import newhsganalysis as hsg
 
-try:
-    from .UI.mainWin_ui import Ui_MainWindow
-    from .UI.qwpCompWin_ui import Ui_PolarimeterWindow
-    from .UI.draggablePlotWidget import DraggablePlotWidget, DraggableViewBox
-except ModuleNotFoundError:
-    from UI.mainWin_ui import Ui_MainWindow
-    from UI.qwpCompWin_ui import Ui_PolarimeterWindow
-    from UI.draggablePlotWidget import DraggablePlotWidget, DraggableViewBox
+from UI.mainWin_ui import Ui_MainWindow
+from UI.draggablePlotWidget import DraggablePlotWidget, DraggableViewBox
 try:
     import interactivePG as ipg
 except:
@@ -30,10 +28,7 @@ except:
 # fileList = dict()
 fileList = []
 combinedWindowList = []
-combinedSpectraWindowList = []
-combinedFitSpectraWindowList = []
 combinedWindowImageList = []
-qwpSweepWindowList = []
 
 class myDict(dict):
     def get(self, k, d=None):
@@ -316,7 +311,9 @@ class BaseWindow(QtWidgets.QMainWindow):
 
     def openFile(self, filename):
         filename = str(filename)
+
         dataObj = self.dataClass(filename)
+
 
         if dataObj.parameters["series"]:
             self.setWindowTitle(dataObj.parameters["series"])
@@ -342,6 +339,7 @@ class BaseWindow(QtWidgets.QMainWindow):
         except TypeError:
             params = self.genParametersOldFormat(parent=p, **dataObj.parameters)
         self.ui.ptFile.setParameters(p, showTop=True)
+
 
     @staticmethod
     def getWindowClass(fname):
@@ -565,6 +563,7 @@ class BaseWindow(QtWidgets.QMainWindow):
         if not event.mimeData().hasUrls():
             event.reject()
             return
+
         # Force Qt to "Copy" the file instead of
         # "Move", preventing it from removing the
         # file from the directory.
@@ -577,9 +576,6 @@ class BaseWindow(QtWidgets.QMainWindow):
         # Only one file was dropped
         if len(event.mimeData().urls()) == 1:
             filename = str(event.mimeData().urls()[0].toLocalFile())
-            if os.path.isdir(filename):
-                self.handleFolderDrop(filename)
-                return
             c = BaseWindow.getWindowClass(filename)
             try:
                 a = c(filename, parentWin=self)
@@ -624,16 +620,6 @@ class BaseWindow(QtWidgets.QMainWindow):
                         a.setWindowTitle("Series: {}".format(obj.parameters["series"]))
         if self.dataObj is None: # I'm the first window. Get outta here!
             self.close()
-
-    def handleFolderDrop(self, folder):
-        if "VAna" in folder or "HAna" in folder:
-            # handle a QWP sweep drop
-            laserParams, rawData = hsg.hsg_combine_qwp_sweep(folder, save=False, verbose=False)
-            _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams, vertAnaDir="VAna" in folder,
-                                    series=folder)
-            a = QWPSweepWindow(rawData, fitDict)
-            qwpSweepWindowList.append(a)
-            a.setWindowTitle(str(os.path.basename(folder)))
 
     def handleFitDragEvent(self, obj, val):
         """
@@ -760,6 +746,7 @@ class BaseWindow(QtWidgets.QMainWindow):
         self.sigClosed.emit(self)
         super(BaseWindow, self).closeEvent(event)
 
+
 class HSGPMTWindow(BaseWindow):
     dataClass = hsg.HighSidebandPMT
 
@@ -779,6 +766,7 @@ class HSGPMTWindow(BaseWindow):
         self.fitsPlot.setData(
             *self.dataObj.initial_data[:,[0,-1]].T
         )
+
 
 class HSGWindow(BaseWindow):
     dataClass = hsg.HighSidebandCCD
@@ -1030,6 +1018,7 @@ class HSGWindow(BaseWindow):
 
         return oldName, newName
 
+
 class HSGImageWindow(HSGWindow):
     # dataClass = object
     def __init__(self, *args, **kwargs):
@@ -1251,73 +1240,15 @@ class ComparisonWindow(QtWidgets.QMainWindow):
         pen.setColor(color)
         p.setPen(pen)
 
-class SpectrumComparisonWindow(ComparisonWindow):
-    """
-    for comparing spectra directly
-    """
-    pass
-
-class FitComparisonWindow(ComparisonWindow):
-    """
-    for comparing fits directly
-    """
-    pass
-
 class ComparisonImageWindow(ipg.ImageView):
     pass
-
-class QWPSweepWindow(BaseWindow):
-    # sigClosed = QtCore.pyqtSignal(object)
-    def __init__(self, rawData, fitDict):
-        # super(QWPSweepWindow, self).__init__()
-        self.rawData = rawData
-        self.fitDict = fitDict
-        # give a sideband, return the index to be used to
-        # get the appropriate parameter from fitDict
-        self.sbToIdx = {sb: idx for idx, sb in enumerate(fitDict["alpha"][:,0])}
-        super(QWPSweepWindow, self).__init__(inp=None)
-        # self.initUI()
-        self.updateRawPlot(True)
-        self.show()
-
-    def initUI(self):
-        self.ui = Ui_PolarimeterWindow()
-        self.ui.setupUi(self)
-
-        ## todo: plot the angles
-
-        menu = self.menuBar().addMenu("Plot Raw Curves")
-        for sb in self.sbToIdx.keys():
-            act = menu.addAction(f"{sb}")
-            act.setCheckable(True)
-            act.triggered.connect(self.updateRawPlot)
-
-    def updateRawPlot(self, val):
-        if not val:
-            #todo remove the curve
-            return
-        # todo make this for the sidebands
-        self.ui.gRaw.addLegend()
-        a = self.ui.gRaw.plot(self.rawData[1:,0], self.rawData[1:,1], 'o-',
-                          name = "{} a = {:.1f}±{:.1f}, g = {:.1f}±{:.1f}".format(0, self.fitDict["alpha"][1, 1],
-                                                                   self.fitDict["alpha"][1, 2],
-                                                                   self.fitDict["gamma"][1, 1],
-                                                                   self.fitDict["gamma"][1, 2]))
-        self.ui.gRaw.updateLegendNames(a)
-
-
-
-    def closeEvent(self, event):
-        self.sigClosed.emit(self)
-        super(QWPSweepWindow, self).closeEvent(event)
 
 def updateFileClose(obj):
     try:
         fileList.remove(obj)
     except Exception as e:
         print("Error removing file from fileList:", e, obj)
-    if not any([fileList, combinedWindowImageList, combinedFitSpectraWindowList, combinedSpectraWindowList,
-                combinedWindowList, qwpSweepWindowList]):
+    if not fileList and not combinedWindowList:
         ex.exit(0)
 
 def updateCompClose(obj):
