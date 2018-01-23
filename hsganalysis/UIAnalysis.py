@@ -4,7 +4,7 @@ Created on Mon Jun 01 16:01:43 2015
 
 @author: dvalovcin
 """
-import os
+import os, glob
 
 import numpy as np
 import pyqtgraph as pg
@@ -329,7 +329,8 @@ class BaseWindow(QtWidgets.QMainWindow):
         # self.ui.ptFile.setParameters(self.specParams, showTop=True)
 
         self.processSingleData(dataObj)
-        self.ui.ptFile.setToolTip(filename)
+        # self.ui.ptFile.setToolTip(filename)
+        self.ui.ptFile.listAllItems()[0].setToolTip(0, filename)
 
     def processSingleData(self, dataObj):
         self.dataObj = dataObj
@@ -570,6 +571,7 @@ class BaseWindow(QtWidgets.QMainWindow):
         # file from the directory.
         event.setDropAction(QtCore.Qt.CopyAction)
 
+        # I forget where I was going with this one...
         if event.keyboardModifiers() & QtCore.Qt.ShiftModifier:
             print("held shift")
 
@@ -579,14 +581,14 @@ class BaseWindow(QtWidgets.QMainWindow):
             filename = str(event.mimeData().urls()[0].toLocalFile())
             if os.path.isdir(filename):
                 self.handleFolderDrop(filename)
-                return
-            c = BaseWindow.getWindowClass(filename)
-            try:
-                a = c(filename, parentWin=self)
-            except Exception as e:
-                raise
             else:
-                fileList.append(a)
+                cls = BaseWindow.getWindowClass(filename)
+                try:
+                    a = cls(filename, parentWin=self)
+                except Exception as e:
+                    raise
+                else:
+                    fileList.append(a)
         # Multiple files were dropped
         else:
             # Make a list of all of them, cuttingout the "seriesed" ones
@@ -610,14 +612,14 @@ class BaseWindow(QtWidgets.QMainWindow):
                 # spectrum. Setting the window title
                 # to the spectrometer wavelength is kinda random
                 if obj.parameters["series"] == "":
-                    c = BaseWindow.getWindowClass(obj.fname)
-                    fileList.append(c(obj, parentWin=self))
+                    cls = BaseWindow.getWindowClass(obj.fname)
+                    fileList.append(cls(obj, parentWin=self))
                     if self.titlePath is None:
                         # default to center for window title unless we've been messing around
                         fileList[-1].setWindowTitle(str(obj.parameters["center_lambda"]))
                 else:
-                    c = BaseWindow.getWindowClass(obj.fname)
-                    a = c(obj, parentWin=self)
+                    cls = BaseWindow.getWindowClass(obj.fname)
+                    a = cls(obj, parentWin=self)
                     fileList.append(a)
                     if self.titlePath is None:
                         # default to series for window title unless we've been messing around
@@ -631,7 +633,14 @@ class BaseWindow(QtWidgets.QMainWindow):
             laserParams, rawData = hsg.hsg_combine_qwp_sweep(folder, save=False, verbose=False)
             _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams, vertAnaDir="VAna" in folder,
                                     series=folder)
-            a = QWPSweepWindow(rawData, fitDict)
+            # pass the first file so you can load general parameters.
+            # The only thing that should change between parameters is
+            # the exact FEL settings, and the rotation angle.
+            #
+            # exposure, center lambda, NIR settings and all that should
+            # still be the same, so just grabbing the first hsould be acceptable.
+            fname = glob.glob(os.path.join(folder, "*.txt"))[0]
+            a = QWPSweepWindow(rawData, fitDict, fname)
             qwpSweepWindowList.append(a)
             a.setWindowTitle(str(os.path.basename(folder)))
 
@@ -786,9 +795,13 @@ class HSGWindow(BaseWindow):
     def __init__(self, *args, **kwargs):
         self.curveFits = {}
         super(HSGWindow, self).__init__(*args, **kwargs)
-        self.sbLine = pg.InfiniteLine(pos = 750, movable=True)
+
+    def initUI(self):
+        super(HSGWindow, self).initUI()
+        self.sbLine = pg.InfiniteLine(pos=750, movable=True)
         self.ui.gSpectrum.addItem(self.sbLine)
         self.sbLine.sigPositionChanged.connect(self.updateSBCalc)
+
 
     def inheritParent(self, parent):
         if isinstance(parent, HSGWindow):
@@ -923,7 +936,8 @@ class HSGWindow(BaseWindow):
             {"name":"NIR Frequency", "type":"list",
                 "values":["{:.3f} nm".format(kwargs.get("nir_lambda", 0)),
                           "{:.2f} cm-1".format(1e7/kwargs.get("nir_lambda", 1))]},
-            {"name":"NIR Polarization", "type":"str", "value":kwargs.get("nir_pol", "?"), "readonly":True},
+            {"name":"NIR Polarization", "type":"str", "value":
+                "{}{}{}".format(kwargs.get("nir_pola", ""), kwargs.get("nir_polg", ""), kwargs.get("nir_pol", "")), "readonly":True},
             {"name": "Detector Pol", "type": "float",
                 "value": kwargs.get("detectorHWP", "-1"), "readonly":True},
             {"name": "Fit NIR (cm-1)", "type": "float",
@@ -1036,11 +1050,10 @@ class HSGImageWindow(HSGWindow):
         super(HSGImageWindow, self).__init__(*args, **kwargs)
         self.ui.gSpectrum.removeItem(self.sbLine)
 
-
     def inheritParent(self, parent):
-        if isinstance(parent, HSGImageWindow):
-            self.ui.gSpectrum.setLevels(*parent.ui.gSpectrum.ui.histogram.getLevels())
-
+        pass
+        # if isinstance(parent, HSGImageWindow):
+        #     self.ui.gSpectrum.setLevels(*parent.ui.gSpectrum.ui.histogram.getLevels())
 
     def initUI(self):
         self.ui = Ui_MainWindow()
@@ -1064,6 +1077,13 @@ class HSGImageWindow(HSGWindow):
         ret = self.makeTitleActionList()
         self.ui.menubar.addMenu(ret)
         self.ret = ret
+
+
+        # move the default ROI to where I want it
+        self.ui.gSpectrum.roi.setPos(1)
+        self.ui.gSpectrum.roi.setAngle(90)
+        self.ui.gSpectrum.roi.setSize(-159)
+
 
 
         self.show()
@@ -1100,9 +1120,8 @@ class HSGImageWindow(HSGWindow):
             img = np.vstack((img, self.ui.gSpectrum.image))
         combinedWindowImageList[-1].setImage(img)
 
-
     def plotSpectrum(self):
-        self.ui.gSpectrum.setImage(self.dataObj.proc_data)
+        self.ui.gSpectrum.setImage(self.dataObj.proc_data, cmap="grey")
 
 class AbsWindow(BaseWindow):
     dataClass = hsg.Absorbance
@@ -1266,25 +1285,81 @@ class FitComparisonWindow(ComparisonWindow):
 class ComparisonImageWindow(ipg.ImageView):
     pass
 
-class QWPSweepWindow(BaseWindow):
+# class QWPSweepWindow(BaseWindow):
+class QWPSweepWindow(HSGWindow):
     # sigClosed = QtCore.pyqtSignal(object)
-    def __init__(self, rawData, fitDict):
+    dataClass = hsg.HighSidebandCCD
+    def __init__(self, rawData, fitDict, fname):
         # super(QWPSweepWindow, self).__init__()
         self.rawData = rawData
         self.fitDict = fitDict
         # give a sideband, return the index to be used to
         # get the appropriate parameter from fitDict
         self.sbToIdx = {sb: idx for idx, sb in enumerate(fitDict["alpha"][:,0])}
+        self._rawPlotCurves = {}
         super(QWPSweepWindow, self).__init__(inp=None)
-        # self.initUI()
-        self.updateRawPlot(True)
+
+        self.processSingleData(self.dataClass(fname))
         self.show()
+    #
+    # # Take the one from HSG window...
+    # genParameters = HSGWindow.genParameters
+    # genParametersOldFormat = HSGWindow.genParametersOldFormat
+
+    def processSingleData(self, dataObj):
+        self.dataObj = dataObj
+        p = Parameter.create(
+            name=dataObj.fname,
+            type='group')
+        self.specParams = p
+        try:
+            params = self.genParameters(parent=p, **dataObj.parameters)
+        except TypeError:
+            params = self.genParametersOldFormat(parent=p, **dataObj.parameters)
+        self.ui.ptFile.setParameters(p, showTop=True)
 
     def initUI(self):
         self.ui = Ui_PolarimeterWindow()
         self.ui.setupUi(self)
 
-        ## todo: plot the angles
+        a = self.ui.gAngles.errorbars(self.fitDict["alpha"][:, 0],
+                                  self.fitDict["alpha"][:, 1],
+                                  self.fitDict["alpha"][:, 2],
+                                  'bo-')
+        self._rawPlotCurves["alpha"] = a
+        self.ui.gAngles.plotItem.axes["left"]["item"].setPen('b', width=2)
+        self.ui.gAngles.plotItem.axes["left"]["item"].setLabel(
+            "&alpha; (<sup>&deg;</sup>)")
+        self.ui.gAngles.plotItem.axes["right"]["item"].setLabel(
+            "&gamma; (<sup>&deg;</sup>)")
+        self.ui.gAngles.plotItem.axes["bottom"]["item"].setLabel("Sideband (order)")
+
+        pi = self.ui.gAngles.plotItem
+
+
+        p2 = ipg.pg.ViewBox()
+        pi.getAxis("right").linkToView(p2)
+        pi.scene().addItem(p2)
+        p2.setXLink(pi.vb)
+
+        errorCurve = ipg.curves.PlotDataErrorItem.PlotDataErrorItem(
+            self.fitDict["gamma"][:, 0],
+            self.fitDict["gamma"][:, 1],
+            self.fitDict["gamma"][:, 2],
+            'ko-')
+        self._rawPlotCurves["gamma"] = errorCurve
+
+        p2.addItem(errorCurve)
+
+        pi.vb.sigResized.connect(lambda: p2.setGeometry(pi.vb.sceneBoundingRect()))
+
+        menu = self.menuBar().addMenu("Max SB plotted")
+        ag = QtWidgets.QActionGroup(self)
+        for sb in self.sbToIdx.keys():
+            act = menu.addAction(f"{sb}")
+            ag.addAction(act)
+            act.setCheckable(True)
+            act.triggered.connect(self.updateAnglesPlot)
 
         menu = self.menuBar().addMenu("Plot Raw Curves")
         for sb in self.sbToIdx.keys():
@@ -1292,20 +1367,60 @@ class QWPSweepWindow(BaseWindow):
             act.setCheckable(True)
             act.triggered.connect(self.updateRawPlot)
 
-    def updateRawPlot(self, val):
-        if not val:
-            #todo remove the curve
-            return
-        # todo make this for the sidebands
+        self.ui.splitter.setStretchFactor(1, 10)
         self.ui.gRaw.addLegend()
-        a = self.ui.gRaw.plot(self.rawData[1:,0], self.rawData[1:,1], 'o-',
-                          name = "{} a = {:.1f}±{:.1f}, g = {:.1f}±{:.1f}".format(0, self.fitDict["alpha"][1, 1],
-                                                                   self.fitDict["alpha"][1, 2],
-                                                                   self.fitDict["gamma"][1, 1],
-                                                                   self.fitDict["gamma"][1, 2]))
-        self.ui.gRaw.updateLegendNames(a)
+
+    def updateAnglesPlot(self):
+        senderSB = float(self.sender().text())
+        senderidx = self.sbToIdx[senderSB]
+
+        self._rawPlotCurves["alpha"].setData(
+            x = self.fitDict["alpha"][:senderidx, 0],
+            y = self.fitDict["alpha"][:senderidx, 1],
+            errorbars = self.fitDict["alpha"][:senderidx, 2],
+        )
+
+        self._rawPlotCurves["gamma"].setData(
+            x=self.fitDict["gamma"][:senderidx, 0],
+            y=self.fitDict["gamma"][:senderidx, 1],
+            errorbars=self.fitDict["gamma"][:senderidx, 2],
+        )
+
+    def updateRawPlot(self, val):
+        if self.sender() is None: return
+        try:
+            senderSB = float(self.sender().text())
+        except:
+            print(self.sender())
+            raise
+        if not val:
+            # self._rawPlotCurves[senderSB].hide()
+            self._rawPlotCurves[senderSB].setVisible(False)
+            return
+
+        if senderSB in self._rawPlotCurves:
+            # self._rawPlotCurves[senderSB].show()
+            self._rawPlotCurves[senderSB].setVisible(True)
+            return
+        idx = self.sbToIdx[int(senderSB)]
 
 
+        # a = self.ui.gRaw.plot(self.rawData[1:,0], self.rawData[1:,2*idx-1], 'o-',
+        #       name = "{} &alpha; = {:.1f}±{:.1f}, &gamma; = {:.1f}±{:.1f}".format(senderSB,
+        #                 self.fitDict["alpha"][idx, 1], self.fitDict["alpha"][idx, 2],
+        #                 self.fitDict["gamma"][idx, 1], self.fitDict["gamma"][idx, 2]))
+        a = self.ui.gRaw.errorbars(self.rawData[1:, 0],
+                                   self.rawData[1:, 2 * idx - 1],
+                                   self.rawData[1:, 2 * idx], 'o-',
+                              name="{} &alpha; = {:.1f}±{:.1f}, &gamma; = {:.1f}±{:.1f}".format(
+                                  senderSB,
+                                  self.fitDict["alpha"][idx, 1],
+                                  self.fitDict["alpha"][idx, 2],
+                                  self.fitDict["gamma"][idx, 1],
+                                  self.fitDict["gamma"][idx, 2]))
+
+        self._rawPlotCurves[senderSB] = a
+        # self.ui.gRaw.updateLegendNames(a)
 
     def closeEvent(self, event):
         self.sigClosed.emit(self)
@@ -1314,6 +1429,8 @@ class QWPSweepWindow(BaseWindow):
 def updateFileClose(obj):
     try:
         fileList.remove(obj)
+    except ValueError:
+        pass
     except Exception as e:
         print("Error removing file from fileList:", e, obj)
     if not any([fileList, combinedWindowImageList, combinedFitSpectraWindowList, combinedSpectraWindowList,
@@ -1370,7 +1487,9 @@ if __name__=="__main__":
                                                  "cl":combinedWindowList,
                                                  "ci":combinedWindowImageList,
                                                  "pg":pg,
-                                                 "conv":converter})
+                                                 "conv":converter,
+                                                 "qwp": qwpSweepWindowList,
+                                                 "ipg": ipg})
     consoleWindow.show()
     consoleWindow.lower()
 

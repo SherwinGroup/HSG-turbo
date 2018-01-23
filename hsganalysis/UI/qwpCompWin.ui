@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>724</width>
-    <height>496</height>
+    <width>800</width>
+    <height>600</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -26,10 +26,11 @@
        </attribute>
        <layout class="QHBoxLayout" name="horizontalLayout_2">
         <item>
-         <widget class="QSplitter" name="splitSpectrum">
+         <widget class="QSplitter" name="splitter">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
           </property>
+          <widget class="ParameterTree" name="ptFile" native="true"/>
           <widget class="DraggablePlotWidget" name="gAngles"/>
          </widget>
         </item>
@@ -59,7 +60,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>724</width>
+     <width>800</width>
      <height>21</height>
     </rect>
    </property>
@@ -71,6 +72,12 @@
    <class>DraggablePlotWidget</class>
    <extends>QGraphicsView</extends>
    <header>draggablePlotWidget</header>
+  </customwidget>
+  <customwidget>
+   <class>ParameterTree</class>
+   <extends>QWidget</extends>
+   <header>pyqtgraph.parametertree</header>
+   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources/>

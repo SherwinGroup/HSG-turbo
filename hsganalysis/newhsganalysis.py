@@ -1077,11 +1077,20 @@ class HighSidebandCCD(CCD):
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.diag(var_list)))))
                 except RuntimeWarning:
                     sb_fits.append(np.hstack((self.sb_list[elem], coeff, np.sqrt(np.abs(np.diag(var_list))))))
+
+                # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
+                # self.sb_guess[elem, 2] is the relative error as calculated by the guess_sidebands method
+                # coeff[1] is the area from the fit.  Therefore, the product should be the absolute error
+                # of the integrated area of the sideband.  The other errors are still underestimated.
+                #
+                # 1/12/18 note: So it looks like what hunter did is calculate an error estimate
+                # for the strength/area by the quadrature sum of errors of the points in the peak
+                # (from like 813 in guess_sidebands:
+                #    error_est = np.sqrt(sum([i ** 2 for i in error[found_index - 1:found_index + 2]])) / (
+                # Where the error is what comes from the CCD by averaging 4 spectra. As far as I can tell,
+                # it doesn't currently pull in the dark counts or anything like that, except maybe
+                # indirectly since it'll cause the variations in the peaks
                 sb_fits[-1][6] = self.sb_guess[elem, 2] * coeff[1]
-                    # the var_list wasn't approximating the error well enough, even when using sigma and absoluteSigma
-                    # self.sb_guess[elem, 2] is the relative error as calculated by the guess_sidebands method
-                    # coeff[1] is the area from the fit.  Therefore, the product should be the absolute error
-                    # of the integrated area of the sideband.  The other errors are still underestimated.
                 if verbose:
                     print("\tRel.Err: {:.4e}  |  Abs.Err: {:.4e}".format(
                         self.sb_guess[elem, 2], coeff[1] * self.sb_guess[elem, 2]
@@ -2832,7 +2841,7 @@ def makeCurve(eta, isVertical):
                    + S2/2*(1-np.cos(eta))*sind(4*x)
     return analyzerCurve
 
-def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], vertAnaDir = True, plot=False,
+def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir = True, plot=False,
                         save = False, plotRaw = lambda x, y: False, series = ''):
     """
     Fit a set of sideband data vs QWP angle to get the stoke's parameters
@@ -2869,6 +2878,12 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = [0], vertAnaDir 
     angles = allSbData[1:, 0]
 
     allSbData = allSbData[:, 1:] # trim out the angles
+
+    if wantedSBs is None:
+        # set to get rid of duplicates, 1: to get rid of the -1 used for
+        # getting arrays the right shape
+        wantedSBs = set(allSbData[0, 1:])
+
     # Make an array to keep all of the sideband information.
     # Start it off by keeping the NIR information (makes for easier plotting into origin)
     sbFits = [[0] + [-1] * 8 + [lAlpha, ldAlpha, lGamma, ldGamma, lDOP, ldDOP]]
@@ -3738,7 +3753,7 @@ def save_parameter_sweep_no_sb(spectrum_list, file_name, folder_str, param_name,
 
 def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
                          wanted_indices = [1, 3, 4], skip_empties = False, verbose=False,
-                         header_dict = {}):
+                         header_dict = {}, only_even=False):
     """
     This function will take a fully processed list of spectrum objects and
     slice Spectrum.sb_fits appropriately to get an output like:
@@ -3759,6 +3774,8 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 
     skip_empties: If False, will add a row of zeroes for the parameter even if no sidebands
     are found. If True, will not add a line for that parameter
+
+    only_even: don't include odd orders in the saved sweep
 
     [sb number, Freq (eV), Freq error (eV), Gauss area (arb.), Area error, Gauss linewidth (eV), Linewidth error (eV)]
     [    0    ,      1   ,        2,      ,        3         ,      4    ,         5           ,        6            ]
@@ -3812,6 +3829,9 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         # If these are from summed spectra, then only the the first file name
         # from that sum will show up here, which should be fine?
         included_spectra[spec.fname.split('/')[-1]] = paramGetter(spec)
+
+    if only_even:
+        sb_included = [ii for ii in sb_included if not ii%2]
     if verbose:
         print("included names:", included_spectra)
         print("sb_included:", sb_included)
@@ -3847,7 +3867,20 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
             except:
                 print("new_spec", new_spec)
                 raise
-            new_spec[found_idx, :] = sb_results
+            try:
+                if only_even:
+                    new_spec[found_idx, :] = sb_results[sb_results[:,0]%2==0]
+                else:
+                    new_spec[found_idx, :] = sb_results
+            except ValueError:
+                print(spec.fname)
+                print("included:", sb_included)
+                print("found:", found_sb, found_idx)
+                print(new_spec.shape, sb_results.shape)
+                print(sb_results)
+                print(new_spec)
+                raise
+
         spec_data = np.insert(new_spec.flatten(), 0, float(paramGetter(spec)))
 
         try:
@@ -4365,6 +4398,30 @@ def get_data_and_header(fname, returnOrigin = False):
     if returnOrigin:
         return header, data, oh
     return header, data
+
+def natural_glob(*args):
+    # glob/python sort alphabetically, so 1, 10, 11, .., 2, 21,
+    # but I sometimes wnat "natural" sorting: 1, 2, 3, ..., 10, 11, 12, ..., 20, 21, 21 ...
+    # There's tons of stack overflows, so I grabbed one of them. I put it in here
+    # because I use it all the damned time. I also almost always use it when
+    # glob.glob'ing, so just internally do it that way
+    #
+    # This is taken from
+    # https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
+
+    import re
+    def atoi(text):
+        return int(text) if text.isdigit() else text
+
+    def natural_keys(text):
+        '''
+        alist.sort(key=natural_keys) sorts in human order
+        http://nedbatchelder.com/blog/200712/human_sorting.html
+        (See Toothy's implementation in the comments)
+        '''
+        return [atoi(c) for c in re.split('(\d+)', text)]
+
+    return sorted(glob.glob(os.path.join(*args)), key=natural_keys)
 
 ####################
 # Smoothing functions
