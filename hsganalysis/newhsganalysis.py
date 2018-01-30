@@ -2842,7 +2842,8 @@ def makeCurve(eta, isVertical):
     return analyzerCurve
 
 def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir = True, plot=False,
-                        save = False, plotRaw = lambda x, y: False, series = ''):
+                        save = False, plotRaw = lambda x, y: False, series = '',
+                        **kwargs):
     """
     Fit a set of sideband data vs QWP angle to get the stoke's parameters
     :param data: data in the form of the return of hsg_combine_qwp_sweep
@@ -2855,6 +2856,8 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
     :param save: filename to save the files. Accepts BytesIO
     :param plotRaw: callable that takes an index of the sb and sb number, returns true to plot the raw curve
     :param series: a string to be put in the header for the origin files
+
+    if saveStokes is in kwargs and False, it will not save the stokes parameters, since I rarely actually use them.
     :return:
     """
     defaultLaserParams = {
@@ -2876,6 +2879,15 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
                                                     defaultLaserParams["ldDOP"]
     allSbData = data
     angles = allSbData[1:, 0]
+
+    # angles += -5
+    # print("="*20)
+    # print("\n"*3)
+    # print("             WARNING")
+    # print("\n"*3)
+    # print("ANGLES HAVE BEEN MANUALLY OFFEST IN proc_n_fit_qwp_data")
+    # print("\n"*3)
+    # print("="*20)
 
     allSbData = allSbData[:, 1:] # trim out the angles
 
@@ -2980,13 +2992,25 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
                 # sbFits = np.insert(sbFits, 10, sbFits[:, 9] - lAlpha, axis=1)
                 # sbFits = sbFits[sbFits[:, 0].argsort()]
 
-    origin_header = 'Sideband,S0,S0 err,S1,S1 err,S2,S2 err,S3,S3 err,alpha,alpha err,gamma,gamma err,DOP,DOP err\n'
+    origin_header = "#\n"*100 # to fit all other files for easy origin importing
+    origin_header += 'Sideband,S0,S0 err,S1,S1 err,S2,S2 err,S3,S3 err,alpha,alpha err,gamma,gamma err,DOP,DOP err\n'
     origin_header += 'Order,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,arb.u,deg,deg,deg,deg,arb.u.,arb.u.\n'
     origin_header += 'Sideband,{},{},{},{},{},{},{},{},{},{},{},{},{},{}'.format(*["{}".format(series)] * 14)
     sbFits = sbFits[sbFits[:, 0].argsort()]
 
     if isinstance(save, str):
-        np.savetxt(dataFileName, np.array(sbFits), delimiter=',', header=origin_header,
+        sbFitsSave = sbFits
+        if not kwargs.get("saveStokes", True):
+            headerlines = origin_header.splitlines()
+            ln, units, coms = headerlines[-3:]
+            ln = ','.join([ln.split(',')[0]] + ln.split(',')[9:])
+            units = ','.join([units.split(',')[0]] + units.split(',')[9:])
+            coms = ','.join([coms.split(',')[0]] + coms.split(',')[9:])
+            headerlines[-3:] = ln, units, coms
+            # remove them from the save data
+            origin_header = '\n'.join(headerlines)
+            sbFitsSave = np.delete(sbFits, range(1, 9), axis=1)
+        np.savetxt(save, np.array(sbFitsSave), delimiter=',', header=origin_header,
                    comments='', fmt='%.6e')
 
     # print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 10]))

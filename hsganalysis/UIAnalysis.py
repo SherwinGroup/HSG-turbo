@@ -937,7 +937,7 @@ class HSGWindow(BaseWindow):
                 "values":["{:.3f} nm".format(kwargs.get("nir_lambda", 0)),
                           "{:.2f} cm-1".format(1e7/kwargs.get("nir_lambda", 1))]},
             {"name":"NIR Polarization", "type":"str", "value":
-                "{}{}{}".format(kwargs.get("nir_pola", ""), kwargs.get("nir_polg", ""), kwargs.get("nir_pol", "")), "readonly":True},
+                "α={}°, γ={}° {}".format(kwargs.get("nir_pola", ""), kwargs.get("nir_polg", ""), kwargs.get("nir_pol", "")), "readonly":True},
             {"name": "Detector Pol", "type": "float",
                 "value": kwargs.get("detectorHWP", "-1"), "readonly":True},
             {"name": "Fit NIR (cm-1)", "type": "float",
@@ -1395,13 +1395,15 @@ class QWPSweepWindow(HSGWindow):
             raise
         if not val:
             # self._rawPlotCurves[senderSB].hide()
-            self._rawPlotCurves[senderSB].setVisible(False)
+            self.ui.gRaw.removeItem(self._rawPlotCurves[senderSB])
+            # self._rawPlotCurves[senderSB].setVisible(False)
+            del self._rawPlotCurves[senderSB]
             return
 
-        if senderSB in self._rawPlotCurves:
-            # self._rawPlotCurves[senderSB].show()
-            self._rawPlotCurves[senderSB].setVisible(True)
-            return
+        # if senderSB in self._rawPlotCurves:
+        #     # self._rawPlotCurves[senderSB].show()
+        #     self._rawPlotCurves[senderSB].setVisible(True)
+        #     return
         idx = self.sbToIdx[int(senderSB)]
 
 
