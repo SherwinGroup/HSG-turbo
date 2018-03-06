@@ -157,7 +157,7 @@ class JonesVector(object):
             delta = np.array(delta)
             Ex = cos(phi)
             Ey = sin(phi) * np.exp(1j*delta * np.pi/180.)
-        elif None not in [alpha, gamma]:
+        elif alpha is not None and gamma is not None:
             """
             I've found that the proper way to construct a jones vector
             from elliptical coordinates is to create elliptical oriented along the
@@ -410,37 +410,3 @@ class JonesVector(object):
 if __name__ == '__main__':
     a = JonesVector(phi=np.arange(0, 90, 5), delta=np.ones(90/5))
     a.gamma
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
