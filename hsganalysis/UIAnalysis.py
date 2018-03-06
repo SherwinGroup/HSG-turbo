@@ -33,6 +33,7 @@ combinedWindowList = []
 combinedSpectraWindowList = []
 combinedFitSpectraWindowList = []
 combinedWindowImageList = []
+combinedQWPSweepWindowList = []
 qwpSweepWindowList = []
 
 class myDict(dict):
@@ -818,6 +819,11 @@ class HSGWindow(BaseWindow):
             [i.setChecked(False) for i in self.menuFitX.actions()]
             [i.setChecked(True) for (i,j) in
                 zip(self.menuFitX.actions(), parent.menuFitX.actions()) if j.isChecked()]
+
+            # Make sure something is set to be plotted
+            if not any([ii.isChecked() for ii in self.menuFitX.actions()]):
+                self.menuFitX.actions()[0].setChecked(True)
+
             self.plotFits()
 
             # [i.setChecked(False) for i in self.menuSpecX.actions()]
@@ -939,7 +945,7 @@ class HSGWindow(BaseWindow):
             {"name":"NIR Polarization", "type":"str", "value":
                 "α={}°, γ={}° {}".format(kwargs.get("nir_pola", ""), kwargs.get("nir_polg", ""), kwargs.get("nir_pol", "")), "readonly":True},
             {"name": "Detector Pol", "type": "float",
-                "value": kwargs.get("detectorHWP", "-1"), "readonly":True},
+                "value": kwargs.get("rotatorAngle", "-1"), "readonly":True},
             {"name": "Fit NIR (cm-1)", "type": "float",
                 "value": kwargs.get("calculated NIR freq (cm-1)", 0), "readonly":True},
             {"name": "Fit THz (cm-1)", "type": "float",
@@ -1285,6 +1291,65 @@ class FitComparisonWindow(ComparisonWindow):
 class ComparisonImageWindow(ipg.ImageView):
     pass
 
+class QWPComparisonWindow(ComparisonWindow):
+    def initUI(self):
+        super(QWPComparisonWindow, self).initUI()
+
+        self.gPlot.plotItem.axes["left"]["item"].setPen('k', width=2)
+        self.gPlot.plotItem.axes["left"]["item"].setLabel(
+            "&alpha; (<sup>&deg;</sup>)")
+        self.gPlot.plotItem.axes["right"]["item"].setLabel(
+            "&gamma; (<sup>&deg;</sup>)")
+        self.gPlot.plotItem.axes["right"]["item"].setPen('b', width=2)
+        self.gPlot.plotItem.axes["bottom"]["item"].setLabel("Sideband (order)")
+
+        pi = self.gPlot.plotItem
+
+        p2 = ipg.pg.ViewBox()
+        pi.getAxis("right").linkToView(p2)
+        pi.scene().addItem(p2)
+        p2.setXLink(pi.vb)
+
+        self.plot2 = p2
+
+        pi.vb.sigResized.connect(lambda: p2.setGeometry(pi.vb.sceneBoundingRect()))
+
+    def addCurve(self, data, label=None):
+
+
+        a = self.gPlot.errorbars(data["alpha"][:, 0],
+                                  data["alpha"][:, 1],
+                                  data["alpha"][:, 2],
+                                  'ko-',
+                                    label=label)
+
+
+        errorCurve = ipg.curves.PlotDataErrorItem.PlotDataErrorItem(
+            data["gamma"][:, 0],
+            data["gamma"][:, 1],
+            data["gamma"][:, 2],
+            'bo-',
+            label=label)
+
+
+        self.plot2.addItem(errorCurve)
+        N = len(self.gPlot.plotItem.curves)
+        #
+        # c = Q.fromHsv(240, 255, 254);
+        # b.setPen(c, width=3)
+
+
+        color = pg.QtGui.QColor.fromHsv(0, 255, (6-N) / 6*240)
+        a.setPen(color, width=3)
+        a.setSymbolPen(color)
+        a.setSymbolBrush(color)
+
+        color = pg.QtGui.QColor.fromHsv(240, 255, (6-N) / 6*240)
+        errorCurve.setPen(color, width=3)
+        errorCurve.setSymbolPen(color)
+        errorCurve.setSymbolBrush(color)
+
+
 # class QWPSweepWindow(BaseWindow):
 class QWPSweepWindow(HSGWindow):
     # sigClosed = QtCore.pyqtSignal(object)
@@ -1301,10 +1366,59 @@ class QWPSweepWindow(HSGWindow):
 
         self.processSingleData(self.dataClass(fname))
         self.show()
+
+        # Dummy menu to appease superclass, even though this doesn't really
+        # have fits in the same sense.
+        self.menuFitX =  QtWidgets.QMenu()
     #
     # # Take the one from HSG window...
     # genParameters = HSGWindow.genParameters
     # genParametersOldFormat = HSGWindow.genParametersOldFormat
+
+    def handleAnglesDragEvent(self, obj, val):
+        """
+        See comments on handleFitDragEvent
+        :param obj:
+        :param val:
+        :return:
+        """
+        # d = [self.ui.gSpectrum.plotItem.curves[1].xData,
+        #      self.ui.gSpectrum.plotItem.curves[1].yData]
+        if self.dataObj is None: return
+        self.createCompWindow(data = self.fitDict, p = val)
+
+    def createCompWindow(self, data, p, label=None):
+        # If there's already open windows, see if the drop point
+        # is over an already created window. If it is,
+        # add it to that window
+        ## todo: reimplement this, generalize it for
+        ## various comparison windows
+        if combinedQWPSweepWindowList:
+            inners = [i for i in combinedQWPSweepWindowList if i.containsPoint(p.toQPoint())]
+            if inners: #tests if it's empty
+                a = inners[-1] # last focused window
+                # Data may not be passed if you make a comparision window
+                # Before loading any files, don't throw errors
+                # if not None in data:
+                a.addCurve(data, str(self.windowTitle()))
+                return
+
+        # If there's no window or not dragged on top of something,
+        # create a new window
+        a = QWPComparisonWindow()
+
+        # Connect the signals for when it gets closed or focused
+        a.sigClosed.connect(updateCompClose)
+        a.sigGotFocus.connect(updateFocusList)
+
+        # Data may not be passed if you make a comparision window
+        # Before loading any files, don't throw errors
+        # if not None in data:
+        a.addCurve(data, str(self.windowTitle()))
+        # Move the window to the drag point
+        a.move(p.toQPoint() - QtCore.QPoint(a.geometry().width()/2, a.geometry().height()/2))
+        # Add it to the list of opened windows
+        combinedQWPSweepWindowList.append(a)
 
     def processSingleData(self, dataObj):
         self.dataObj = dataObj
@@ -1325,13 +1439,14 @@ class QWPSweepWindow(HSGWindow):
         a = self.ui.gAngles.errorbars(self.fitDict["alpha"][:, 0],
                                   self.fitDict["alpha"][:, 1],
                                   self.fitDict["alpha"][:, 2],
-                                  'bo-')
+                                  'ko-')
         self._rawPlotCurves["alpha"] = a
-        self.ui.gAngles.plotItem.axes["left"]["item"].setPen('b', width=2)
+        self.ui.gAngles.plotItem.axes["left"]["item"].setPen('k', width=2)
         self.ui.gAngles.plotItem.axes["left"]["item"].setLabel(
             "&alpha; (<sup>&deg;</sup>)")
         self.ui.gAngles.plotItem.axes["right"]["item"].setLabel(
             "&gamma; (<sup>&deg;</sup>)")
+        self.ui.gAngles.plotItem.axes["right"]["item"].setPen('b', width=2)
         self.ui.gAngles.plotItem.axes["bottom"]["item"].setLabel("Sideband (order)")
 
         pi = self.ui.gAngles.plotItem
@@ -1346,12 +1461,14 @@ class QWPSweepWindow(HSGWindow):
             self.fitDict["gamma"][:, 0],
             self.fitDict["gamma"][:, 1],
             self.fitDict["gamma"][:, 2],
-            'ko-')
+            'bo-')
         self._rawPlotCurves["gamma"] = errorCurve
 
         p2.addItem(errorCurve)
 
         pi.vb.sigResized.connect(lambda: p2.setGeometry(pi.vb.sceneBoundingRect()))
+
+        pi.vb.sigDropEvent.connect(self.handleAnglesDragEvent)
 
         menu = self.menuBar().addMenu("Max SB plotted")
         ag = QtWidgets.QActionGroup(self)
@@ -1491,6 +1608,7 @@ if __name__=="__main__":
                                                  "pg":pg,
                                                  "conv":converter,
                                                  "qwp": qwpSweepWindowList,
+                                                 "cq": combinedQWPSweepWindowList,
                                                  "ipg": ipg})
     consoleWindow.show()
     consoleWindow.lower()

@@ -2698,7 +2698,8 @@ def pmt_sorter(folder_path, plot_individual = True):
 def stitch_abs_results(main, new):
     raise NotImplementedError
 
-def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
+def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False,
+                          skipOdds = True):
     """
     Given a path to data taken from rotating the QWP (doing polarimetry),
     process the data (fit peaks), and parse it into a matrix of sb strength vs
@@ -2719,6 +2720,9 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
     :param loadNorm: if true, load the normalized data
     :param save: Save the processed file or not
     :param verbose:
+    :param skipOdds: Passed on to save sweep; determine whether or not to save
+            odd orders. Generally, odds are artifacts and I don't want
+            them messing up the data, so default to True.
     :return:
     """
     def getData(fname):
@@ -2728,13 +2732,17 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
         :return:
         """
         if isinstance(fname, str):
+            if loadNorm:
+                ending = "_norm.txt"
+            else:
+                ending = "_snip.txt"
             header = ''
-            with open(os.path.join("Processed QWP Dependence", fname + "_snip.txt")) as fh:
+            with open(os.path.join("Processed QWP Dependence", fname + ending)) as fh:
                 ln = fh.readline()
                 while ln[0] == '#':
                     header += ln[1:]
                     ln = fh.readline()
-            data = np.genfromtxt(os.path.join("Processed QWP Dependence", fname + "_snip.txt"),
+            data = np.genfromtxt(os.path.join("Processed QWP Dependence", fname + ending),
                                  delimiter=',', dtype=str)
         if isinstance(fname, io.BytesIO):
             header = b''
@@ -2751,7 +2759,6 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
         ######### End getData
 
     try:
-        assert False
         sbData, lAlpha, lGamma, nir, thz = getData(path)
     except:
         # Do the processing on all the files
@@ -2776,7 +2783,8 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
                                          "lAlpha": specs[0].parameters["nir_pola"],
                                          "lGamma": specs[0].parameters["nir_polg"],
                                          "nir": specs[0].parameters["nir_lambda"],
-                                         "thz": specs[0].parameters["fel_lambda"], })
+                                         "thz": specs[0].parameters["fel_lambda"], },
+                                 only_even=skipOdds)
 
             if loadNorm:
                 sbData, lAlpha, lGamma, nir, thz = getData(norm)
@@ -2789,7 +2797,8 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False):
                                      "lAlpha": specs[0].parameters["nir_pola"],
                                      "lGamma": specs[0].parameters["nir_polg"],
                                      "nir": specs[0].parameters["nir_lambda"],
-                                     "thz": specs[0].parameters["fel_lambda"], })
+                                     "thz": specs[0].parameters["fel_lambda"], },
+                                 only_even=skipOdds)
             sbData, lAlpha, lGamma, nir, thz = getData(path)
 
         laserParams = {
@@ -2842,7 +2851,7 @@ def makeCurve(eta, isVertical):
     return analyzerCurve
 
 def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir = True, plot=False,
-                        save = False, plotRaw = lambda x, y: False, series = '',
+                        save = False, plotRaw = lambda sbidx, sbnum: False, series = '',
                         **kwargs):
     """
     Fit a set of sideband data vs QWP angle to get the stoke's parameters
@@ -2919,10 +2928,11 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         sbData = allSbData[1:, sbIdx]
         sbDataErr = allSbData[1:, sbIdx + 1]
 
-        try:
-            p0 = sbFits[-1][1:8:2]
-        except:
-            p0 = [1, 1, 0, 0]
+        # try:
+        #     p0 = sbFits[-1][1:8:2]
+        # except:
+        #     p0 = [1, 1, 0, 0]
+        p0 = [1, 1, 0, 0]
 
         eta = 0.25 # QWP retardence, assume perfect for now
         p, pcov = curve_fit(makeCurve(0.25, vertAnaDir), angles, sbData, p0=p0)
@@ -2930,13 +2940,13 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         if plot and plotRaw(sbIdx, sbNum):
             # pg.figure("{}: sb {}".format(dataName, sbNum))
             plt.figure("All Curves")
-            plt.errorbar(angles, sbData, sbDataErr, 'o-', name=series)
+            plt.errorbar(angles, sbData, sbDataErr, 'o-', name=f"{series}, {sbNum}")
             # plt.plot(angles, sbData,'o-', label="Data")
             fineAngles = np.linspace(angles.min(), angles.max(), 300)
             # plt.plot(fineAngles,
             #         makeCurve(eta, "V" in dataName)(fineAngles, *p0), name="p0")
-            # plt.plot(fineAngles,
-            #         makeCurve(eta, "V" in dataName)(fineAngles, *p))
+            plt.plot(fineAngles,
+                    makeCurve(eta, vertAnaDir)(fineAngles, *p))
             # plt.show()
             plt.ylim(0, 1)
             plt.xlim(0, 360)
@@ -3010,6 +3020,9 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             # remove them from the save data
             origin_header = '\n'.join(headerlines)
             sbFitsSave = np.delete(sbFits, range(1, 9), axis=1)
+
+        if not os.path.exists(os.path.dirname(save)):
+            os.mkdir(os.path.dirname(save))
         np.savetxt(save, np.array(sbFitsSave), delimiter=',', header=origin_header,
                    comments='', fmt='%.6e')
 
@@ -3017,35 +3030,18 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
     # print("g = {:.2f} ± {:.2f}".format(sbFits[1, 11], sbFits[1, 12]))
 
     if plot:
-        raise NotImplementedError("Sorry! You need to sort this out")
-    # pg.figure("{} - deviationalpha".format(dataName))
-    # pg.errorbar(sbFits[:,0], sbFits[:,10], sbFits[:,11], 'o-', label="")
-    # # pg.plot(sbFits[:,0], sbFits[:,10], label="")
-    # # pg.plot(sbs, [lAlpha-ldAlpha, lAlpha-ldAlpha])
-    # # pg.plot(sbs, [lAlpha+ldAlpha, lAlpha+ldAlpha])
-    #
-    # pg.xlabel("Sideband (order)")
-    # pg.ylabel("&alpha; deviation (&deg;)")
-    # # pg.ylim(-10, 10)
-    #
-    # pg.figure("{} - gamma".format(dataName))
-    # pg.errorbar(sbFits[:,0], sbFits[:,12], sbFits[:,13], 'o-', label="")
-    # pg.plot(sbs, [lGamma-ldGamma, lGamma-ldGamma])
-    # pg.plot(sbs, [lGamma+ldGamma, lGamma+ldGamma])
-    # # pg.plot(sbFits[:,0], sbFits[:,12], label="")
-    # pg.xlabel("Sideband (order)")
-    # pg.ylabel("&gamma; (&deg;)")
-
-    # print("a = {:.2f} ± {:.2f}".format(sbFits[1, 9], sbFits[1, 11]))
-    # print("g = {:.2f} ± {:.2f}".format(sbFits[1, 12], sbFits[1, 13]))
-
-    # pg.figure("{} - DOP".format(dataName))
-    # pg.errorbar(sbFits[:,0], sbFits[:,14], sbFits[:,15], label=str("")+"")
-    # pg.plot(sbs, [lDOP-ldDOP, lDOP-ldDOP])
-    # pg.plot(sbs, [lDOP+ldDOP, lDOP+ldDOP])
-    # # pg.plot(sbFits[:,0], sbFits[:,14], label=str("")+"")
-    # pg.xlabel("Sideband (order)")
-    # pg.ylabel("DOP")
+        plt.figure("alpha")
+        plt.errorbar(sbFitsDict["alpha"][:, 0],
+                     sbFitsDict["alpha"][:, 1],
+                     sbFitsDict["alpha"][:, 2],
+                     'o-', name = series
+                     )
+        plt.figure("gamma")
+        plt.errorbar(sbFitsDict["gamma"][:, 0],
+                     sbFitsDict["gamma"][:, 1],
+                     sbFitsDict["gamma"][:, 2],
+                     'o-', name=series
+                     )
     return sbFits, sbFitsDict
 
 ####################
@@ -4444,7 +4440,6 @@ def natural_glob(*args):
         (See Toothy's implementation in the comments)
         '''
         return [atoi(c) for c in re.split('(\d+)', text)]
-
     return sorted(glob.glob(os.path.join(*args)), key=natural_keys)
 
 ####################
@@ -4543,8 +4538,8 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
     """
     # Make a copy so we can return the same thing
     retData = np.array(data)
-    x = np.array(data[:, 0])
-    y = np.array(data[:, -1])
+    x = np.array(retData[:, 0])
+    y = np.array(retData[:, -1])
     # Let's you place with zero padding.
     zeroPadding = len(x)
     N = len(x)
@@ -4552,7 +4547,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
     if isInteractive:
         try:
             import pyqtgraph as pg
-            from PyQt4 import QtCore, QtGui
+            from PyQt5 import QtCore, QtWidgets
         except:
             raise ImportError("Cannot do interactive plotting without pyqtgraph installed")
 
@@ -4565,7 +4560,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
                 super(FFTWin, self).__init__()
                 # Plot the log of the data,
                 # it breaks text boxes to do semilogy
-                self.plotItem.plot(x, np.log10(y))
+                self.plotItem.plot(x, np.log10(y), pen='k')
                 # The line for picking the cutoff
                 # Connect signals so the textbox updates and the
                 # realspace window can recalcualte the FFT
@@ -4618,7 +4613,7 @@ def fft_filter(data, cutoffFrequency=1520, inspectPlots=False, tryFitting=False,
 
             def updatePlot(self, val):
                 self.plotItem.clear()
-                self.plotItem.plot(*self.data.T, pen=pg.mkPen(width=3))
+                self.plotItem.plot(*self.data.T, pen=pg.mkPen('k', width=3))
                 # Recursion! Call this same function to do the FFT
                 newData = fft_filter(self.data, cutoffFrequency=val)
                 self.plotItem.plot(*newData.T, pen=pg.mkPen('r', width=3))

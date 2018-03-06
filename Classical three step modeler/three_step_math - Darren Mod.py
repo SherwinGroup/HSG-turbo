@@ -19,6 +19,8 @@ import scipy.optimize as spo
 
 import matplotlib.pyplot as plt
 
+import InstsAndQt
+
 q_e = 1.602e-19 # Charge of electron in Coulombs
 m_e = 9.109e-31 # Mass of bare electron in kg
 hbar = 1.055e-34 # Reduced Planck's constant in J*s
@@ -251,13 +253,15 @@ class Trajectories(object):
         """
         I have no idea what to include in here.
         """
+
+        phi = float(phi)
         self.m_e_eff = m_e_eff * m_e # in kg
         self.m_h_eff = m_h_eff * m_e # in kg
         self.reduced_mass = 1 / (1 / self.m_e_eff + 1 / self.m_h_eff) # in kg
         self.thz_freq = thz_freq * 1e12 # in Hz
         self.thz_field = thz_field * 1e5 # in V/m
         self.e_bind = e_bind * q_e * 1e-3 # in J
-        self.phi = float(phi) * np.pi / 180 # in rad
+        self.phi = phi * np.pi / 180 # in rad
 
         self.parts_dict = {'eff. electron mass': '{:.4f}'.format(m_e_eff),
                            'eff. hole mass': '{:.4f}'.format(m_h_eff),
@@ -265,7 +269,7 @@ class Trajectories(object):
                            'thz field (kV/cm)': '{:.2f}'.format(thz_field),
                            'thz frequency (THz)': '{:.3f}'.format(thz_freq),
                            'exciton binding energy (eV)': '{:.3f}'.format(e_bind),
-                           'tunneling phase (deg)': '{:.3f}'.format(self.phi)}
+                           'tunneling phase (deg)': '{:.3f}'.format(phi)}
         self.results_dict = {}
         self.update_stuff()
 
