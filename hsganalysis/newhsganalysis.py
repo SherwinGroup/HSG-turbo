@@ -2905,6 +2905,10 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         # getting arrays the right shape
         wantedSBs = set(allSbData[0, 1:])
 
+    # allow pasing a flag it ignore odds. I think I generally do, so set it to
+    # default to True
+    skipOdds = kwargs.get("skip_odds", True)
+
     # Make an array to keep all of the sideband information.
     # Start it off by keeping the NIR information (makes for easier plotting into origin)
     sbFits = [[0] + [-1] * 8 + [lAlpha, ldAlpha, lGamma, ldGamma, lDOP, ldDOP]]
@@ -2923,6 +2927,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
     for sbIdx in range(0, allSbData.shape[1], 2):
         sbNum = allSbData[0, sbIdx]
         if sbNum not in wantedSBs: continue
+        if skipOdds and sbNum%2: continue
         # if verbose:
         #     print("\tlooking at sideband", sbNum)
         sbData = allSbData[1:, sbIdx]
@@ -3810,16 +3815,16 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         param_name = param_name[0]
     else:
         paramGetter = lambda x: x.parameters[param_name]
-    
+
     # Sort all of the spectra based on the desired key
     spectrum_list.sort(key=paramGetter)
-    
+
     # keep track of which file name corresponds to which parameter which gets put in
     included_spectra = dict()
-    
+
     # The big array which will be stacked up to keep all of the sideband details vs desired parameter
     param_array = None
-    
+
     # list of which sidebands are seen throughout.
     sb_included = []
     # how many parameters (area, strength, linewidth, pos, etc.) are there?
@@ -3862,7 +3867,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         noSidebands = False
         if verbose:
             print("the sb_results:", spec.sb_results)
-            
+
         # if no sidebands were found, skip this one
         try:
             if not spec or spec.sb_results.ndim == 1:
@@ -4018,7 +4023,7 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         else:
             if verbose:
                 print("Didn't save")
-    
+
     return sb_included, param_array, snipped_array, norm_array
 
 def save_parameter_sweep_vs_sideband(spectrum_list, file_name,
