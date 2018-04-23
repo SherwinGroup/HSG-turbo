@@ -1160,6 +1160,7 @@ class ComparisonWindow(QtWidgets.QMainWindow):
     def initUI(self):
         # self.gPlot = DraggablePlotWidget()
         self.gPlot = ipg.PlotWidget()
+        self.gPlot = ipg.PlotContainerWindow()
         self.gPlot.addLegend()
         self.setCentralWidget(self.gPlot)
         # self.legend = pg.LegendItem()

@@ -4,3 +4,4 @@
 __author__ = 'dreadnought'
 
 from .newhsganalysis import * # This allows for easier imports later
+from .jones import JonesVector

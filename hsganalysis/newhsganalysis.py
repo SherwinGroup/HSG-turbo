@@ -25,7 +25,10 @@ import scipy.ndimage as ndimage
 import itertools as itt
 np.set_printoptions(linewidth=500)
 
-
+# One of the main results is the HighSidebandCCD.sb_results array. These are the
+# various mappings between index and real value
+# I deally, this code should be converted to pandas to avoid this issue,
+# but that's outside the scope of current work.
 # [sb number, Freq (eV), Freq error (eV), Gauss area (arb.), Area error, Gauss linewidth (eV), Linewidth error (eV)]
 # [    0    ,      1   ,        2,      ,        3         ,      4    ,         5           ,        6            ]
 class sbarr(object):
@@ -37,8 +40,6 @@ class sbarr(object):
     WIDTH = 5
     WIDTHERR = 6
 
-# cast warnings as errors because they shouldn't happen
-# warnings.filterwarnings("error")
 
 ####################
 # Objects
@@ -51,75 +52,91 @@ class CCD(object):
         things will be handled with the sub classes.
 
         Creates:
-        self.parameters = JSON dictionary holding all of the information from the
-                          data file.
+        self.parameters = Dictionary holding all of the information from the
+                          data file, which comes from the JSON encoded header in the data
+                          file
         self.description = string that is the text box from data taking GUI
         self.raw_data = raw data output by measurement software, wavelength vs.
-                        data.  There may be text for some of the entries
+                        data, errors.  There may be text for some of the entries
+                        corresponding to text used for Origin imports, but they
+                        should appear as np.nan
         self.ccd_data = semi-processed 1600 x 3 array of photon energy vs. data with standard error of mean at that pixel
-                        calculated by taking multiple images.
+                        calculated by taking multiple images. Standard error is calculated from
+                        the data collection software
+
+        Most subclasses should make a self.proc_data, which will do whatever
+        processing is required to the ccd_data, such as normalizing, taking ratios,
+        etc.
 
         :param fname: file name where the data is saved
         :type fname: str
         :param spectrometer_offset: if the spectrometer won't go where it's told, use this to correct the wavelengths (nm)
         :type spectrometer_offset: float
-        :return: None, technically
         """
 
         self.fname = fname
 
-        # print "I'm going to open", fname
-        # f = open(fname,'rU')
+        # Read in the JSON-formatted parameter string.
+        # The lines are all prepended by '#' for easy numpy importing
+        # so loop over all those lines
         with open(fname, 'r') as f:
             param_str = ''
             line = f.readline()
             while line[0] == '#':
                 param_str += line[1:]
                 line = f.readline()
-
+            # Parse the JSON string
             self.parameters = json.loads(param_str)
-        # with open(fname,'rU') as f:
-        #     parameters_str = f.readline()
-        #     self.parameters = json.loads(parameters_str[1:])
-        #     self.description = ''
-        #     read_description = True
-        #     while read_description:
-        #         line = f.readline()
-        #         if line[0] == '#':
-        #             self.description += line[:]
-        #         else:
-        #             read_description = False
+
+        # Spec[trometer] steps are set to define the same physical data, but taken at
+        # different spectrometer center wavelengths. This value is used later
+        # for stitching these scans together
         try:
             self.parameters["spec_step"] = int(self.parameters["spec_step"])
-        except ValueError:
+        except (ValueError, KeyError):
+            # If there isn't a spe
             self.parameters["spec_step"] = 0
-        except KeyError:
-            pass
 
-        # Slice through 3 to get rid of comments/origin info
-        self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=',')[3:])
+        # Slice through 3 to get rid of comments/origin info.
+        # Would likely be better to check np.isnan() and slicing out those nans.
         # I used flipup so that the x-axis is an increasing function of frequency
+        self.raw_data = np.flipud(np.genfromtxt(fname, comments='#', delimiter=',')[3:])
 
-        self.ccd_data = np.array(self.raw_data[:1600, :])  # By slicing up to 1600,
-        # we cut out the text
-        # header
+
+        # The camera chip is 1600 pixels wide. This line was redudent with the [3:]
+        # slice above and served to make sure there weren't extra stray bad lines
+        # hanging around.
+        #
+        # This should also be updated some day to compensate for any horizontal bining
+        # on the chip, or masking out points that are bad (cosmic ray making it
+        # through processing, room lights or monitor lines interfering with signal)
+        self.ccd_data = np.array(self.raw_data[:1600, :])
+
+        # Check to see if the spectrometer offset is set. This isn't specified
+        # during data collection. This is a value that can be appended
+        # when processing if it's realized the data is offset.
+        # This allows the offset to be specified and kept with the data file itself,
+        # instead of trying to do it in individual processing scripts
+        #
+        # It's allowed as a kwarg parameter in this script for trying to determine
+        # what the correct offset should be
         if spectrometer_offset is not None or "offset" in self.parameters:
             try:
-                # print "Doing offset", self.parameters["offset"]
                 self.ccd_data[:, 0] += float(self.parameters["offset"])
-                # print "it worked"
             except:
                 self.ccd_data[:, 0] += spectrometer_offset
-                # print "it didn't work"
-        self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
 
-    # def __str__(self):
-    #     return self.parameters['comments']
+        # Convert from nm to eV
+        # self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
+        self.ccd_data[:, 0] = photonConverter["nm"]["eV"](self.ccd_data[:, 0])
+
 
 class Photoluminescence(CCD):
     def __init__(self, fname):
         """
-        This object handles PL-type data.
+        This object handles PL-type data. The only distinction from the parent class 
+        is that the CCD data gets normalized to the exposure time to make different 
+        exposures directly comparable.
 
         creates:
         self.proc_data = self.ccd_data divided by the exposure time
@@ -127,37 +144,47 @@ class Photoluminescence(CCD):
         :param fname: name of the file
         :type fname: str
 
-        :return: None, it makes things.
         """
         super(Photoluminescence, self).__init__(fname)
 
-        self.proc_data = np.array(self.ccd_data)  # Does this work the way I want it to?
+        # Create a copy of the array , and then normalize the signal and the errors
+        # by the exposure time
+        self.proc_data = np.array(self.ccd_data) 
         self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['exposure']
+        self.proc_data[:, 2] = self.proc_data[:, 2] / self.parameters['exposure']
 
-
-# def save_processing(self):
 
 class Absorbance(CCD):
     def __init__(self, fname):
         """
         There are several ways Absorbance data can be loaded
         You could try to load the abs data output from data collection directly,
-        which has the wavelength, raw, blank and actual absorbance data itself.  This is correct.
+        which has the wavelength, raw, blank and actual absorbance data itself.
+        This is best way to do it.
 
         Alternatively, you could want to load the raw transmission/reference
         data, ignoring (or maybe not even having) the abs calculated
-        from the data collection software.  This is not the way to do it
+        from the data collection software. If you want to do it this way,
+        you should pass fname as a list where the first element is the
+        file name for the reference data, and the second is the absorbance data
+        At first, it didn't really seem to make sense to let you pass just the
+        raw reference or raw abs data,
+
 
         Creates:
-        self.ref_data = np array of the reference, freq (eV) vs. reference (counts)
-        self.raw_data = np.array of the raw absorption spectrum, freq (eV) vs. reference (counts)
-        self.proc_data = np.array of the absorption spectrum IN dB! freq (eV) vs. "absorbance" (dB!!!)
-        # TODO: are there errors here?
+        self.ref_data = np array of the reference,
+            freq (eV) vs. reference (counts)
+        self.raw_data = np.array of the raw absorption spectrum,
+            freq (eV) vs. reference (counts)
+        self.proc_data = np.array of the absorption spectrum
+            freq (eV) vs. "absorbance" (dB)
+
+        Note, the error bars for this data haven't been defined.
+
         :param fname: either an absorbance filename, or a length 2 list of filenames
         :type fname: str
         :return: None
         """
-        # TODO: are there errors here?
         if "abs_" in fname:
             super(Absorbance, self).__init__(fname)
             # Separate into the separate data sets
@@ -179,7 +206,10 @@ class Absorbance(CCD):
             except ValueError:
                 # ValueError gets thrown when importing older data
                 # which had more headers than data columns. Enforce
-                # only loading first two columns to avoid
+                # only loading first two columns to avoid numpy trying
+                # to parse all of the data
+
+                # See CCD.__init__ for what's going on.
 
                 self.ref_data = np.flipud(np.genfromtxt(fname[0], comments='#',
                                                         delimiter=',', usecols=(0, 1)))
@@ -193,10 +223,13 @@ class Absorbance(CCD):
                 self.raw_data = np.array(self.raw_data[:1600, :])
                 self.raw_data[:, 0] = 1239.84 / self.raw_data[:, 0]
             except Exception as e:
-                print("Exception opening,", e)
+                print("Exception opening absorbance data,", e)
+
+            # Calculate the absorbance from the raw camera counts.
             self.proc_data = np.empty_like(self.ref_data)
             self.proc_data[:, 0] = self.ref_data[:, 0]
-            self.proc_data[:, 1] = np.log10(self.raw_data[:, 1] / self.ref_data[:, 1])
+            self.proc_data[:, 1] = -10*np.log10(self.raw_data[:, 1] / self.ref_data[:,
+                                                                     1])
 
     def abs_per_QW(self, qw_number):
         """
@@ -4446,6 +4479,14 @@ def natural_glob(*args):
         '''
         return [atoi(c) for c in re.split('(\d+)', text)]
     return sorted(glob.glob(os.path.join(*args)), key=natural_keys)
+
+# photonConverter[A][B](x):
+#    convert x from A to B.
+photonConverter = {
+    "nm":         {"nm": lambda x: x,           "eV": lambda x:1239.84/x,            "wavenumber": lambda x: 10000000./x},
+    "eV":         {"nm": lambda x: 1239.84/x,   "eV": lambda x: x,                   "wavenumber":lambda x: 8065.56 * x},
+    "wavenumber": {"nm": lambda x: 10000000./x, "eV": lambda x: x/8065.56, "wavenumber": lambda x: x}
+}
 
 ####################
 # Smoothing functions

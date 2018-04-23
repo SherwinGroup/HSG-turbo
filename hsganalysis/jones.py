@@ -169,11 +169,15 @@ class JonesVector(object):
             v = np.array([cos(gamma), 1j*sin(gamma)])
             r = make_rotation(alpha)
             # r = make_birefringent(alpha/2, eta=pi)
-            if alpha.size == 1:
+            if alpha.size == 1: # pass single alpha, multiple gamma
                 v = np.einsum("ij,j->i", r, v)
                 Ex = np.abs(v[0])
                 Ey = np.abs(v[1]) * np.exp(1j * np.diff(np.angle(v))[0])
-            else:
+            elif gamma.size == 1:  # pass single gamma, multiple alpha
+                v = np.einsum("ijk,j->ik", r, v)
+                Ex = np.abs(v[0])
+                Ey = np.abs(v[1]) * np.exp(1j * np.diff(np.angle(v), axis=0)[0])
+            else: # pass multiple alpha/gamma
                 v = np.einsum("ijk,jk->ik", r, v)
                 Ex = np.abs(v[0,:])
                 Ey = np.abs(v[1,:]) * np.exp(1j * np.diff(np.angle(v), axis=0)[0,:])
@@ -194,7 +198,6 @@ class JonesVector(object):
         st += ']'
 
         return st
-
 
     @property
     def x(self):
@@ -303,7 +306,7 @@ class JonesVector(object):
         transform = make_birefringent(theta, eta)
 
         ret = self.apply_transformation(transform)
-        self.vec = ret
+        # self.vec = ret
 
     def vertical_projection(self):
         m = [[0,0],[0,1]]
@@ -389,6 +392,7 @@ class JonesVector(object):
             raise ValueError(msg)
 
         vec = np.einsum(einIndices, transform, self.vec)
+        self.vec = vec
         return vec
 
     def unwrap_phase(self, input_polarization):
