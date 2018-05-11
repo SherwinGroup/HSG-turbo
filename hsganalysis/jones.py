@@ -18,6 +18,20 @@ def cos(x, *p):
 
 p0 = [0.5, 2, 90., 0.5]
 
+class AngleWrapper(object):
+    """
+    Class which will force angles to be within the specified bounds
+    """
+    def __init__(self, mn, mx):
+        self._min = mn; self._max=mx
+    def __contains__(self, item):
+        return self._min < item < self._max
+    def wrap(self, datum):
+        bnd = (self._max - self._min)
+        datum = np.array(datum)
+        datum[datum > self._max] = abs(datum[datum > self._max]) - bnd
+        datum[datum < self._min] = bnd - abs(datum[datum < self._min])
+        return datum
 
 def cos(x):
     return np.cos(x * np.pi/180.)
@@ -169,10 +183,14 @@ class JonesVector(object):
             v = np.array([cos(gamma), 1j*sin(gamma)])
             r = make_rotation(alpha)
             # r = make_birefringent(alpha/2, eta=pi)
-            if alpha.size == 1: # pass single alpha, multiple gamma
+            if alpha.size == 1 and gamma.size == 1: # pass single alpha and gamma
                 v = np.einsum("ij,j->i", r, v)
                 Ex = np.abs(v[0])
                 Ey = np.abs(v[1]) * np.exp(1j * np.diff(np.angle(v))[0])
+            elif alpha.size == 1:  # pass single alpha, multiple gamma
+                v = np.einsum("ij,jk->ik", r, v)
+                Ex = np.abs(v[0])
+                Ey = np.abs(v[1]) * np.exp(1j * np.diff(np.angle(v), axis=0)[0])
             elif gamma.size == 1:  # pass single gamma, multiple alpha
                 v = np.einsum("ijk,j->ik", r, v)
                 Ex = np.abs(v[0])
