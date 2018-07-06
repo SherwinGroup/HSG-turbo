@@ -1597,6 +1597,8 @@ if __name__=="__main__":
     import sys
     print("argv:", sys.argv)
     print(len(sys.argv))
+    # Fix for running on a windows machine with DPI scaling
+    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling)
     ex = QtWidgets.QApplication(sys.argv)
     win = BaseWindow()
     # win.openFile(sys.argv[1])
