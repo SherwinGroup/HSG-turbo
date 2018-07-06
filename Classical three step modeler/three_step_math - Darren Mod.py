@@ -120,10 +120,12 @@ class Window(QtWidgets.QWidget):
         sin_vals = -self.data.thz_field*np.sin(2*np.pi*self.data.thz_freq*time_vals)/100. # v/cm
         self.e_field_line.setData(time_vals, sin_vals)
 
-        ion_time = (self.data.phi-np.pi/2)/(2*np.pi*self.data.thz_freq)
+        # ion_time = (self.data.phi-np.pi/2)/(2*np.pi*self.data.thz_freq)
+        ion_time = self.data.ion_time
         ion_field = -self.data.thz_field*np.sin(2*np.pi*self.data.thz_freq*ion_time)/100. # v/cm
         self.ionization_time_arrow.setPos(ion_time, ion_field)
-        recol_time = ion_time+self.data.recollision_time_ps*1e-12
+        # recol_time = ion_time+self.data.recollision_time_ps*1e-12
+        recol_time = self.data.recol_time
         recol_field = -self.data.thz_field*np.sin(2*np.pi*self.data.thz_freq*recol_time)/100. # v/cm
         self.recollision_time_arrow.setPos(recol_time, recol_field)
 
@@ -237,12 +239,23 @@ class Window(QtWidgets.QWidget):
         header_string += '\nResults:\n'
         header_string += json.dumps(self.data.results_dict, sort_keys=True, indent=4, separators=(',', ': '))
         header_string = header_string.replace('\n', '\n#')
-        header_string += '\nTime,Electric field,Position,Position,Kinetic energy,Kinetic energy,Kinetic energy'
-        header_string += '\nps,kV/cm,nm,nm,meV,meV,meV'
-        header_string += '\n,,Electron,Hole,Electron,Hole,Total'
+        header_string += '\nTime,Electric field,Position,Position,Kinetic energy,' \
+                         'Kinetic energy,Kinetic energy,Full Field Time,Full Field'
+        header_string += '\nps,kV/cm,nm,nm,meV,meV,meV,ps,kV/cm'
+        header_string += '\n,,Electron,Hole,Electron,Hole,Total,,{}/{}'.format(
+            self.data.thz_freq*1e-9, self.data.thz_field*1e-5
+        )
+
+        time_vals_full_field = np.linspace(-1, 1, len(self.data.time_vals_s)) / (self.data.thz_freq * 2)
+        sin_vals_full_field = -self.data.thz_field * np.sin(
+            2 * np.pi * self.data.thz_freq * time_vals_full_field) / 100.  # v/cm
+
+
         save_stuff = np.column_stack((self.data.time_vals_s * 1e12, self.data.driving_field * self.data.thz_field / 1e5, self.data.e_position_m * 1e9,
                                       self.data.h_position_m * 1e9, self.data.e_kenergy_eV * 1e3, self.data.h_kenergy_eV * 1e3,
-                                      self.data.total_kenergy_eV * 1e3))
+                                      self.data.total_kenergy_eV * 1e3,
+                                      time_vals_full_field*1e12,
+                                      sin_vals_full_field*1e-3))
         np.savetxt(self.file_name, save_stuff, comments='', header=header_string, delimiter=',')
 
 class Trajectories(object):
@@ -311,6 +324,13 @@ class Trajectories(object):
         self.results_dict['individual electron KE (meV)'] = '{:.2f}'.format(self.e_kenergy_rec_meV)
         self.results_dict['individual hole KE (meV)'] = '{:.2f}'.format(self.h_kenergy_rec_meV)
         self.results_dict['approximate sideband'] = '{:.1f}'.format(self.approx_sb)
+
+        self.ion_time = (self.phi - np.pi / 2) / (2 * np.pi * self.thz_freq)
+        self.recol_time = self.ion_time + self.recollision_time_ps * 1e-12
+
+
+        self.results_dict['ionization time'] = '{:.3f}'.format(self.ion_time*1e15)
+        self.results_dict['recollision time'] = '{:.3f}'.format(self.recol_time*1e15)
 
     def make_energy_slew_rate(self, time, splitting):
         """
