@@ -86,7 +86,12 @@ class CCD(object):
                 param_str += line[1:]
                 line = f.readline()
             # Parse the JSON string
-            self.parameters = json.loads(param_str)
+            try:
+                self.parameters = json.loads(param_str)
+            except json.JSONDecodeError:
+                # error from _really_ old data where comments were dumped after a
+                # single-line json dumps
+                self.parameters=json.loads(param_str.splitlines()[0])
 
         # Spec[trometer] steps are set to define the same physical data, but taken at
         # different spectrometer center wavelengths. This value is used later
@@ -128,7 +133,7 @@ class CCD(object):
 
         # Convert from nm to eV
         # self.ccd_data[:, 0] = 1239.84 / self.ccd_data[:, 0]
-        self.ccd_data[:, 0] = photonConverter["nm"]["eV"](self.ccd_data[:, 0])
+        self.ccd_data[:, 0] = photon_converter["nm"]["eV"](self.ccd_data[:, 0])
 
 
 class Photoluminescence(CCD):
@@ -663,8 +668,13 @@ class HighSidebandCCD(CCD):
         approx_order = (test_nir_freq - nir_freq) / thz_freq
         return approx_order
 
-    def guess_sidebands(self, cutoff=8, verbose=False, plot=False):
+    def guess_sidebands(self, cutoff=4.5, verbose=False, plot=False, **kwargs):
         """
+        Update 05/24/18:
+        Hunter had two different loops for negative order sidebands,
+        then positive order sidebands. They're done pretty much identically,
+        so I've finally merged them into one.
+
         Finds the locations of all the sidebands in the proc_data array to be
         able to seed the fitting method.  This works by finding the maximum data
         value in the array and guessing what sideband it is.  It creates an array
@@ -678,6 +688,12 @@ class HighSidebandCCD(CCD):
         Input:
         cutoff = signal-to-noise threshold to count a sideband candidate.
 
+        kwargs:
+           window_size: how big of a window (in pixels) to use for checking for
+                sidebands. Specified in half-width
+              default: 15
+
+
         Internal:
         self.sb_list = List of all of the orders the method found
         self.sb_index = index of all of the peaks of the sidebands
@@ -686,15 +702,13 @@ class HighSidebandCCD(CCD):
         """
         # TODO: this isn't commented appropriately.  Will it be made more readable first?
 
-
         if "cutoff" in self.parameters:
             cutoff = self.parameters["cutoff"]
         else:
             self.parameters['cutoff for guess_sidebands'] = cutoff
 
-
         if verbose:
-            print("="*15)
+            print("=" * 15)
             print()
             print("Guessing CCD Sideband parameters")
             print(os.path.basename(self.fname))
@@ -703,7 +717,12 @@ class HighSidebandCCD(CCD):
             print("=" * 15)
         x_axis = np.array(self.proc_data[:, 0])
         y_axis = np.array(self.proc_data[:, 1])
-        error = np.array(self.proc_data[:, 2])
+        try:
+            error = np.array(self.proc_data[:, 2])
+        except IndexError:
+            # Happens on old data where spectra weren't calculated in the live
+            # software.
+            error = np.ones_like(x_axis)
 
         min_sb = int(self.calc_approx_sb_order(x_axis[0])) + 1
         try:
@@ -713,6 +732,9 @@ class HighSidebandCCD(CCD):
 
         nir_freq = self.parameters["nir_freq"]
         thz_freq = self.parameters["thz_freq"]
+
+        if verbose:
+            print("min_sb: {} | max_sb: {}".format(min_sb, max_sb))
 
         # Find max strength sideband and it's order
         global_max = np.argmax(y_axis)
@@ -736,15 +758,10 @@ class HighSidebandCCD(CCD):
         check_ratio = (check_max_area - 3 * check_ave) / check_stdev
 
         if verbose:
-            # print "\nI'm checking", self.fname
-            # print "Global max checking:", global_max
-            # print "\ncheck_max_area is", check_max_area
-            # print "check_ave is", check_ave
-            # print "check_stdev is", check_stdev
-            # print "check_ratio is", check_ratio
-            print(("{:^16}"*5).format(
-                "global_max idx", "check_max_area", "check_ave", "check_stdev", "check_ratio"))
-            print(("{:^16.5g}"*5).format(
+            print(("{:^16}" * 5).format(
+                "global_max idx", "check_max_area", "check_ave", "check_stdev",
+                "check_ratio"))
+            print(("{:^16.5g}" * 5).format(
                 global_max, check_max_area, check_ave, check_stdev, check_ratio))
 
         if check_ratio > cutoff:
@@ -753,86 +770,85 @@ class HighSidebandCCD(CCD):
             sb_freq_guess = [x_axis[global_max]]
             sb_amp_guess = [y_axis[global_max]]
             sb_error_est = [
-                np.sqrt(sum([i ** 2 for i in error[global_max - 2:global_max + 3]])) / (check_max_area - 5 * check_ave)]
+                np.sqrt(sum([i ** 2 for i in error[global_max - 2:global_max + 3]])) / (
+                            check_max_area - 5 * check_ave)]
         else:
             print("There are no sidebands in", self.fname)
             raise RuntimeError
 
-        # Look for lower order sidebands
         if verbose:
             print("\t Looking for sidebands with f < {:.6f}".format(sb_freq_guess[0]))
         last_sb = sb_freq_guess[0]
         index_guess = global_max
+        # keep track of how many consecutive sidebands we've skipped. Sometimes one's
+        #  noisy or something, so we want to keep looking after skipping one
         consecutive_null_sb = 0
         consecutive_null_odd = 0
         no_more_odds = False
         break_condition = False
         for order in range(order_init - 1, min_sb - 1, -1):
+            # Check to make sure we're not looking at an odd when
+            # we've decided to skip them.
             if no_more_odds == True and order % 2 == 1:
                 last_sb = last_sb - thz_freq
                 if verbose:
                     print("I skipped", order)
                 continue
 
+            # Window size to look for next sideband. Needs to be order dependent
+            # because higher orders get wider, so we need to look at more.
+            # Values are arbitrary.
             window_size = 0.45 + 0.0004 * order  # used to be last_sb?
-            lo_freq_bound = last_sb - thz_freq * (1 + window_size)  # Not sure what to do about these
+            lo_freq_bound = last_sb - thz_freq * (
+                        1 + window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb - thz_freq * (1 - window_size)
 
-            start_index = False
-            end_index = False
             if verbose:
                 print("\nSideband", order)
-                # print "The low frequency bound is", lo_freq_bound
-                # print "The high frequency bound is", hi_freq_bound
-                print("\t{:.4f} < f_{} < {:.4f}".format(lo_freq_bound, order, hi_freq_bound))
-            for i in range(index_guess, 0, -1):
-                if end_index == False and i == 1:
-                    break_condition = True
-                    break
-                if end_index == False and x_axis[i] < hi_freq_bound:
-                    # print "end_index is", i
-                    end_index = i
-                elif i == 1:
-                    start_index = 0
-                    # print "hit end of data, start_index is 0"
-                elif start_index == False and x_axis[i] < lo_freq_bound:
-                    start_index = i
-                    # print "start_index is", i
-                    index_guess = i
-                    break
+                print("\t{:.4f} < f_{} < {:.4f}".format(lo_freq_bound, order,
+                                                        hi_freq_bound))
 
-            if break_condition:
-                break
-            check_y = y_axis[start_index:end_index]
+            # Get the indices where the energies lie within the bounds for this SB
+            sliced_indices = \
+            np.where((x_axis > lo_freq_bound) & (x_axis < hi_freq_bound))[0]
+            start_index, end_index = sliced_indices.min(), sliced_indices.max()
 
-            check_max_index = np.argmax(check_y)  # This assumes that two floats won't be identical
+            # Get a slice of the y_data which is only in the region of interest
+            check_y = y_axis[sliced_indices]
+
+            check_max_index = np.argmax(
+                check_y)  # This assumes that two floats won't be identical
+            # Calculate the "area" of the sideband by looking at the peak value
+            # within the range, and the pixel above/below it
             check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
-            no_peak = (2 * len(check_y)) // 6
-            try:
-                check_ave = np.mean(np.take(check_y, np.concatenate((list(range(no_peak)), list(range(no_peak, 0, -1))))))
-            except TypeError:
-                # Happens on an empty file. Not sure why
-                print("I think there are no sidebadns in ", self.fname)
-                raise RuntimeError("I think there are no sidebadns in {}".format(self.fname))
-            check_stdev = np.std(np.take(check_y, np.concatenate((list(range(no_peak)), list(range(no_peak, 0, -1))))))
-            # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
-            # check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
-            # So the sideband isn't included in the noise calculation
+
+            if verbose and plot:
+                plt.figure("CCD data")
+                plt.plot([lo_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([hi_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([lo_freq_bound, hi_freq_bound], [check_y[check_max_index]] *
+                         2, 'b', label="{} Box".format(order))
+                plt.text((lo_freq_bound + hi_freq_bound) / 2, check_y[check_max_index],
+                         order)
+
+            # get the slice that doesn't have the peak in it to compare statistics
+            check_region = np.append(check_y[:check_max_index - 1],
+                                     check_y[check_max_index + 2:])
+            check_ave = check_region.mean()
+            check_stdev = check_region.std()
+
+            # Calculate an effective SNR, where check_ave is roughly the
+            # background level
             check_ratio = (check_max_area - 3 * check_ave) / check_stdev
 
+            if order % 2 == 1:  # This raises the barrier for odd sideband detection
+                check_ratio = check_ratio / 1.5
             if verbose:
-                # print "check_y is", check_y
-                # print "\ncheck_max_area is", check_max_area
-                # print "check_ave is", check_ave
-                # print "check_stdev is", check_stdev
-                # print "check_ratio is", check_ratio
-                print("\t" + ("{:^14}"*4).format(
+                print("\t" + ("{:^14}" * 4).format(
                     "check_max_area", "check_ave", "check_stdev", "check_ratio"))
-                print("\t" + ("{:^14.5g}"*4).format(
+                print("\t" + ("{:^14.5g}" * 4).format(
                     check_max_area, check_ave, check_stdev, check_ratio))
 
-            if order % 2 == 1: # This raises the barrier for odd sideband detection
-                check_ratio = check_ratio / 1.5
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
                 self.sb_index.append(found_index)
@@ -843,8 +859,10 @@ class HighSidebandCCD(CCD):
 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - 3 * check_ave)
-                error_est = np.sqrt(sum([i ** 2 for i in error[found_index - 1:found_index + 2]])) / (
-                check_max_area - 3 * check_ave)
+                error_est = np.sqrt(
+                    sum(
+                        [i ** 2 for i in error[found_index - 1:found_index + 2]]
+                    )) / (check_max_area - 3 * check_ave)
                 if verbose:
                     print("My error estimate is:", error_est)
                 sb_error_est.append(error_est)
@@ -879,9 +897,9 @@ class HighSidebandCCD(CCD):
                 last_sb = last_sb + thz_freq
                 continue
             window_size = 0.45 + 0.001 * order  # used to be 0.28 and 0.0004
-            lo_freq_bound = last_sb + thz_freq * (1 - window_size)  # Not sure what to do about these
+            lo_freq_bound = last_sb + thz_freq * (
+                        1 - window_size)  # Not sure what to do about these
             hi_freq_bound = last_sb + thz_freq * (1 + window_size)
-
 
             start_index = False
             end_index = False
@@ -890,7 +908,8 @@ class HighSidebandCCD(CCD):
                 print("\nSideband", order)
                 # print "The low frequency bound is", lo_freq_bound
                 # print "The high frequency bound is", hi_freq_bound
-                print("\t{:.4f} < f_{} < {:.4f}".format(lo_freq_bound, order, hi_freq_bound))
+                print("\t{:.4f} < f_{} < {:.4f}".format(lo_freq_bound, order,
+                                                        hi_freq_bound))
             for i in range(index_guess, 1600):
                 if start_index == False and i == 1599:
                     # print "I'm all out of space, captain!"
@@ -911,42 +930,50 @@ class HighSidebandCCD(CCD):
                 break
             check_y = y_axis[start_index:end_index]
 
-            check_max_index = np.argmax(check_y)  # This assumes that two floats won't be identical
+            check_max_index = np.argmax(
+                check_y)  # This assumes that two floats won't be identical
             octant = len(check_y) // 8  # To be able to break down check_y into eighths
             if octant < 1:
                 octant = 1
 
-            check_max_area = np.sum(check_y[check_max_index - octant-1:check_max_index + octant + 1])
-
+            check_max_area = np.sum(
+                check_y[check_max_index - octant - 1:check_max_index + octant + 1])
 
             if verbose and plot:
                 plt.figure("CCD data")
                 plt.plot([lo_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
                 plt.plot([hi_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([lo_freq_bound, hi_freq_bound], [check_y[check_max_index]] *
+                         2, 'b', label=order)
+                plt.text((lo_freq_bound + hi_freq_bound) / 2, check_y[check_max_index],
+                         order)
 
-            no_peak = (2 * len(check_y)) // 6 # The denominator is in flux, used to be 5
+            no_peak = (2 * len(
+                check_y)) // 6  # The denominator is in flux, used to be 5
             # if verbose: print "\tcheck_y length", len(check_y)
 
-            check_ave = np.mean(np.take(check_y, np.concatenate((np.arange(no_peak), np.arange(-no_peak, 0)))))
-            check_stdev = np.std(np.take(check_y, np.concatenate((np.arange(no_peak), np.arange(-no_peak, 0)))))
-            # check_ave = np.mean(check_y[[0,1,2,3,-1,-2,-3,-4]])
-            # check_stdev = np.std(check_y[[0,1,2,3,-1,-2,-3,-4]])
+            check_ave = np.mean(np.take(check_y, np.concatenate(
+                (np.arange(no_peak), np.arange(-no_peak, 0)))))
+            check_stdev = np.std(np.take(check_y, np.concatenate(
+                (np.arange(no_peak), np.arange(-no_peak, 0)))))
+
             check_ratio = (check_max_area - (2 * octant + 1) * check_ave) / check_stdev
 
             if verbose:
-                print("\tIndices: {}->{} (d={})".format(start_index, end_index, len(check_y)))
+                print("\tIndices: {}->{} (d={})".format(start_index, end_index,
+                                                        len(check_y)))
                 # print "check_y is", check_y
                 # print "\ncheck_max_area is", check_max_area
                 # print "check_ave is", check_ave
                 # print "check_stdev is", check_stdev
                 # print "check_ratio is", check_ratio
 
-                print("\t" + ("{:^14}"*4).format(
+                print("\t" + ("{:^14}" * 4).format(
                     "check_max_area", "check_ave", "check_stdev", "check_ratio"))
-                print("\t" + ("{:^14.6g}"*4).format(
+                print("\t" + ("{:^14.6g}" * 4).format(
                     check_max_area, check_ave, check_stdev, check_ratio))
 
-            if order % 2 == 1: # This raises the barrier for odd sideband detection
+            if order % 2 == 1:  # This raises the barrier for odd sideband detection
                 check_ratio = check_ratio / 2
             if check_ratio > cutoff:
                 found_index = check_max_index + start_index
@@ -954,13 +981,15 @@ class HighSidebandCCD(CCD):
                 last_sb = x_axis[found_index]
 
                 if verbose:
-                    print("\tI'm counting this SB at index {} (f={:.4f})".format(found_index, last_sb), end=' ')
+                    print("\tI'm counting this SB at index {} (f={:.4f})".format(
+                        found_index, last_sb), end=' ')
                     # print "\tI found", order, "at index", found_index, "at freq", last_sb
 
                 sb_freq_guess.append(x_axis[found_index])
                 sb_amp_guess.append(check_max_area - (2 * octant + 1) * check_ave)
-                error_est = np.sqrt(sum([i ** 2 for i in error[found_index - octant:found_index + octant]])) / (
-                check_max_area - (2 * octant + 1) * check_ave)
+                error_est = np.sqrt(sum([i ** 2 for i in error[
+                                                         found_index - octant:found_index + octant]])) / (
+                                    check_max_area - (2 * octant + 1) * check_ave)
                 # This error is a relative error.
                 if verbose:
                     print(". Err = {:.3g}".format(error_est))
@@ -988,10 +1017,361 @@ class HighSidebandCCD(CCD):
 
         if verbose:
             print("I found these sidebands:", self.sb_list)
-            print('-'*15)
+            print('-' * 15)
             print()
             print()
-        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess), np.asarray(sb_error_est)]).T
+        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess),
+                                  np.asarray(sb_error_est)]).T
+        # self.sb_guess = [frequency guess, amplitude guess, relative error of amplitude] for each sideband.
+
+    def guess_sidebandsOld(self, cutoff=4.5, verbose=False, plot=False, **kwargs):
+        """
+        05/24/18
+        Old code from Hunter's days (or nearly, I've already started cleaning some
+        stuff up). keeping it around in case I break too much stuff
+
+        Finds the locations of all the sidebands in the proc_data array to be
+        able to seed the fitting method.  This works by finding the maximum data
+        value in the array and guessing what sideband it is.  It creates an array
+        that includes this information.  It will then step down, initially by one
+        THz frequency, then by twos after it hasn't found any odd ones.  It then
+        goes up from the max and finds everything above in much the same way.
+
+        There is currently no rhyme or reason to a cutoff of 8.  I don't know what
+        it should be changed to, though.
+
+        Input:
+        cutoff = signal-to-noise threshold to count a sideband candidate.
+
+        kwargs:
+           window_size: how big of a window (in pixels) to use for checking for
+                sidebands. Specified in half-width
+              default: 15
+
+
+        Internal:
+        self.sb_list = List of all of the orders the method found
+        self.sb_index = index of all of the peaks of the sidebands
+        self.sb_guess = three-part list including the frequency, amplitude and
+                        error guesses for each sideband
+        """
+        # TODO: this isn't commented appropriately.  Will it be made more readable first?
+
+        if "cutoff" in self.parameters:
+            cutoff = self.parameters["cutoff"]
+        else:
+            self.parameters['cutoff for guess_sidebands'] = cutoff
+
+        if verbose:
+            print("=" * 15)
+            print()
+            print("Guessing CCD Sideband parameters")
+            print(os.path.basename(self.fname))
+            print("\tCutoff = {}".format(cutoff))
+            print()
+            print("=" * 15)
+        x_axis = np.array(self.proc_data[:, 0])
+        y_axis = np.array(self.proc_data[:, 1])
+        error = np.array(self.proc_data[:, 2])
+
+        min_sb = int(self.calc_approx_sb_order(x_axis[0])) + 1
+        try:
+            max_sb = int(self.calc_approx_sb_order(x_axis[-1]))
+        except ValueError:
+            print(x_axis)
+
+        nir_freq = self.parameters["nir_freq"]
+        thz_freq = self.parameters["thz_freq"]
+
+        if verbose:
+            print("min_sb: {} | max_sb: {}".format(min_sb, max_sb))
+
+        # Find max strength sideband and it's order
+        global_max = np.argmax(y_axis)
+        order_init = int(round(self.calc_approx_sb_order(x_axis[global_max])))
+        # if verbose:
+        #     print "The global max is at index", global_max
+        if global_max < 15:
+            check_y = y_axis[:global_max + 15]
+            check_y = np.concatenate((np.zeros(15 - global_max), check_y))
+        elif global_max > 1585:
+            check_y = y_axis[global_max - 15:]
+            check_y = np.concatenate((check_y, np.zeros(global_max - 1585)))
+        else:
+            check_y = y_axis[global_max - 15:global_max + 15]
+
+        check_max_index = np.argmax(check_y)
+        check_max_area = np.sum(check_y[check_max_index - 2:check_max_index + 3])
+
+        check_ave = np.mean(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
+        check_stdev = np.std(check_y[[0, 1, 2, 3, 4, -1, -2, -3, -4, -5]])
+        check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+
+        if verbose:
+            print(("{:^16}" * 5).format(
+                "global_max idx", "check_max_area", "check_ave", "check_stdev",
+                "check_ratio"))
+            print(("{:^16.5g}" * 5).format(
+                global_max, check_max_area, check_ave, check_stdev, check_ratio))
+
+        if check_ratio > cutoff:
+            self.sb_list = [order_init]
+            self.sb_index = [global_max]
+            sb_freq_guess = [x_axis[global_max]]
+            sb_amp_guess = [y_axis[global_max]]
+            sb_error_est = [
+                np.sqrt(sum([i ** 2 for i in error[global_max - 2:global_max + 3]])) / (
+                            check_max_area - 5 * check_ave)]
+        else:
+            print("There are no sidebands in", self.fname)
+            raise RuntimeError
+
+        if verbose:
+            print("\t Looking for sidebands with f < {:.6f}".format(sb_freq_guess[0]))
+        last_sb = sb_freq_guess[0]
+        index_guess = global_max
+        # keep track of how many consecutive sidebands we've skipped. Sometimes one's
+        #  noisy or something, so we want to keep looking after skipping one
+        consecutive_null_sb = 0
+        consecutive_null_odd = 0
+        no_more_odds = False
+        break_condition = False
+        for order in range(order_init - 1, min_sb - 1, -1):
+            # Check to make sure we're not looking at an odd when
+            # we've decided to skip them.
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb - thz_freq
+                if verbose:
+                    print("I skipped", order)
+                continue
+
+            # Window size to look for next sideband. Needs to be order dependent
+            # because higher orders get wider, so we need to look at more.
+            # Values are arbitrary.
+            window_size = 0.45 + 0.0004 * order  # used to be last_sb?
+            lo_freq_bound = last_sb - thz_freq * (
+                        1 + window_size)  # Not sure what to do about these
+            hi_freq_bound = last_sb - thz_freq * (1 - window_size)
+
+            if verbose:
+                print("\nSideband", order)
+                print("\t{:.4f} < f_{} < {:.4f}".format(lo_freq_bound, order,
+                                                        hi_freq_bound))
+
+            # Get the indices where the energies lie within the bounds for this SB
+            sliced_indices = \
+            np.where((x_axis > lo_freq_bound) & (x_axis < hi_freq_bound))[0]
+            start_index, end_index = sliced_indices.min(), sliced_indices.max()
+
+            # Get a slice of the y_data which is only in the region of interest
+            check_y = y_axis[sliced_indices]
+
+            check_max_index = np.argmax(
+                check_y)  # This assumes that two floats won't be identical
+            # Calculate the "area" of the sideband by looking at the peak value
+            # within the range, and the pixel above/below it
+            check_max_area = np.sum(check_y[check_max_index - 1:check_max_index + 2])
+
+            if verbose and plot:
+                plt.figure("CCD data")
+                plt.plot([lo_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([hi_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([lo_freq_bound, hi_freq_bound], [check_y[check_max_index]] *
+                         2, 'b', label="{} Box".format(order))
+                plt.text((lo_freq_bound + hi_freq_bound) / 2, check_y[check_max_index],
+                         order)
+
+            # get the slice that doesn't have the peak in it to compare statistics
+            check_region = np.append(check_y[:check_max_index - 1],
+                                     check_y[check_max_index + 2:])
+            check_ave = check_region.mean()
+            check_stdev = check_region.std()
+
+            # Calculate an effective SNR, where check_ave is roughly the
+            # background level
+            check_ratio = (check_max_area - 3 * check_ave) / check_stdev
+
+            if order % 2 == 1:  # This raises the barrier for odd sideband detection
+                check_ratio = check_ratio / 1.5
+            if verbose:
+                print("\t" + ("{:^14}" * 4).format(
+                    "check_max_area", "check_ave", "check_stdev", "check_ratio"))
+                print("\t" + ("{:^14.5g}" * 4).format(
+                    check_max_area, check_ave, check_stdev, check_ratio))
+
+            if check_ratio > cutoff:
+                found_index = check_max_index + start_index
+                self.sb_index.append(found_index)
+                last_sb = x_axis[found_index]
+
+                if verbose:
+                    print("I just found", last_sb)
+
+                sb_freq_guess.append(x_axis[found_index])
+                sb_amp_guess.append(check_max_area - 3 * check_ave)
+                error_est = np.sqrt(
+                    sum(
+                        [i ** 2 for i in error[found_index - 1:found_index + 2]]
+                    )) / (check_max_area - 3 * check_ave)
+                if verbose:
+                    print("My error estimate is:", error_est)
+                sb_error_est.append(error_est)
+                self.sb_list.append(order)
+                consecutive_null_sb = 0
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
+            else:
+                # print "I could not find sideband with order", order
+                last_sb = last_sb - thz_freq
+                consecutive_null_sb += 1
+                if order % 2 == 1:
+                    consecutive_null_odd += 1
+            if consecutive_null_odd == 1 and no_more_odds == False:
+                # print "I'm done looking for odd sidebands"
+                no_more_odds = True
+            if consecutive_null_sb == 2:
+                # print "I can't find any more sidebands"
+                break
+
+        # Look for higher sidebands
+        if verbose: print("\nLooking for higher energy sidebands")
+
+        last_sb = sb_freq_guess[0]
+        index_guess = global_max
+        consecutive_null_sb = 0
+        consecutive_null_odd = 0
+        no_more_odds = False
+        break_condition = False
+        for order in range(order_init + 1, max_sb + 1):
+            if no_more_odds == True and order % 2 == 1:
+                last_sb = last_sb + thz_freq
+                continue
+            window_size = 0.45 + 0.001 * order  # used to be 0.28 and 0.0004
+            lo_freq_bound = last_sb + thz_freq * (
+                        1 - window_size)  # Not sure what to do about these
+            hi_freq_bound = last_sb + thz_freq * (1 + window_size)
+
+            start_index = False
+            end_index = False
+
+            if verbose:
+                print("\nSideband", order)
+                # print "The low frequency bound is", lo_freq_bound
+                # print "The high frequency bound is", hi_freq_bound
+                print("\t{:.4f} < f_{} < {:.4f}".format(lo_freq_bound, order,
+                                                        hi_freq_bound))
+            for i in range(index_guess, 1600):
+                if start_index == False and i == 1599:
+                    # print "I'm all out of space, captain!"
+                    break_condition = True
+                    break
+                elif start_index == False and x_axis[i] > lo_freq_bound:
+                    # print "start_index is", i
+                    start_index = i
+                elif i == 1599:
+                    end_index = 1599
+                    # print "hit end of data, end_index is 1599"
+                elif end_index == False and x_axis[i] > hi_freq_bound:
+                    end_index = i
+                    # print "end_index is", i
+                    index_guess = i
+                    break
+            if break_condition:
+                break
+            check_y = y_axis[start_index:end_index]
+
+            check_max_index = np.argmax(
+                check_y)  # This assumes that two floats won't be identical
+            octant = len(check_y) // 8  # To be able to break down check_y into eighths
+            if octant < 1:
+                octant = 1
+
+            check_max_area = np.sum(
+                check_y[check_max_index - octant - 1:check_max_index + octant + 1])
+
+            if verbose and plot:
+                plt.figure("CCD data")
+                plt.plot([lo_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([hi_freq_bound] * 2, [0, check_y[check_max_index]], 'b')
+                plt.plot([lo_freq_bound, hi_freq_bound], [check_y[check_max_index]] *
+                         2, 'b', label=order)
+                plt.text((lo_freq_bound + hi_freq_bound) / 2, check_y[check_max_index],
+                         order)
+
+            no_peak = (2 * len(
+                check_y)) // 6  # The denominator is in flux, used to be 5
+            # if verbose: print "\tcheck_y length", len(check_y)
+
+            check_ave = np.mean(np.take(check_y, np.concatenate(
+                (np.arange(no_peak), np.arange(-no_peak, 0)))))
+            check_stdev = np.std(np.take(check_y, np.concatenate(
+                (np.arange(no_peak), np.arange(-no_peak, 0)))))
+
+            check_ratio = (check_max_area - (2 * octant + 1) * check_ave) / check_stdev
+
+            if verbose:
+                print("\tIndices: {}->{} (d={})".format(start_index, end_index,
+                                                        len(check_y)))
+                # print "check_y is", check_y
+                # print "\ncheck_max_area is", check_max_area
+                # print "check_ave is", check_ave
+                # print "check_stdev is", check_stdev
+                # print "check_ratio is", check_ratio
+
+                print("\t" + ("{:^14}" * 4).format(
+                    "check_max_area", "check_ave", "check_stdev", "check_ratio"))
+                print("\t" + ("{:^14.6g}" * 4).format(
+                    check_max_area, check_ave, check_stdev, check_ratio))
+
+            if order % 2 == 1:  # This raises the barrier for odd sideband detection
+                check_ratio = check_ratio / 2
+            if check_ratio > cutoff:
+                found_index = check_max_index + start_index
+                self.sb_index.append(found_index)
+                last_sb = x_axis[found_index]
+
+                if verbose:
+                    print("\tI'm counting this SB at index {} (f={:.4f})".format(
+                        found_index, last_sb), end=' ')
+                    # print "\tI found", order, "at index", found_index, "at freq", last_sb
+
+                sb_freq_guess.append(x_axis[found_index])
+                sb_amp_guess.append(check_max_area - (2 * octant + 1) * check_ave)
+                error_est = np.sqrt(sum([i ** 2 for i in error[
+                                                         found_index - octant:found_index + octant]])) / (
+                                    check_max_area - (2 * octant + 1) * check_ave)
+                # This error is a relative error.
+                if verbose:
+                    print(". Err = {:.3g}".format(error_est))
+                    # print "\tMy error estimate is:", error_est
+                # print "My relative error is:", error_est / sb_amp_guess
+                sb_error_est.append(error_est)
+                self.sb_list.append(order)
+                consecutive_null_sb = 0
+                if order % 2 == 1:
+                    consecutive_null_odd = 0
+            else:
+                # print "I could not find sideband with order", order
+                last_sb = last_sb + thz_freq
+                consecutive_null_sb += 1
+                if order % 2 == 1:
+                    consecutive_null_odd += 1
+                if verbose:
+                    print("\t\tI did not count this sideband")
+            if consecutive_null_odd == 1 and no_more_odds == False:
+                # print "I'm done looking for odd sidebands"
+                no_more_odds = True
+            if consecutive_null_sb == 2:
+                # print "I can't find any more sidebands"
+                break
+
+        if verbose:
+            print("I found these sidebands:", self.sb_list)
+            print('-' * 15)
+            print()
+            print()
+        self.sb_guess = np.array([np.asarray(sb_freq_guess), np.asarray(sb_amp_guess),
+                                  np.asarray(sb_error_est)]).T
         # self.sb_guess = [frequency guess, amplitude guess, relative error of amplitude] for each sideband.
 
     def fit_sidebands(self, plot=False, verbose=False):
@@ -1416,6 +1796,12 @@ class HighSidebandPMT(PMT):
             raw_temp[:,3] *= self.parameters["pc ratio"]
             pass
         raw_temp[:, 0] = raw_temp[:, 0] / 8065.6  # turn NIR freq into eV
+        self.parameters["thz_freq"] = 0.000123984 * float(
+            self.parameters.get("fel_lambda", -1))
+        self.parameters["nir_freq"] =  float(
+            self.parameters.get("nir_lambda", -1))/8065.6
+
+
         self.initial_sb = sb_num
         self.initial_data = np.array(raw_temp)
         self.sb_dict = {sb_num: np.array(raw_temp)}
@@ -1517,7 +1903,7 @@ class HighSidebandPMT(PMT):
         if verbose:
             print("Sidebands included", self.sb_list)
 
-    def integrate_sidebands(self, verbose=False, cutoff=1.5):
+    def integrate_sidebands(self, verbose=False, cutoff=1.5, **kwargs):
         """
         This method will integrate the sidebands to find their strengths, and then
         use a magic number to define the width, since they are currently so utterly
@@ -1673,7 +2059,7 @@ class HighSidebandPMT(PMT):
         for sb in self.sb_results:
             self.full_dict[sb[0]] = np.asarray(sb[1:])
 
-    def laser_line(self, verbose=False):
+    def laser_line(self, verbose=False, **kwargs):
         """
         This method is designed to scale everything in the PMT to the conversion
         efficiency based on our measurement of the laser line with a fixed
@@ -2223,10 +2609,9 @@ class FullHighSideband(FullSpectrum):
         self.parameters = initial_CCD_piece.parameters
         self.parameters['files_here'] = [initial_CCD_piece.fname.split('/')[-1]]
         self.full_dict = {}
-        # for sb in self.sb_results:
-        #     self.full_dict[sb[0]] = np.asarray(sb[1:])
+        for sb in self.sb_results:
+            self.full_dict[sb[0]] = np.asarray(sb[1:])
 
-        self.full_dict, self.sb_results = self.parse_sb_array(self.sb_results)
 
     @staticmethod
     def parse_sb_array(arr):
@@ -2234,6 +2619,8 @@ class FullHighSideband(FullSpectrum):
         Check to make sure the first even order sideband in an array is not weaker
         than the second even order. If this happens, it's likely because the SB was in
         the short pass filter and isn't work counting.
+
+        We cut it out to prevent it from itnerfering with calculating overlaps
         :param arr:
         :return:
         """
@@ -2252,7 +2639,7 @@ class FullHighSideband(FullSpectrum):
             full_dict[sb[0]] = np.asarray(sb[1:])
         return full_dict, arr
 
-    def add_CCD(self, ccd_object, verbose=False, force_calc=None):
+    def add_CCD(self, ccd_object, verbose=False, force_calc=None, **kwargs):
         """
         This method will be called by the stitch_hsg_results function to add another
         CCD image to the spectrum.
@@ -2267,11 +2654,14 @@ class FullHighSideband(FullSpectrum):
             calc = True
         if force_calc is not None:
             calc = force_calc
+        if "need_ratio" in kwargs: #cascading it through, starting to think
+            # everything should be in a kwarg
+            calc = kwargs.pop("need_ratio")
         try:
             # self.full_dict = stitch_hsg_dicts(self.full_dict, ccd_object.full_dict,
             #                                   need_ratio=calc, verbose=verbose)
             self.full_dict = stitch_hsg_dicts(self, ccd_object, need_ratio=calc,
-                                              verbose=verbose)
+                                              verbose=verbose, **kwargs)
             self.parameters['files_here'].append(ccd_object.fname.split('/')[-1])
             # update sb_results, too
             sb_results = [[k]+list(v) for k, v in list(self.full_dict.items())]
@@ -2293,13 +2683,13 @@ class FullHighSideband(FullSpectrum):
                                           # need_ratio=True, verbose=False)
         self.full_dict = stitch_hsg_dicts(pmt_object, self,
                                           need_ratio=True, verbose=verbose)
-        if verbose:
-            self.full_dict, ratio = self.full_dict
+        # if verbose:
+        #     self.full_dict, ratio = self.full_dict
         # print "I'm done adding PMT data"
         self.parameters['files_here'].append(pmt_object.parameters['files included'])
         self.make_results_array()
-        if verbose:
-            return ratio
+        # if verbose:
+        #     return ratio
 
     def make_results_array(self):
         """
@@ -2470,7 +2860,7 @@ def gaussWithBackground(x, *p):
 ####################
 # Collection functions
 ####################
-def hsg_combine_spectra(spectra_list, verbose = False):
+def hsg_combine_spectra(spectra_list, verbose = False, **kwargs):
     """
     This function is all about smooshing different parts of the same hsg
     spectrum together.  It takes a list of HighSidebandCCD spectra and turns the
@@ -2487,10 +2877,12 @@ def hsg_combine_spectra(spectra_list, verbose = False):
 
     :param spectra_list: randomly-ordered list of HSG spectra, some of which can be stitched together
     :type spectra_list: List of HighSidebandCCD objects
+    kwargs gets passed onto add_item
     :return: fully combined list of full hsg spectra.  No PMT business yet.
     :rtype: list of FullHighSideband
     """
     good_list = []
+    spectra_list = spectra_list.copy()
     spectra_list.sort(key=lambda x: x.parameters["spec_step"])
 
     # keep a dict for each series' spec step
@@ -2540,7 +2932,7 @@ def hsg_combine_spectra(spectra_list, verbose = False):
                     if verbose:
                         print("I found this one", piece)
                     counter += 1
-                    good_list[-1].add_CCD(piece)
+                    good_list[-1].add_CCD(piece, verbose=verbose, **kwargs)
                     spectra_list.remove(piece)
         good_list[-1].make_results_array()
     return good_list
@@ -2990,6 +3382,8 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             plt.xlim(0, 360)
             plt.ylabel("Normalized Intensity")
             plt.xlabel("QWP Angle (&theta;)")
+            print(f"\t{series} {sbNum}, p={p}")
+
 
         # get the errors
         d = np.sqrt(np.diag(pcov))
@@ -3263,7 +3657,8 @@ def stitchData(dataList, plot=False):
         flipped = True
         first, second = second, first
 
-def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=[1,1]):
+def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=[1,1],
+                     override_ratio = False, ignore_weaker_lowers = True):
     """
     This helper function takes a FullHighSideband and a sideband
     object, either CCD or PMT and smushes the new sb_results into the full_dict.
@@ -3289,6 +3684,15 @@ def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=
     measure to which all else should be related.
     TODO: run some test cases to test this.
 
+    06/11/18
+    --------
+    That sometimes was breaking if there were only 3-4 sidebands to fit with poor
+    SNR. I've added the override_ratio to be passed to set a specific ratio to scale
+    by. From data on 06/03/18, the 50gain to 110gain is a ~3.6 ratio. I haven't done
+    a clean way of specifying which data set it should be scaled. Right now,
+    it leaves the laser line data, or the 110 gain data alone.
+
+
     Inputs:
     full = full_dict from FullHighSideband, or HighSidebandPMT.  It's important
            that it contains lower orders than the new_dict.
@@ -3297,11 +3701,15 @@ def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=
                  calculating the ratio instead of the measurements being equivalent.
                  Changing integration time still means N photons made M counts,
                  but changing gain or using PMT or whatever does affect things.
-    ratios: Will update the values to the ratios needed to scale the data.
+    ratios: Will update with the values to the ratios needed to scale the data.
             ratios[0] is the ratio for the "full_obj"
             ratios[1] is the ratio for the "new_obj"
             one of them will be one, one will be the appropriate scale, since one of
-            them is unscaled.
+            them is unscaled. This is strictly speaking an output
+    override_ratio: Pass a float to specify the ratio that should be used.
+    ignore_weaker_lowers: Sometimes, a SB is in the short pass filter so a lower
+        order is weaker than the next highest. If True, causes script to ignore all
+        sidebands which are weaker and lower order.
 
     Returns:
     full = extended version of the input full.  Overlapping sidebands are
@@ -3317,12 +3725,27 @@ def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=
         print()
         print("=" * 15)
 
-    full_obj.full_dict, full_obj.sb_results = FullHighSideband.parse_sb_array(full_obj.sb_results)
-    new_obj.new_dict, new_obj.sb_results = FullHighSideband.parse_sb_array(new_obj.sb_results)
+    # remove potentially offensive SBs, i.e. a 6th order SB being in the SPF for more
+    #  data, but being meaningless to pull intensity information from.
+    # Note: this might not be the best if you get to higher order stitches where it's
+    #  possible that the sidebands might not be monotonic (from noise?)
+    if ignore_weaker_lowers:
+        full_obj.full_dict, full_obj.sb_results = FullHighSideband.parse_sb_array(full_obj.sb_results)
+        new_obj.new_dict, new_obj.sb_results = FullHighSideband.parse_sb_array(new_obj.sb_results)
 
-    full = full_obj.full_dict
-    new_dict = new_obj.full_dict
+    # was fucking around with references and causing updates to arrays when it shouldn't
+    # be
+    full = copy.deepcopy(full_obj.full_dict)
+    new_dict = copy.deepcopy(new_obj.full_dict)
 
+    # Force a rescaling if you've passed a specified parameter
+    # if isinstance(override_ratio, float):
+    #     need_ratio = True
+
+    # Do some testing to see which dict should be scaled to the other
+    # I honestly forget why I prioritized the PMT first like this. But the third
+    # check looks to make a gain 110 prioritize non-110, unless the non-110 includes
+    # a laser line
     scaleTo = ""
     if need_ratio:
         if isinstance(new_obj, HighSidebandPMT):
@@ -3374,7 +3797,7 @@ def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=
                     if verbose:
                         print("\t\t{:2.0f}: {:.3e}/{:.3e} ~ {:.3e},".format(sb, new_dict[sb][2],
                                                                full[sb][2], ratio_list[-1]))
-                new_ratio = 1
+                # new_ratio = 1 06/11/18 Not sure what these were used for
                 ratio = np.mean(ratio_list)
             else:
                 if verbose:
@@ -3384,10 +3807,17 @@ def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=
                     if verbose:
                         print("\t\t{:2.0f}: {:.3e}/{:.3e} ~ {:.3e},".format(sb, full[sb][2],
                                                                new_dict[sb][2], ratio_list[-1]))
-                new_ratio = np.mean(ratio_list)
-                ratio = np.mean(ratio_list)
+                # new_ratio = np.mean(ratio_list) 06/11/18 Not sure what these were used for
 
+                ratio = np.mean(ratio_list)
+            # Maybe not the best way to do it, performance wise, since you still
+            # iterate through the list, even though you'll override it.
+            if isinstance(override_ratio, float):
+                ratio = override_ratio
+                if verbose:
+                    print("overriding calculated ratio with user inputted")
             error = np.std(ratio_list) / np.sqrt(len(ratio_list))
+
         except IndexError:
             # If there's no overlap (which you shouldn't let happen), hardcode a ratio
             # and error. I looked at all the ratios for the overlaps from 6/15/16
@@ -3512,7 +3942,8 @@ def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=
     if verbose:
         print("I made this dictionary", sorted(full.keys()))
         print('-'*19)
-        return full, ratio
+        return full
+        return full, ratio #the fuck? Why was this here?
 
     return full
 
@@ -3548,7 +3979,7 @@ def stitch_hsg_dicts_old(full, new_dict, need_ratio=False, verbose=False):
            averaged because that makes sense?
     """
     if verbose:
-        print("I'm adding these sidebands", sorted(new_dict.keys()))
+        print("I'm adding these sidebands in old stitcher", sorted(new_dict.keys()))
     overlap = [] # The list that hold which orders are in both dictionaries
     missing = [] # How to deal with sidebands that are missing from full but in new.
     for new_sb in sorted(new_dict.keys()):
@@ -4431,7 +4862,7 @@ def get_data_and_header(fname, returnOrigin = False):
 
     Can choose to return the origin header as well
     :param fname: Filename to open
-    :return: header (dict), data
+    :return: data, header (dict)
     """
     with open(fname) as fh:
         line = fh.readline()
@@ -4454,8 +4885,8 @@ def get_data_and_header(fname, returnOrigin = False):
     header = json.loads(header_string)
 
     if returnOrigin:
-        return header, data, oh
-    return header, data
+        return data, header, oh
+    return data, header
 
 def natural_glob(*args):
     # glob/python sort alphabetically, so 1, 10, 11, .., 2, 21,
@@ -4482,7 +4913,7 @@ def natural_glob(*args):
 
 # photonConverter[A][B](x):
 #    convert x from A to B.
-photonConverter = {
+photon_converter = {
     "nm":         {"nm": lambda x: x,           "eV": lambda x:1239.84/x,            "wavenumber": lambda x: 10000000./x},
     "eV":         {"nm": lambda x: 1239.84/x,   "eV": lambda x: x,                   "wavenumber":lambda x: 8065.56 * x},
     "wavenumber": {"nm": lambda x: 10000000./x, "eV": lambda x: x/8065.56, "wavenumber": lambda x: x}
@@ -5118,12 +5549,13 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
 
     :rtype: list of HighSidebandPMT
     """
-    pmt_data = pmt_sorter(folder_path)
+    pmt_data = pmt_sorter(folder_path, plot_individual=plot)
 
     index = 0
     for spectrum in pmt_data:
-        spectrum.integrate_sidebands(verbose=verbose)
-        spectrum.laser_line(verbose=verbose)  # This function is broken because process sidebands can't handle the laser line
+        spectrum.integrate_sidebands(verbose=verbose, **kwargs)
+        spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
+        # because process sidebands can't handle the laser line
         # print spectrum.full_dict
         if plot:
             plt.figure('PMT data')
@@ -5131,6 +5563,7 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
                 plt.errorbar(elem[:, 0], elem[:, 1], elem[:, 2],
                              marker='o', label="{} {}".format(spectrum.parameters["series"],sb))
             plt.figure('Sideband strengths')
+            plt.yscale("log")
             plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
                          label=spectrum.parameters['series'], marker='o')
         if plot and confirm_fits:
@@ -5147,11 +5580,12 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
             spectrum.save_processing(os.path.basename(save), os.path.dirname(save),
                                      index=index)
             index += 1
-    plt.legend()
+    if plot:
+        plt.legend()
     return pmt_data
 
 
-def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=False,
+def proc_n_plotCCD(folder_path, offset=None, plot=False, confirm_fits=False,
                    save=None, keep_empties = False, verbose=False, **kwargs):
     """
     This function will take a list of ccd files and process it completely.
@@ -5178,7 +5612,7 @@ def proc_n_plotCCD(folder_path, cutoff=8, offset=None, plot=False, confirm_fits=
     index = 0
     for spectrum in raw_list:
         try:
-            spectrum.guess_sidebands(cutoff=cutoff, verbose=verbose, plot=plot)
+            spectrum.guess_sidebands(verbose=verbose, plot=plot)
         except RuntimeError:
             print("\n\n\nNo sidebands??\n\n")
             # No sidebands, say it's empty
