@@ -216,7 +216,8 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
                intensityData = [],
                plotFanNIRs = np.arange(-90, 90, 5),
                sliceInExp = True,
-               calculationCallback = lambda J, T: T ):
+               calculationCallback = lambda J, T: T,
+                **kwargs):
     """
 
     :param compiledAlpha: saved files created from a FanCompiler.buildAndSave()
@@ -224,7 +225,7 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
     :param calculationCallback: function to be called when T/J matrices are recalculated
     :return:
     """
-
+    NMax = kwargs.get("NMax", 12)
 
     nirAlphas = compiledAlpha[0, 1:]
     sbs = compiledAlpha[1:, 0]
@@ -273,14 +274,18 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
         # print(f"Recon to: \n{reconstructedAlpha}")
 
         if sliceInExp:
-            niralpha = compiledAlpha[0, idx]
-            reconstructedAlpha[1:,
-                np.argwhere(reconstructedAlpha[0, :].astype(int) == niralpha)[0][0]
-            ] = compiledAlpha[1:, idx]
+            for idx, _ in enumerate(nirAlphas):
 
-            reconstructedGamma[1:,
-                np.argwhere(reconstructedGamma[0, :].astype(int) == niralpha)[0][0]
-            ] = compiledGamma[1:, idx]
+                niralpha = compiledAlpha[0, idx+1]
+                if np.abs(compiledGamma[0, idx+1])>1: continue # finite gamma don't make
+                # sense in this plot
+                reconstructedAlpha[1:,
+                    np.argwhere(reconstructedAlpha[0, :].astype(int) == niralpha)[0][0]
+                ] = compiledAlpha[1:, idx+1]
+
+                reconstructedGamma[1:,
+                    np.argwhere(reconstructedGamma[0, :].astype(int) == niralpha)[0][0]
+                ] = compiledGamma[1:, idx+1]
 
         palp.setImage(reconstructedAlpha[1:, 1:])
         pgam.setImage(reconstructedGamma[1:, 1:])
@@ -294,7 +299,7 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
         T = makeT(J, crystalOrientation)
 
 
-        NMax = 12
+
         TppPolar.setData(sbs[:NMax]+np.abs(T[0, 0, :NMax]), np.angle(T[0, 0, :NMax],
                                                                  deg=False))
         TpmPolar.setData(sbs[:NMax]+np.abs(T[0, 1, :NMax]), np.angle(T[0, 1, :NMax],
@@ -312,6 +317,16 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
         TmpALinear.setData(sbs[:NMax], np.angle(T[1, 0, :NMax],deg=True))
         TmmLinear.setData(sbs[:NMax], np.abs(T[1, 1, :NMax]))
         TmmALinear.setData(sbs[:NMax], np.angle(T[1, 1, :NMax],deg=True))
+
+        TppoTmmLinear.setData(sbs[:NMax], np.abs(T[0, 0, :NMax] / T[1, 1, :NMax]))
+        TppoTmmALinear.setData(sbs[:NMax], np.angle(T[0, 0, :NMax] / T[1, 1, :NMax],
+                               deg=True))
+
+        TpmoTmpLinear.setData(sbs[:NMax], np.abs(T[0, 1, :NMax] / T[1, 0, :NMax]))
+        TpmoTmpALinear.setData(sbs[:NMax], np.angle(T[0, 1, :NMax] / T[1, 0, :NMax],
+                               deg=True))
+
+
 
         calculationCallback(J, T)
     mainwid.updateJ = updateJ # need to keep a reference
@@ -338,6 +353,7 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
 
     double = pg.DoubleYPlot()
     TLinears = pg.PlotContainerWindow(plotWidget=double)
+    TLinears.addLegend()
     TppLinear = TLinears.plot('ko-', name="T++")
     TpmLinear = TLinears.plot('ro-', name="T+-")
     TmpLinear = TLinears.plot('bo-', name="T-+")
@@ -353,6 +369,25 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
     double.p2.addItem(TmmALinear)
 
     tabWid.addTab(TLinears, "T Matrices (Linear)")
+
+
+
+
+
+
+    double2 = pg.DoubleYPlot()
+    TLinears2 = pg.PlotContainerWindow(plotWidget=double2)
+    TLinears2.addLegend()
+    TppoTmmLinear = TLinears2.plot('ko-', name="|T++/T--|")
+    TpmoTmpLinear = TLinears2.plot('ro-', name="|T+-/T+-|")
+
+    TppoTmmALinear = TLinears2.plot('ko--', name="ph(T++/T--)")
+    double2.p2.addItem(TppoTmmALinear)
+    TpmoTmpALinear = TLinears2.plot('ro--', name="ph(T+-/T-+)")
+    double2.p2.addItem(TpmoTmpALinear)
+
+
+    tabWid.addTab(TLinears2, "T Matrices (Ratios)")
 
 
 

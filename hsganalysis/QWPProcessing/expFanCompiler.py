@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import hsganalysis as hsg
 from hsganalysis.jones import JonesVector as JV
 
 class FanCompiler(object):
@@ -18,15 +19,46 @@ class FanCompiler(object):
     outputs.buildAndSave(fname)
 
     """
-    def __init__(self, wantedSBs, keepErrors = False):
+    def __init__(self, wantedSBs, keepErrors = False, negateNIR = True):
+        """
+
+        :param wantedSBs:
+        :param keepErrors:
+        :param negateNIR: flag for whether to negate the NIR alpha value. Currently,
+        this is done because the PAX views -z direction, while home-built views +z (
+        with NIR)
+        """
         self.want = np.array(wantedSBs)
         self.arrA = wantedSBs.reshape(-1, 1) # so I can stack in the opposite direction
         self.arrG = wantedSBs.reshape(-1, 1)  # so I can stack in the opposite direction
         self.arrS = wantedSBs.reshape(-1, 1)  # so I can stack in the opposite direction
         self.nirAlphas = []
+        self.nirGammas = []
         self._e = keepErrors
+        self._n = negateNIR
 
-    def addSet(self, nirAlpha, dataSet):
+    @staticmethod
+    def fromDataFolder(folder, wantedSBs, keepErrors = False, negateNIR = True):
+        """
+        Create a fan compiler by passing the data path. Handles looping through the
+        folder's sub-folders to find
+        :param folder:
+        :return:
+        """
+        comp = FanCompiler(wantedSBs, keepErrors, negateNIR)
+        for nirFolder in hsg.natural_glob(folder, "*"):
+            if "skip" in nirFolder.lower(): continue
+            laserParams, rawData = hsg.hsg_combine_qwp_sweep(nirFolder, save=False,
+                                                             verbose=False,
+                                                             loadNorm=False)
+
+            _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams,
+                                                 vertAnaDir="VAna" in nirFolder,
+                                                 series=nirFolder)
+            comp.addSet(fitDict)
+        return comp
+
+    def addSet(self, dataSet):
         """ Assume it's passed from  proc_n_fit_qwp_data"""
         newAData = []
         newGData = []
@@ -34,6 +66,9 @@ class FanCompiler(object):
         alphaSet = dataSet["alpha"]
         gammaSet = dataSet["gamma"]
         s0Set = dataSet["S0"]
+
+        nirAlpha = dataSet["alpha"][0][1]
+        nirGamma = dataSet["gamma"][0][1]
         if self._e:
             for sb in self.want:
                 newAData.append([ii[1:] for ii in alphaSet if ii[0] == sb])
@@ -62,18 +97,19 @@ class FanCompiler(object):
             print(np.array(newAData).shape)
             raise
 
-        ## I need to look into this, but I'm starting to think that
-        ## currently, the PAX and polarimeter disagree about orientaiton.
-        ## which actually, I think means I need to reverse the polarimeter
-        ## data
-        print("WARNING: Negating NIR Alpha")
-        self.nirAlphas.append(-nirAlpha)
+
+        if self._n:
+            print("WARNING: Negating NIR Alpha")
+            self.nirAlphas.append(-nirAlpha)
+        else:
+            self.nirAlphas.append(nirAlpha)
+        self.nirGammas.append(nirGamma)
 
     def build(self):
         fullDataA = np.append([-1], self.nirAlphas)
         fullDataA = np.row_stack((fullDataA, self.arrA))
 
-        fullDataG = np.append([-1], self.nirAlphas)
+        fullDataG = np.append([-1], self.nirGammas)
         fullDataG = np.row_stack((fullDataG, self.arrG))
 
         fullDataS = np.append([-1], self.nirAlphas)

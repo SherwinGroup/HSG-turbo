@@ -100,6 +100,7 @@ def findJ(alphas, gammas, **kwargs):
 
     sbs = alphas[1:,0]
     nirAlphas = alphas[0, 1:]
+    nirGammas = gammas[0, 1:]
     sbGetter = SbStateGetter(alphas[1:, 1:], gammas[1:, 1:], sbs, nirAlphas)
 
 
@@ -117,7 +118,7 @@ def findJ(alphas, gammas, **kwargs):
             p = type("_", (object, ), {"x": np.array([np.nan]*3 + [0]*3)})
         else:
             sbJones = JV(alpha=als, gamma=gms)
-            nirJones = JV(alpha=nirAlphas, gamma=0)
+            nirJones = JV(alpha=nirAlphas, gamma=nirGammas)
 
             costfunc = lambda jmatrix: np.linalg.norm(solver([nirJones, sbJones], jmatrix))
 

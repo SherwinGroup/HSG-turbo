@@ -5602,7 +5602,8 @@ def proc_n_plotCCD(folder_path, offset=None, plot=False, confirm_fits=False,
     else:
         # if verbose:
             # print "Looking in:", os.path.join(folder_path, '*seq_spectrum.txt')
-        file_list = glob.glob(os.path.join(folder_path, '*seq_spectrum.txt'))
+        # file_list = glob.glob(os.path.join(folder_path, '*seq_spectrum.txt'))
+        file_list = natural_glob(folder_path, '*seq_spectrum.txt')
         # if verbose:
             # print "found these files:", "\n".join([os.path.basename(ii) for ii in file_list])
     raw_list = []

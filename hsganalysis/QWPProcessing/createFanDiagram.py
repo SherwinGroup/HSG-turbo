@@ -49,6 +49,7 @@ def createFan(alphas, gammas, **kwargs):
 
 
     sbs = alphas[1:, 0]
+    maxSB = sbs.max()
     nirAlphas = alphas[0, 1:]
 
     # p(olarplot)alp(ha)
@@ -66,8 +67,8 @@ def createFan(alphas, gammas, **kwargs):
         ]
     })
     palp.ui.histogram.axis.setTickFont(QtGui.QFont("Arial", 18))
-    palp.view.setXRange(-40, 40)
-    palp.view.setYRange(-40, 40)
+    palp.view.setXRange(-maxSB*1.1, maxSB*1.1)
+    palp.view.setYRange(-maxSB*1.1, maxSB*1.1)
     palp.setLevels(-90, 90)
 
     # p(olarplot)gam(ma)
@@ -105,7 +106,7 @@ def createFan(alphas, gammas, **kwargs):
     palp.textItem = textItem
     palp.pe = pe
     palp.addItem(textItem)
-    textItem.setPos(-40, -35)
+    textItem.setPos(-maxSB*1.1, -maxSB)
     palp.imageItem.sigPointClicked.connect(
         lambda x: textItem.setHtml(
             f"r={x.r:.0f}, &theta;={x.t:.0f},<br>f(r, &theta;)={x.val:.3f}"
@@ -152,8 +153,6 @@ def createFan(alphas, gammas, **kwargs):
             arr._rotate = False
             arr.setIndex(74)
             arr.rotate(-a)
-
-
 
         for g in [45, 30, 15, -15, -30, -45]:
             e = pg.PolarizationEllipseItem()
@@ -235,5 +234,6 @@ def saveAndRenderFan(p1, p2, fname, **kwargs):
     hist1.render(outputPainter, r1)
 
 
-    outputImage.save(fname)
+    ret = outputImage.save(fname)
+
     outputPainter.end()
