@@ -16,7 +16,7 @@ def dtr(a):
 def makeU(t):
     # unitary rotation matrix between x/y and sigma+- bases
     # t is the crystal rotation angle. By note below, it should be relative to [011]
-    t = dtr(t+45) # +45 because I'm relative to [011], Matrix wants [010]
+    t = dtr(t-45) # +45 because I'm relative to [011], Matrix wants [010]
                 # I SHOULD DOUBLE CHECK THAT IT'S +45 NOT -45
     a =    np.exp(-1j * t)
     b =   -np.exp( 1j * t)
