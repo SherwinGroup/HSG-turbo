@@ -106,6 +106,7 @@ class BaseWindow(QtWidgets.QMainWindow):
                 # to handle FullHighSideband class
                 self.processSingleData(inp)
             else:
+                self.processSingleData(inp)
                 print("unknown type, ", type(inp), self.__class__.__name__)
 
         self.sigClosed.connect(updateWindowClose)
@@ -1735,9 +1736,10 @@ class QWPSweepWindow(HSGWindow):
         # get the appropriate parameter from fitDict
         self.sbToIdx = {sb: idx for idx, sb in enumerate(fitDict["alpha"][:,0])}
         self._rawPlotCurves = {}
-        super(QWPSweepWindow, self).__init__(inp=None)
+        super(QWPSweepWindow, self).__init__(inp=[self.dataClass(fname), folder])
+        # super(QWPSweepWindow, self).__init__(inp=None)
+        # self.processSingleData([self.dataClass(fname), folder])
 
-        self.processSingleData(self.dataClass(fname), folder)
         self.show()
 
         # Dummy menu to appease superclass, even though this doesn't really
@@ -1798,7 +1800,8 @@ class QWPSweepWindow(HSGWindow):
         # Add it to the list of opened windows
         combinedQWPSweepWindowList.append(a)
 
-    def processSingleData(self, dataObj, folder):
+    def processSingleData(self, inp):
+        dataObj, folder = inp
         self.dataObj = dataObj
         p = Parameter.create(
             name=dataObj.fname,
@@ -1813,7 +1816,7 @@ class QWPSweepWindow(HSGWindow):
         fileList = []
 
         for fname in glob.glob(os.path.join(folder, "*.txt")):
-            h, _ = hsg.get_data_and_header(fname)
+            _, h = hsg.get_data_and_header(fname)
             try:
                 fileList.append({"name": "{:.1f}".format(h["rotatorAngle"]), "type": "str",
                 "value": os.path.basename(fname), "readonly": False})
@@ -1864,6 +1867,8 @@ class QWPSweepWindow(HSGWindow):
         pi.vb.sigResized.connect(lambda: p2.setGeometry(pi.vb.sceneBoundingRect()))
 
         pi.vb.sigDropEvent.connect(self.handleAnglesDragEvent)
+
+        self.ret = self.ui.menubar.addMenu("Set Window Title")
 
         menu = self.menuBar().addMenu("Max SB plotted")
         ag = QtWidgets.QActionGroup(self)
