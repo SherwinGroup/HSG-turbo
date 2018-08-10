@@ -3287,7 +3287,7 @@ def makeCurve(eta, isVertical):
     return analyzerCurve
 
 def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir = True, plot=False,
-                        save = False, plotRaw = lambda sbidx, sbnum: False, series = '',
+                        save = False, plotRaw = lambda sbidx, sbnum: False, series = '', eta=None,
                         **kwargs):
     """
     Fit a set of sideband data vs QWP angle to get the stoke's parameters
@@ -3301,6 +3301,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
     :param save: filename to save the files. Accepts BytesIO
     :param plotRaw: callable that takes an index of the sb and sb number, returns true to plot the raw curve
     :param series: a string to be put in the header for the origin files
+    :param eta: a function to call to calculate the desired retardance. Input will be the SB order.
 
     if saveStokes is in kwargs and False, it will not save the stokes parameters, since I rarely actually use them.
     :return:
@@ -3341,6 +3342,19 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         # getting arrays the right shape
         wantedSBs = set(allSbData[0, 1:])
 
+    if eta is None:
+        """
+        It might be easier for the end user to do this by passing eta(wavelength) instead of eta(sborder), 
+        but then this function would need to carry around wavelengths, which is extra work. It could convert
+        between NIR/THz wavelengths to SB order, but it's currently unclear whether you'd rather use what the WS6 
+        claims, or what the sidebands say, and you'd probably want to take the extra step to ensure the SB fit rseults
+        if using the spectromter wavelengths. In general, if you have a function as etal(wavelength), you'd probably 
+        want to pass this as 
+        eta = lambda x: etal(1239.84/(nirEv + x*THzEv))
+        assuming nirEv/THzEv are the photon energies of the NIR/THz. 
+        """
+        eta = lambda x: 0.25
+
     # allow pasing a flag it ignore odds. I think I generally do, so set it to
     # default to True
     skipOdds = kwargs.get("skip_odds", True)
@@ -3375,8 +3389,8 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         #     p0 = [1, 1, 0, 0]
         p0 = [1, 1, 0, 0]
 
-        eta = 0.25 # QWP retardence, assume perfect for now
-        p, pcov = curve_fit(makeCurve(0.25, vertAnaDir), angles, sbData, p0=p0)
+        etan = eta(sbNum)
+        p, pcov = curve_fit(makeCurve(etan, vertAnaDir), angles, sbData, p0=p0)
 
         if plot and plotRaw(sbIdx, sbNum):
             # pg.figure("{}: sb {}".format(dataName, sbNum))
