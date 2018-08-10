@@ -27,7 +27,10 @@ def createFan(alphas, gammas, **kwargs):
     """
 
     defaults = {
-        "plotEllipseHelpers": True
+        "plotEllipseHelpers": True,
+        "showGamma": True,
+        "showCenterEllipse": True,
+        "showInfoText": True,
     }
     defaults.update(kwargs)
 
@@ -105,6 +108,11 @@ def createFan(alphas, gammas, **kwargs):
     textItem = pg.pg.TextItem("Start", color=(0, 0, 0))
     palp.textItem = textItem
     palp.pe = pe
+    if not defaults["showCenterEllipse"]:
+        pe.hide()
+    if not defaults["showInfoText"]:
+        textItem.hide()
+
     palp.addItem(textItem)
     textItem.setPos(-maxSB*1.1, -maxSB)
     palp.imageItem.sigPointClicked.connect(
@@ -174,7 +182,8 @@ def createFan(alphas, gammas, **kwargs):
 
 
     palp.show()
-    pgam.show()
+    if defaults["showGamma"]:
+        pgam.show()
     return palp, pgam
 
 def saveAndRenderFan(p1, p2, fname, **kwargs):

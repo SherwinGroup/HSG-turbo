@@ -2,7 +2,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from hsganalysis.jones import JonesVector as JV
-from .expFanCompiler import SbStateGetter
+from .expFanCompiler import *
 
 
 def rtd(a):
@@ -51,17 +51,25 @@ def unflattenJ(jVec):
     return j.reshape(2,2)
 
 def solver(r, J):
+    """ Reminder:
+    a Jones Vector is represented by
+    (cos(phi), sin(phi)exp(i delta)).T
+    """
     Jxy, Jyx, Jyy = (J[:3]+1j*J[3:])
     nir, sb = r
     eN = np.exp(1j*np.deg2rad(nir.delta))
     eH = np.exp(-1j*np.deg2rad(sb.delta))
-    cotH = 1./np.tan(np.deg2rad(sb.phi))
+    cH = np.cos(np.deg2rad(sb.phi))
+    sH = np.sin(np.deg2rad(sb.phi))
     cN = np.cos(np.deg2rad(nir.phi))
     sN = np.sin(np.deg2rad(nir.phi))
 
-    return cotH*eH*(Jyx*cN + Jyy*sN*eN)-cN-Jxy*sN*eN
+    # cotH = 1./np.tan(np.deg2rad(sb.phi))
+    # return cotH*eH*(Jyx*cN + Jyy*sN*eN)-cN-Jxy*sN*eN
 
-def findJ(alphas, gammas, **kwargs):
+    return cH*eH*(Jyx*cN + Jyy*sN*eN) - sH*(cN + sN*eN*Jxy)
+
+def findJ(alphas, gammas=None, **kwargs):
     """
     Extract the Jones matrix (x/y basis) from given data.
     alphas/gammas should be the matrices saved from the FanCompiler, of form:
@@ -89,6 +97,9 @@ def findJ(alphas, gammas, **kwargs):
           ]
         useful for continuing into processing (and JonesVector maths).
 
+    You can also just pass a FanCompiler object and it'll pull the alpha/gamma from
+    that.
+
     :return:
     """
 
@@ -97,6 +108,8 @@ def findJ(alphas, gammas, **kwargs):
     }
     defaults.update(kwargs)
 
+    if gammas is None and isinstance(alphas, FanCompiler):
+        alphas, gammas, _ = alphas.build()
 
     sbs = alphas[1:,0]
     nirAlphas = alphas[0, 1:]
@@ -135,5 +148,38 @@ def findJ(alphas, gammas, **kwargs):
     if defaults["returnFlat"]: return outputFlatJMatrix
     return outputJMatrix
 
+
+def saveT(T, out):
+    """
+    Save a complex T matrix, input as an Nx2x2, into a text file. Dumps it as a CSV
+    where the first four columns are the real components, the last four are imaginary
+    :param T:
+    :param out:
+    :return:
+    """
+    T = T.transpose(2, 0, 1)
+    flatT = T.reshape(-1, 4).view(float).reshape(-1, 8)
+    flatT = np.column_stack((wantedSBs, flatT))
+
+    header = "SB,ReT++,ReT+-,ReT-+,ReT--,ImT++,ImT+-,ImT-+,ImT--"
+    np.savetxt(out,
+               flatT, header=header, comments='', delimiter=',',
+               fmt="%.6f")
+    print("saved {}\n".format(out))
+
+def loadT(name):
+    """
+    Load the file saved by saveT
+    :param name:
+    :return:
+    """
+    d = np.genfromtxt(name, delimiter=',')[1:] # label line
+
+    sbs = d[:,0]
+
+    T = d[:, 1:5]+1j*d[:, 5:]
+    T = T.reshape(-1, 2, 2)
+    T = T.transpose(1, 2, 0)
+    return T
 
 
