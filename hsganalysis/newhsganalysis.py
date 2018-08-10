@@ -2934,6 +2934,13 @@ def hsg_combine_spectra(spectra_list, verbose = False, **kwargs):
                     counter += 1
                     good_list[-1].add_CCD(piece, verbose=verbose, **kwargs)
                     spectra_list.remove(piece)
+                else:
+                    print("\t\tNot the right spec step?", type(piece.parameters["spec_step"]))
+
+            else:
+                if verbose:
+                    print("\t\tNot the same series ({} vs {}".format(
+                        piece.parameters["series"],temp.parameters["series"]))
         good_list[-1].make_results_array()
     return good_list
 
@@ -3188,6 +3195,10 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False,
     except:
         # Do the processing on all the files
         specs = proc_n_plotCCD(path, keep_empties=True, verbose=verbose)
+        for sp in specs:
+            sp.parameters["series"] = round(float(sp.parameters["rotatorAngle"]), 2)
+        specs = hsg_combine_spectra(specs, ignore_weaker_lowers=False)
+        print(specs, path)
         if not save:
             # If you don't want to save them, set everything up for doing Bytes objects
             # to replacing saving files
@@ -5602,7 +5613,8 @@ def proc_n_plotCCD(folder_path, offset=None, plot=False, confirm_fits=False,
     else:
         # if verbose:
             # print "Looking in:", os.path.join(folder_path, '*seq_spectrum.txt')
-        file_list = glob.glob(os.path.join(folder_path, '*seq_spectrum.txt'))
+        # file_list = glob.glob(os.path.join(folder_path, '*seq_spectrum.txt'))
+        file_list = natural_glob(folder_path, '*seq_spectrum.txt')
         # if verbose:
             # print "found these files:", "\n".join([os.path.basename(ii) for ii in file_list])
     raw_list = []

@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import hsganalysis as hsg
 from hsganalysis.jones import JonesVector as JV
 
 class FanCompiler(object):
@@ -18,15 +19,61 @@ class FanCompiler(object):
     outputs.buildAndSave(fname)
 
     """
-    def __init__(self, wantedSBs, keepErrors = False):
+    def __init__(self, wantedSBs, keepErrors = False, negateNIR = True):
+        """
+
+        :param wantedSBs:
+        :param keepErrors:
+        :param negateNIR: flag for whether to negate the NIR alpha value. Currently,
+        this is done because the PAX views -z direction, while home-built views +z (
+        with NIR)
+        """
         self.want = np.array(wantedSBs)
         self.arrA = wantedSBs.reshape(-1, 1) # so I can stack in the opposite direction
         self.arrG = wantedSBs.reshape(-1, 1)  # so I can stack in the opposite direction
         self.arrS = wantedSBs.reshape(-1, 1)  # so I can stack in the opposite direction
         self.nirAlphas = []
+        self.nirGammas = []
         self._e = keepErrors
+        self._n = 1
+        if negateNIR:
+            print("WARNING: NEGATING NIR ALPHA")
+            self._n = -1
 
-    def addSet(self, nirAlpha, dataSet):
+
+
+    @staticmethod
+    def fromDataFolder(folder, wantedSBs, keepErrors = False, negateNIR = True):
+        """
+        Create a fan compiler by passing the data path. Handles looping through the
+        folder's sub-folders to find
+        :param folder: The folder to search through. Alternatively, if it's a
+        list/iterable, iterate through that instead. Useful if external code is
+        directly removing sets of data.
+        :return:
+        """
+        comp = FanCompiler(wantedSBs, keepErrors, negateNIR)
+        # If it's a string, assume it's a single path that wants to be searached
+        if isinstance(folder, str):
+            wantFolders = hsg.natural_glob(folder, "*")
+        else:
+            # Otherwise, assume they've passed an iterable to search through
+            wantFolders = folder
+
+
+        for nirFolder in wantFolders:
+            if "skip" in nirFolder.lower(): continue
+            laserParams, rawData = hsg.hsg_combine_qwp_sweep(nirFolder, save=False,
+                                                             verbose=False,
+                                                             loadNorm=False)
+
+            _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams,
+                                                 vertAnaDir="VAna" in nirFolder,
+                                                 series=nirFolder)
+            comp.addSet(fitDict)
+        return comp
+
+    def addSet(self, dataSet):
         """ Assume it's passed from  proc_n_fit_qwp_data"""
         newAData = []
         newGData = []
@@ -34,16 +81,28 @@ class FanCompiler(object):
         alphaSet = dataSet["alpha"]
         gammaSet = dataSet["gamma"]
         s0Set = dataSet["S0"]
+
+        # nirAlpha = dataSet["alpha"][0][1]
+        # nirGamma = dataSet["gamma"][0][1]
         if self._e:
+            # Need to double to account for
+            nirAlpha = [self._n*dataSet["alpha"][0][1], dataSet["alpha"][0][2]]
+            nirGamma = [dataSet["gamma"][0][1], dataSet["gamma"][0][2]]
             for sb in self.want:
-                newAData.append([ii[1:] for ii in alphaSet if ii[0] == sb])
-                newGData.append([ii[1:] for ii in gammaSet if ii[0] == sb])
-                newSData.append([ii[1:] for ii in s0Set if ii[0] == sb])
+                # the list(*[]) bullshit is to make sure a list gets appended,
+                # not a numpy array. Further complicated because if the list
+                # comprehension returns nothing, it doesn't append anything,
+                # hence casting to a list.
+                newAData.append(list(*[ii[1:] for ii in alphaSet if ii[0] == sb]))
+                newGData.append(list(*[ii[1:] for ii in gammaSet if ii[0] == sb]))
+                newSData.append(list(*[ii[1:] for ii in s0Set if ii[0] == sb]))
                 if not newAData[-1]: # no data was found.
                     newAData[-1] = [np.nan, np.nan]
                     newGData[-1] = [np.nan, np.nan]
                     newSData[-1] = [np.nan, np.nan]
         else:
+            nirAlpha = [self._n*dataSet["alpha"][0][1]]
+            nirGamma = [dataSet["gamma"][0][1]]
             for sb in self.want:
                 newAData.append([ii[1] for ii in alphaSet if ii[0] == sb])
                 newGData.append([ii[1] for ii in gammaSet if ii[0] == sb])
@@ -62,18 +121,15 @@ class FanCompiler(object):
             print(np.array(newAData).shape)
             raise
 
-        ## I need to look into this, but I'm starting to think that
-        ## currently, the PAX and polarimeter disagree about orientaiton.
-        ## which actually, I think means I need to reverse the polarimeter
-        ## data
-        print("WARNING: Negating NIR Alpha")
-        self.nirAlphas.append(-nirAlpha)
+        # extending created lists accounts for keeping errors r not
+        self.nirAlphas.extend(nirAlpha)
+        self.nirGammas.extend(nirGamma)
 
     def build(self):
         fullDataA = np.append([-1], self.nirAlphas)
         fullDataA = np.row_stack((fullDataA, self.arrA))
 
-        fullDataG = np.append([-1], self.nirAlphas)
+        fullDataG = np.append([-1], self.nirGammas)
         fullDataG = np.row_stack((fullDataG, self.arrG))
 
         fullDataS = np.append([-1], self.nirAlphas)
