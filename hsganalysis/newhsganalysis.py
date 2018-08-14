@@ -3195,10 +3195,10 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False,
     except:
         # Do the processing on all the files
         specs = proc_n_plotCCD(path, keep_empties=True, verbose=verbose)
+
         for sp in specs:
             sp.parameters["series"] = round(float(sp.parameters["rotatorAngle"]), 2)
         specs = hsg_combine_spectra(specs, ignore_weaker_lowers=False)
-        print(specs, path)
         if not save:
             # If you don't want to save them, set everything up for doing Bytes objects
             # to replacing saving files
@@ -3390,7 +3390,14 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         p0 = [1, 1, 0, 0]
 
         etan = eta(sbNum)
-        p, pcov = curve_fit(makeCurve(etan, vertAnaDir), angles, sbData, p0=p0)
+        try:
+            p, pcov = curve_fit(makeCurve(etan, vertAnaDir), angles, sbData, p0=p0)
+        except ValueError:
+            print("value error")
+            print(angles)
+            print(sbData)
+            raise
+
 
         if plot and plotRaw(sbIdx, sbNum):
             # pg.figure("{}: sb {}".format(dataName, sbNum))
@@ -4359,8 +4366,15 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
 
         # if no sidebands were found, skip this one
         try:
+            # TODO: (08/14/18) the .ndim==1 isn't the correct check, since it fails
+            # when looking at the laser line. Need to test this with a real
+            # empty data set, vs data set with 1 sb
             if not spec or spec.sb_results.ndim == 1:
-                if skip_empties:
+                if spec.sb_results[0] == 0:
+                    spec.sb_results = np.atleast_2d(spec.sb_results)
+
+
+                elif skip_empties:
                     continue
                 else:
                     noSidebands = True
