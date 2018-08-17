@@ -4919,7 +4919,7 @@ def get_data_and_header(fname, returnOrigin = False):
             oh += fh.readline()[:-1] #remove final \n
 
         # data = np.genfromtxt(fh, delimiter=',')
-    data = np.genfromtxt(fname, delimiter=',')[3:]
+    data = np.genfromtxt(fname, delimiter=',')
 
     header = json.loads(header_string)
 
@@ -5690,13 +5690,15 @@ def proc_n_plotCCD(folder_path, offset=None, plot=False, confirm_fits=False,
             plt.ylim([-0.1, 1])
         if type(save) is tuple:
             spectrum.save_processing(save[0], save[1],
-                                     marker=spectrum.parameters["series"],
+                                     marker=spectrum.parameters["series"].replace(
+                                         r"/", "p"),
                                      index=index)
             index += 1
         elif isinstance(save, str):
             # print "DEBUG: trying to save CCD with ", os.path.dirname(save),'_at_', os.path.basename(save)
             spectrum.save_processing(os.path.basename(save), os.path.dirname(save),
-                                     marker=spectrum.parameters["series"],
+                                     marker=spectrum.parameters["series"].replace(
+                                         r"/", "p"),
                                      index=index)
             index += 1
     return raw_list

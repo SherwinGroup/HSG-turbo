@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'C:\Users\dvalovcin\Documents\GitHub\HSG-turbo\hsganalysis\UI\qwpCompWin.ui'
 #
-# Created by: PyQt5 UI code generator 5.6
+# Created by: PyQt5 UI code generator 5.9.2
 #
 # WARNING! All changes made in this file will be lost!
 
@@ -21,7 +21,6 @@ class Ui_PolarimeterWindow(object):
         self.tabAngles = QtWidgets.QWidget()
         self.tabAngles.setObjectName("tabAngles")
         self.horizontalLayout_2 = QtWidgets.QHBoxLayout(self.tabAngles)
-        self.horizontalLayout_2.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout_2.setObjectName("horizontalLayout_2")
         self.splitter = QtWidgets.QSplitter(self.tabAngles)
         self.splitter.setOrientation(QtCore.Qt.Horizontal)
@@ -35,7 +34,6 @@ class Ui_PolarimeterWindow(object):
         self.tabRaw = QtWidgets.QWidget()
         self.tabRaw.setObjectName("tabRaw")
         self.horizontalLayout_3 = QtWidgets.QHBoxLayout(self.tabRaw)
-        self.horizontalLayout_3.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout_3.setObjectName("horizontalLayout_3")
         self.splitFits = QtWidgets.QSplitter(self.tabRaw)
         self.splitFits.setOrientation(QtCore.Qt.Vertical)
@@ -44,6 +42,14 @@ class Ui_PolarimeterWindow(object):
         self.gRaw.setObjectName("gRaw")
         self.horizontalLayout_3.addWidget(self.splitFits)
         self.tabWidget.addTab(self.tabRaw, "")
+        self.widget = QtWidgets.QWidget()
+        self.widget.setObjectName("widget")
+        self.horizontalLayout_4 = QtWidgets.QHBoxLayout(self.widget)
+        self.horizontalLayout_4.setObjectName("horizontalLayout_4")
+        self.gFits = DraggablePlotWidget(self.widget)
+        self.gFits.setObjectName("gFits")
+        self.horizontalLayout_4.addWidget(self.gFits)
+        self.tabWidget.addTab(self.widget, "")
         self.horizontalLayout.addWidget(self.tabWidget)
         PolarimeterWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(PolarimeterWindow)
@@ -63,6 +69,7 @@ class Ui_PolarimeterWindow(object):
         PolarimeterWindow.setWindowTitle(_translate("PolarimeterWindow", "HSG Analysis Tool"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabAngles), _translate("PolarimeterWindow", "Angles"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabRaw), _translate("PolarimeterWindow", "Raw Curves"))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.widget), _translate("PolarimeterWindow", "Fit Results"))
 
 from .draggablePlotWidget import DraggablePlotWidget
 from pyqtgraph.parametertree import ParameterTree

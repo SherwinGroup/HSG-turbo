@@ -149,7 +149,7 @@ def findJ(alphas, gammas=None, **kwargs):
     return outputJMatrix
 
 
-def saveT(T, out):
+def saveT(T, sbs, out):
     """
     Save a complex T matrix, input as an Nx2x2, into a text file. Dumps it as a CSV
     where the first four columns are the real components, the last four are imaginary
@@ -159,7 +159,7 @@ def saveT(T, out):
     """
     T = T.transpose(2, 0, 1)
     flatT = T.reshape(-1, 4).view(float).reshape(-1, 8)
-    flatT = np.column_stack((wantedSBs, flatT))
+    flatT = np.column_stack((sbs, flatT))
 
     header = "SB,ReT++,ReT+-,ReT-+,ReT--,ImT++,ImT+-,ImT-+,ImT--"
     np.savetxt(out,

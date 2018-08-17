@@ -307,6 +307,8 @@ class BaseWindow(QtWidgets.QMainWindow):
             {"name": "Gain", "type": "int", "value": kwargs.get("gain", 0), "readonly":True},
             {"name": "CCD Image", "type": "str", "value": "[{}, {}, {}]".format(
                 *np.array(kwargs.get("ccd_image_settings", [-1]*6))[[1, 4, 5]]), "readonly":True},
+            {"name": "Images Taken", "type": "text", "value":
+                str(kwargs.get("images_in_sequence", "NA")), "readonly":False, "expanded":False},
             {"name": "CCD Temp (C)", "type": "str", "value": kwargs.get("ccd_temperature", 0), "readonly":True},
             {"name": "Spec Grating", "type": "int", "value": kwargs.get("grating", 0), "readonly":True},
             {"name": "Spec Sweep", "type": "int", "value": kwargs.get("spec_step", 0), "readonly":True},
@@ -1382,7 +1384,7 @@ class HSGImageWindow(HSGWindow):
     # dataClass = object
     def __init__(self, *args, **kwargs):
         super(HSGImageWindow, self).__init__(*args, **kwargs)
-        self.ui.gSpectrum.removeItem(self.sbLine)
+        # self.ui.gSpectrum.removeItem(self.sbLine)
 
     def inheritParent(self, parent):
         pass
@@ -1816,14 +1818,35 @@ class QWPSweepWindow(HSGWindow):
         folder = os.path.dirname(dataObj.fname)
         for fname in glob.glob(os.path.join(folder, "*.txt")):
             _, h = hsg.get_data_and_header(fname)
+            # Cut out the first part cause I just need the number to know which file
+            # to open
+            specnum = fname[fname.find("seq")-4:fname.find("seq")]
             try:
-                fileList.append({"name": "{:.1f}".format(h["rotatorAngle"]), "type": "str",
-                "value": os.path.basename(fname), "readonly": False})
+                name= "{:.1f}{}".format(h["rotatorAngle"],
+                            "" if not h["spec_step"] else "_{}".format(h["spec_step"]))
             except KeyError:
-                # Old data styles where the
-                fileList.append(
-                    {"name": "{:.1f}".format(h["detectorHWP"]), "type": "str",
-                     "value": os.path.basename(fname), "readonly": False})
+                name= "{:.1f}{}".format(h["detectorHWP"],
+                            "" if not h["spec_step"] else "_{}".format(h["spec_step"]))
+
+
+            fileList.append({"name": name, "type":"str", "value":specnum,
+                             "readonly":False})
+
+            fileList.append({"name": "   {}".format(name), "type": "str",
+                             "value": "  ->"+h["date"], "readonly": False})
+
+
+            # try:
+            #     fileList.append({"name": "{:.1f}{}".format(
+            #         h["rotatorAngle"], "" if not h["spec_step"] else "_{}".format(h["spec_step"])),
+            #                      "type": "str",
+            #     "value": specnum, "readonly": False})
+            # except KeyError:
+            #     # Old data styles where the
+            #     fileList.append(
+            #         {"name": "{:.1f}".format(h["detectorHWP"]), "type": "str",
+            #          "value": specnum, "readonly": False})
+
 
         p.addChild({"name":"Included Files", "type":"group", "children":
             fileList})
@@ -1888,6 +1911,26 @@ class QWPSweepWindow(HSGWindow):
 
         self.ui.splitter.setStretchFactor(1, 10)
         self.ui.gRaw.addLegend()
+        self.ui.gRaw.plotItem.setLabel("bottom", "QWP Angle (°)")
+        self.ui.gRaw.plotItem.setLabel("left", "Normalized Intensity")
+        self.ui.gRaw.plotItem.setYRange(0, 1, padding=0)
+        self.ui.gRaw.plotItem.setXRange(-5, 365, padding=0)
+        self.ui.gRaw.plotItem.axes["bottom"]["item"].setTickSpacing(45, 15)
+        self.ui.gRaw.plotItem.axes["top"]["item"].setTickSpacing(45, 15)
+
+        self.ui.gFits.plotItem.setLabel("bottom", "Sideband Order")
+        self.ui.gFits.errorbars(self.fitDict["DOP"][:, 0],
+                                  self.fitDict["DOP"][:, 1],
+                                  self.fitDict["DOP"][:, 2],
+                                  'ko-')
+
+
+
+
+
+
+
+
 
     def updateAnglesPlot(self):
         senderSB = float(self.sender().text())
@@ -1936,6 +1979,13 @@ class QWPSweepWindow(HSGWindow):
                                   self.fitDict["alpha"][idx, 2],
                                   self.fitDict["gamma"][idx, 1],
                                   self.fitDict["gamma"][idx, 2]))
+
+        S0, S1, S2, S3 = self.fitDict["S0"][idx, 1], self.fitDict["S1"][idx, 1], \
+                         self.fitDict["S2"][idx, 1], self.fitDict["S3"][idx, 1]
+        curvefunc = hsg.makeCurve(0.25, "vana" in self.dataObj.fname.lower())
+        angs = np.linspace(0, 337.5, 100)
+        self.ui.gRaw.plot(angs, curvefunc(angs, S0, S1, S2, S3), pen=a.opts["pen"])
+
 
         self._rawPlotCurves[senderSB] = a
         # self.ui.gRaw.updateLegendNames(a)

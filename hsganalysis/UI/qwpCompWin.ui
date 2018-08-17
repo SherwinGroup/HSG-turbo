@@ -51,6 +51,16 @@
         </item>
        </layout>
       </widget>
+      <widget class="QWidget" name="">
+       <attribute name="title">
+        <string>Fit Results</string>
+       </attribute>
+       <layout class="QHBoxLayout" name="horizontalLayout_4">
+        <item>
+         <widget class="DraggablePlotWidget" name="gFits"/>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
    </layout>
@@ -69,15 +79,15 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>DraggablePlotWidget</class>
-   <extends>QGraphicsView</extends>
-   <header>draggablePlotWidget</header>
-  </customwidget>
-  <customwidget>
    <class>ParameterTree</class>
    <extends>QWidget</extends>
    <header>pyqtgraph.parametertree</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>DraggablePlotWidget</class>
+   <extends>QGraphicsView</extends>
+   <header>draggablePlotWidget</header>
   </customwidget>
  </customwidgets>
  <resources/>
