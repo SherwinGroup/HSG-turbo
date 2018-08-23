@@ -215,7 +215,8 @@ class FanCompiler(object):
 
 
     @staticmethod
-    def fromDataFolder(folder, wantedSBs, keepErrors = False, negateNIR = True):
+    def fromDataFolder(folder, wantedSBs, keepErrors = False, negateNIR = True,
+                       eta=None):
         """
         Create a fan compiler by passing the data path. Handles looping through the
         folder's sub-folders to find
@@ -241,7 +242,8 @@ class FanCompiler(object):
 
             _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams,
                                                  vertAnaDir="VAna" in nirFolder,
-                                                 series=nirFolder)
+                                                 series=nirFolder,
+                                                 eta=eta)
             comp.addSet(fitDict)
         return comp
 

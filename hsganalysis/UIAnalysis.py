@@ -349,7 +349,7 @@ class BaseWindow(QtWidgets.QMainWindow):
         self.dataObj = dataObj
         self.plotSpectrum()
         p = Parameter.create(
-            name=dataObj.fname,
+            name=os.path.basename(dataObj.fname),
             type='group')
         try:
             params = self.genParameters(parent=p, **dataObj.parameters)
@@ -841,7 +841,7 @@ class HSGWindow(BaseWindow):
 
 
         self.specParams = Parameter.create(
-            name=dataObj.fname,
+            name=os.path.basename(dataObj.fname),
             type='group')
         try:
             params = self.genParameters(parent=self.specParams, **dataObj.parameters)
@@ -1093,45 +1093,6 @@ class HSGWindow(BaseWindow):
         return oldName, newName
 
 class HSGCCDWindow(HSGWindow):
-    # dataClass = hsg.HighSidebandCCD
-    # dataSubclasses = [hsg.FullHighSideband]
-    # def __init__(self, *args, **kwargs):
-    #     self.curveFits = {}
-    #     super(HSGWindow, self).__init__(*args, **kwargs)
-    #
-    # def initUI(self):
-    #     super(HSGWindow, self).initUI()
-    #     self.sbLine = pg.InfiniteLine(pos=750, movable=True)
-    #     self.ui.gSpectrum.addItem(self.sbLine)
-    #     self.sbLine.sigPositionChanged.connect(self.updateSBCalc)
-    #
-    # def inheritParent(self, parent):
-    #     if isinstance(parent, HSGWindow):
-    #         # set the same units on NIR frequency
-    #         params = parent.specParams
-    #         idx = params.child("Laser Settings", "NIR Frequency").opts["values"].index(
-    #             params.child("Laser Settings", "NIR Frequency").opts["value"]
-    #         )
-    #         params = self.specParams
-    #         params.child("Laser Settings", "NIR Frequency").setValue(
-    #             params.child("Laser Settings", "NIR Frequency").opts["values"][idx]
-    #         )
-    #         self.ui.tabWidget.setCurrentIndex(parent.ui.tabWidget.currentIndex())
-    #         [i.setChecked(False) for i in self.menuFitX.actions()]
-    #         [i.setChecked(True) for (i,j) in
-    #             zip(self.menuFitX.actions(), parent.menuFitX.actions()) if j.isChecked()]
-    #
-    #         # Make sure something is set to be plotted
-    #         if not any([ii.isChecked() for ii in self.menuFitX.actions()]):
-    #             self.menuFitX.actions()[0].setChecked(True)
-    #
-    #         # self.plotFits()
-    #
-    #         # [i.setChecked(False) for i in self.menuSpecX.actions()]
-    #         # [i.setChecked(True) for (i,j) in
-    #         #     zip(self.menuSpecX.actions(), parent.menuSpecX.actions()) if j.isChecked()]
-    #         # self.plotFits()
-    #     super(HSGWindow, self).inheritParent(parent)
 
     def processSingleData(self, dataObj):
         super(HSGCCDWindow, self).processSingleData(dataObj)
@@ -1155,230 +1116,6 @@ class HSGCCDWindow(HSGWindow):
 
         self.plotFits()
 
-
-
-    # def plotSBFits(self):
-    #     xType = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
-    #     units = converter["eV"][xType]
-    #
-    #     # for sb, curve in self.curveFits.items():
-    #     for sb in self.curveFits:
-    #         fit = self.dataObj.full_dict[sb]
-    #         curve = self.curveFits[sb]
-    #
-    #         x = np.linspace(fit[0]-5*fit[4], fit[0]+5*fit[4], num=300)
-    #         args = list(fit[0::2])
-    #         args.append(0)
-    #         y = hsg.gauss(x, *args)
-    #         curve.setData(units(x), y/self.uisbDivideBy.value())
-    #
-    # def updateSBCalc(self):
-    #     params = self.specParams
-    #     # see notes in calcFELFreq for explaination
-    #     # of following two lines
-    #     NIRL = float(
-    #         params.child("Laser Settings", "NIR Frequency").opts["values"][1].split()[0])
-    #     FELL = float(
-    #         params.child("FEL Settings", "FEL Frequency (cm-1)").opts["value"])
-    #     rawVal = self.sbLine.value()
-    #     units = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
-    #     currentWN = converter[units]["wavenumber"](rawVal)
-    #
-    #     sbn = (currentWN-NIRL)/FELL
-    #
-    #     self.specParams.child("General Settings", "SB Number").setValue(sbn,
-    #                                 blockSignal = self.updateSBLine)
-    #
-    # def updateSBLine(self, paramObj, val):
-    #
-    #     params = self.specParams
-    #     # see notes in calcFELFreq for explaination
-    #     # of following two lines
-    #     NIRL = float(
-    #         params.child("Laser Settings", "NIR Frequency").opts["values"][1].split()[0])
-    #     FELL = float(
-    #         params.child("FEL Settings", "FEL Frequency (cm-1)").opts["value"])
-    #
-    #     units = [str(i.text()) for i in self.menuSpecX.actions() if i.isChecked()][0]
-    #
-    #
-    #     sbWN = NIRL + FELL*val
-    #     line = converter["wavenumber"][units](sbWN)
-    #     print("Setting to", line, "from", units)
-    #
-    #     paramObj.blockSignals(True)
-    #     self.sbLine.setValue(line)
-    #     paramObj.blockSignals(False)
-    #
-    # def genParameters(self, **kwargs):
-    #     if kwargs.get("nir_lambda", None) is not None:
-    #         kwargs["nir_lambda"] = float(kwargs["nir_lambda"])
-    #     params = super(HSGWindow, self).genParameters(**kwargs)
-    #
-    #     kwargs = myDict(kwargs)
-    #
-    #
-    #     params[-1]["children"].append(
-    #         {"name":"SB Number", "type":"float", "value":0, "step":0.05}
-    #     )
-    #     params.append(
-    #     {"name":"Sample Parameters", "type":"group", "children":[
-    #         {"name":"Sample", "type":"str", "value":kwargs.get("sample_name", "None?"), "readonly":True},
-    #         {"name":"Sample Temp", "type":"float", "value":kwargs.get("sample_Temp", -1), "readonly":True}
-    #         ]})
-    #     params.append(
-    #     {"name":"Laser Settings", "type":"group", "children":[
-    #         {"name":"NIR Power (mW)", "type":"float", "value":kwargs.get("nir_power", 0), "readonly":True},
-    #         {"name":"NIR Frequency", "type":"list",
-    #             "values":["{:.3f} nm".format(kwargs.get("nir_lambda", 0)),
-    #                       "{:.2f} cm-1".format(1e7/kwargs.get("nir_lambda", 1))]},
-    #         {"name":"NIR Polarization", "type":"str", "value":
-    #             "α={}°, γ={}° {}".format(kwargs.get("nir_pola", ""), kwargs.get("nir_polg", ""), kwargs.get("nir_pol", "")), "readonly":True},
-    #         {"name": "Rotator Angle", "type": "float",
-    #             "value": kwargs.get("rotatorAngle", "-1"), "readonly":True},
-    #         {"name": "Fit NIR (cm-1)", "type": "float",
-    #             "value": kwargs.get("calculated NIR freq (cm-1)", 0), "readonly":True,
-    #             "decimals":8},
-    #         {"name": "Fit THz (cm-1)", "type": "float",
-    #             "value": kwargs.get("calculated THz freq (cm-1)", 0), "readonly":True,
-    #             "decimals": 5}
-    #         ]})
-    #
-    #     params.append(
-    #     {"name":"FEL Settings", "type":"group", "children":[
-    #         {"name":"Pulses", "type":"int", "value":np.mean(kwargs.get("fel_pulses", 0)), "readonly":True},
-    #         {"name":"FEL Energy (mJ)", "type": "str",
-    #             "value": "{:.1f} +/- {:.1f}".format(
-    #                 kwargs.get("pulseEnergies", {"mean":-1})["mean"],
-    #                 kwargs.get("pulseEnergies", {"std": -1})["std"]), "readonly":True},
-    #         {"name":"Field Strength (kV/cm)", "type": "str",
-    #             "value": "{:.2f} +/- {:.2f}".format(
-    #                 kwargs.get("fieldStrength", {"mean":-1})["mean"],
-    #                 kwargs.get("fieldStrength", {"std": -1})["std"]), "readonly":True},
-    #         {"name": "Transmission", "type": "float", "value": kwargs.get("fel_transmission", 0), "readonly":True},
-    #         {"name": "Pyro Voltage", "type": "str",
-    #             "value": "{:.1f} +/- {:.1f} mV".format(
-    #                 kwargs.get("pyroVoltage", {"mean":-1})["mean"]*1e3,
-    #                 kwargs.get("pyroVoltage", {"std": -1})["std"]*1e3), "readonly":True},
-    #         {"name": "CD Ratio", "type": "str",
-    #             "value": "{:.1f} +/- {:.1f}".format(
-    #                 kwargs.get("cdRatios", {"mean":-1})["mean"]*1e2,
-    #                 kwargs.get("cdRatios", {"std": -1})["std"]*1e2), "readonly":True},
-    #         {"name": "FP Time", "type": "str",
-    #             "value": "{:.0f} +/- {:.0f} ns".format(
-    #                 kwargs.get("fpTime", {"mean":-1})["mean"]*1e3,
-    #                 kwargs.get("fpTime", {"std": -1})["std"]*1e3), "readonly":True},
-    #         {"name":"Pulse RR (Hz)", "type":"float", "value":kwargs.get("fel_reprate", 0), "readonly":True},
-    #         {"name":"FEL Frequency (cm-1)", "type":"float", "value":kwargs.get("fel_lambda", 0), "readonly":True}
-    #         ]})
-    #     # try:
-    #     #     kwargs["parent"].addChildren(params)
-    #     #     kwargs["parent"].child("General Settings", "Offset (nm)").sigValueChanged.connect(
-    #     #         self.updateOffset
-    #     #     )
-    #     # except KeyError:
-    #     #     raise
-    #
-    #     return params
-    #
-    # def genParametersOldFormat(self, **kwargs):
-    #     """
-    #     Generate parameter tree from old version of the head file. Force/coerce header
-    #     information to match what we currently need.
-    #     :param kwargs:
-    #     :return:
-    #     """
-    #
-    #     # if, for some reason, you don't want to be changign the new dict
-    #     newDict = dict(kwargs)
-    #     # One big change was only saving statistical information of the FEL pulses
-    #     # etc. Caclulate that information and update the dict.
-    #     if isinstance(kwargs.get("fieldStrength", {}), list):
-    #         stats = ["kurtosis", "mean", "skew", "std"]
-    #         sets = ["fieldStrength", "fieldInt", "cdRatios", "fpTime", "pyroVoltage"]
-    #         try:
-    #             newDict["fel_pulses"] = sum(kwargs["fel_pulses"])
-    #         except TypeError:
-    #             # error from ___ooollldd__ datasets where all field strengths were
-    #             # dumped straight, and no stats were done on the field parameters live
-    #             newDict["fel_pulses"] = kwargs["fel_pulses"]
-    #
-    #             newDict.update(
-    #                 {set: {"mean": np.mean(kwargs.get(set, [-1])),
-    #                        "std": np.std(kwargs.get(set, [-1]))}
-    #                  for set in sets}
-    #             )
-    #         else:
-    #             newDict.update(
-    #                 {set: {stat: np.mean(
-    #                                     [x.get(stat, '-1') for x in kwargs[set]] )
-    #                                 for stat in stats}
-    #                 for set in sets}
-    #             )
-    #     elif isinstance(kwargs.get("pyroVoltage", {}), list):
-    #         # There was a small period of time where some of the above were changed,
-    #         # but not others. I think it might actually be from hole coupler
-    #         # experiments.
-    #         stats = ["kurtosis", "mean", "skew", "std"]
-    #         sets = ["pulseDuration", "pyroVoltage"]
-    #         try:
-    #             newDict["fel_pulses"] = sum(kwargs["fel_pulses"])
-    #         except TypeError:
-    #             # error from ___ooollldd__ datasets where all field strengths were
-    #             # dumped straight, and no stats were done on the field parameters live
-    #             newDict["fel_pulses"] = kwargs["fel_pulses"]
-    #
-    #             newDict.update(
-    #                 {set: {"mean": np.mean(kwargs.get(set, [-1])),
-    #                        "std": np.std(kwargs.get(set, [-1]))}
-    #                  for set in sets}
-    #             )
-    #         else:
-    #             newDict.update(
-    #                 {set: {stat: np.mean(
-    #                                     [x.get(stat, '-1') for x in kwargs[set]] )
-    #                                 for stat in stats}
-    #                 for set in sets}
-    #             )
-    #
-    #     return self.genParameters(**newDict)
-    #
-    # def genFitParams(self, sbList):
-    #     p = []
-    #     for sb in sbList:
-    #         d = {"name":"Sideband {}".format(sb[0]), "type":"group", "children":[
-    #             {"name":"Peak Pos (eV): {}".format(sb[1]), "type":"group", "children":[
-    #                 {"name":"nm", "type":"float", "value":1239.84/sb[1], "decimals":6},
-    #                 {"name":"wavenumber", "type":"float", "value":10000000*sb[
-    #                     1]/1239.84, "decimals":8}
-    #             ], "expanded":False },
-    #             {"name":"Area", "type":"float","value":sb[3], "decimals":8},
-    #             {"name":"Sigma (1/eV): {}".format(sb[5]), "type":"group", "children":[
-    #                 {"name":"1/nm", "type":"float", "value":sb[5]/1239.84, "decimals":8},
-    #                 {"name":"1/wavenumber", "type":"float", "value":1239.84/(
-    #                         10000000*sb[5]), "decimals":8}
-    #             ], "expanded":False }
-    #         ]}
-    #         p.append(d)
-    #     return p
-    #
-    # def updateOffset(self, paramObj, val):
-    #     [self.ui.gSpectrum.getPlotItem().removeItem(ii) for ii in list(self.curveFits.values())]
-    #     super(HSGWindow, self).updateOffset(paramObj, val)
-    #     self.updateSBCalc()
-    #
-    # def parseSpecXChange(self, val=None):
-    #     names = super(HSGWindow, self).parseSpecXChange(val=val)
-    #     if names is None: return
-    #     oldName, newName = names
-    #
-    #     if self.dataObj is not None: #reupdate plots if we've already loaded some data
-    #         sb = self.sbLine.value()
-    #         self.plotSBFits()
-    #         sb = converter[oldName][newName](sb)
-    #         self.sbLine.setValue(sb)
-    #
-    #     return oldName, newName
 
 class HSGImageWindow(HSGWindow):
     # dataClass = object
@@ -1805,7 +1542,7 @@ class QWPSweepWindow(HSGWindow):
     def processSingleData(self, dataObj):
         self.dataObj = dataObj
         p = Parameter.create(
-            name=dataObj.fname,
+            name=os.path.basename(dataObj.fname),
             type='group')
         self.specParams = p
         try:
@@ -1819,7 +1556,7 @@ class QWPSweepWindow(HSGWindow):
         for fname in glob.glob(os.path.join(folder, "*.txt")):
             _, h = hsg.get_data_and_header(fname)
             # Cut out the first part cause I just need the number to know which file
-            # to open
+            # to open if I need to investigate data furhter.
             specnum = fname[fname.find("seq")-4:fname.find("seq")]
             try:
                 name= "{:.1f}{}".format(h["rotatorAngle"],
@@ -1831,9 +1568,10 @@ class QWPSweepWindow(HSGWindow):
 
             fileList.append({"name": name, "type":"str", "value":specnum,
                              "readonly":False})
-
+            # add the date so I can see when the data was taken if needing to
+            # correlate that to FEL or laser parameters or anything
             fileList.append({"name": "   {}".format(name), "type": "str",
-                             "value": "  ->"+h["date"], "readonly": False})
+                             "value": "  ->"+h["date"].split(" ")[1], "readonly":False})
 
 
             # try:

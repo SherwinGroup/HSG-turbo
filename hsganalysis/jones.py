@@ -328,13 +328,13 @@ class JonesVector(object):
 
     def vertical_projection(self):
         m = [[0,0],[0,1]]
-        return self.apply_transformation(m)
+        return self.apply_transformation(m, update_state=False)
 
     def horizontal_projection(self):
         m = [[1,0],[0,0]]
-        return self.apply_transformation(m)
+        return self.apply_transformation(m, update_state=False)
 
-    def apply_transformation(self, transform):
+    def apply_transformation(self, transform, update_state=True):
         """
         I tried to make this really general. If you pass it an array of theta/eta
         because you want to look at rotating the FA (via theta) or different retardences
@@ -410,7 +410,8 @@ class JonesVector(object):
             raise ValueError(msg)
 
         vec = np.einsum(einIndices, transform, self.vec)
-        self.vec = vec
+        if update_state:
+            self.vec = vec
         return vec
 
     def unwrap_phase(self, input_polarization):
@@ -422,6 +423,12 @@ class JonesVector(object):
         """
         pass
 
+    def to_Stokes(self):
+        x = np.abs(self.x)**2 - np.abs(self.y)**2
+        y = 2 * np.real(self.x*np.conj(self.y))
+        z = 2 * np.imag(self.x*np.conj(self.y))
+        return np.array([np.ones_like(x), x, y, z])
+
 
 
 
@@ -430,5 +437,8 @@ class JonesVector(object):
 
 
 if __name__ == '__main__':
+    from hsganalysis.jones import JonesVector as JV
+    a = JV(alpha=[-45, 0, 45, 90], gamma=0)
+    a.to_Stokes()
     a = JonesVector(phi=np.arange(0, 90, 5), delta=np.ones(90/5))
     a.gamma

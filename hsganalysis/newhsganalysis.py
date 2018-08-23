@@ -3408,7 +3408,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             # plt.plot(fineAngles,
             #         makeCurve(eta, "V" in dataName)(fineAngles, *p0), name="p0")
             plt.plot(fineAngles,
-                    makeCurve(eta, vertAnaDir)(fineAngles, *p))
+                    makeCurve(etan, vertAnaDir)(fineAngles, *p))
             # plt.show()
             plt.ylim(0, 1)
             plt.xlim(0, 360)
