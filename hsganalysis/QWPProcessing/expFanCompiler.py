@@ -271,7 +271,7 @@ class FanCompiler(object):
                 # hence casting to a list.
                 [jj.append( list(*[ii[1:] for ii in dataSet[kk] if ii[0] == sb]) )
                  for kk, jj in newData.items()]
-                if not newData["alpha"]: # no data was found.
+                if not newData["alpha"][-1]: # no data was found.
                     for jj in newData.values():
                         jj[-1] = [np.nan, np.nan]
         else:
@@ -299,9 +299,19 @@ class FanCompiler(object):
         self.nirAlphas.extend(nirAlpha)
         self.nirGammas.extend(nirGamma)
 
-    def build(self):
+    def build(self, withErrors = True):
+        """
+        Return only alpha, gamma, S0 parameters directly, for compatibility and ease.
+        :param withErrors:
+        :return:
+        """
         data = self.buildAll()
-        return data["alpha"], data["gamma"], data["S0"]
+        if withErrors:
+            return data["alpha"], data["gamma"], data["S0"]
+        alphaData = np.column_stack((data["alpha"][:, 0], data["alpha"][:, 1::2]))
+        gammaData = np.column_stack((data["gamma"][:, 0], data["gamma"][:, 1::2]))
+        S0Data = np.column_stack((data["S0"][:, 0], data["S0"][:, 1::2]))
+        return alphaData, gammaData, S0Data
 
 
     def buildAll(self):

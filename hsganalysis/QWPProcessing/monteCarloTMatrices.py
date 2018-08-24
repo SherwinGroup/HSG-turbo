@@ -101,6 +101,37 @@ def errorPropagator(num, den, dnum, dden):
     return ratio, dratio, ang, dang
 
 
+def errorPropagatorDifference(num, den, dnum, dden):
+    """
+    Do error propagation for two calculations on two complex numbers. Calculates
+    |num-den| and angle(num-den), and provides errors on them. Error propagation
+    determiend by calculating |num-den| = sqrt((a+ib-(x+iy)) * (a-ib-(x-iy))),
+    and doing error propagation on that. Similar for the angle, where angle=arctan(
+    num/den). Propagations were done in Mathematica because that's too much algebra
+    for me to mess up.
+    :param num:
+    :param den:
+    :param dnum:
+    :param dden:
+    :return:
+    """
+    a, b = np.real(num), np.imag(num)
+    x, y = np.real(den), np.imag(den)
+
+    da, db = np.real(dnum), np.imag(dnum)
+    dx, dy = np.real(dden), np.imag(dden)
+
+    mag = np.abs(num-den)
+    dmag = np.sqrt(((da**2+dx**2)*(a-x)**2+(db**2+dy**2)*(b-y)**2)/((a-x)**2+(b-y)**2))
+
+    ang = -np.angle(num-den, deg=True)
+    dang = np.sqrt((db**2+dy**2)*(a-x)**2+(da**2+dx**2)*(b-y)**2)/((a-x)**2+(b-y)**2)
+    dang = np.rad2deg(np.abs(dang))
+
+
+    return mag, dmag, ang, dang
+
+
 
 try:
     from PyQt5 import QtWidgets, QtGui, QtCore

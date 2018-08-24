@@ -109,7 +109,7 @@ def findJ(alphas, gammas=None, **kwargs):
     defaults.update(kwargs)
 
     if gammas is None and isinstance(alphas, FanCompiler):
-        alphas, gammas, _ = alphas.build()
+        alphas, gammas, _ = alphas.build(withErrors=False)
 
     sbs = alphas[1:,0]
     nirAlphas = alphas[0, 1:]
@@ -161,7 +161,7 @@ def saveT(T, sbs, out):
     flatT = T.reshape(-1, 4).view(float).reshape(-1, 8)
     flatT = np.column_stack((sbs, flatT))
 
-    header = "SB,ReT++,ReT+-,ReT-+,ReT--,ImT++,ImT+-,ImT-+,ImT--"
+    header = "SB,ReT++,ImT++,ReT+-,ImT+-,ReT-+,ImT-+,ReT--,ImT--"
     np.savetxt(out,
                flatT, header=header, comments='', delimiter=',',
                fmt="%.6f")
@@ -178,8 +178,9 @@ def loadT(name):
     sbs = d[:,0]
 
     T = d[:, 1:5]+1j*d[:, 5:]
+    T = d[:, 1::2] + 1j * d[:, 2::2]
     T = T.reshape(-1, 2, 2)
     T = T.transpose(1, 2, 0)
-    return T
+    return T, sbs
 
 

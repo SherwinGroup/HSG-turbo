@@ -76,6 +76,17 @@ class CCD(object):
 
         self.fname = fname
 
+        # Checking restrictions from Windows path length limits. Check if you can
+        # open the file:
+        try:
+            with open(fname) as f: pass
+        except FileNotFoundError:
+            # Couldn't find the file. Could be you passed the wrong one, but I'm
+            # finding with a large number of subfolders for polarimetry stuff,
+            # you end up exceeding Windows'  filelength limit.
+            # Haven't tested on Mac or UNC moutned drives (e.g \\128.x.x.x\Sherwin\)
+            fname = r"\\?\\" + os.path.abspath(fname)
+
         # Read in the JSON-formatted parameter string.
         # The lines are all prepended by '#' for easy numpy importing
         # so loop over all those lines
@@ -4939,7 +4950,11 @@ def natural_glob(*args):
 
     import re
     def atoi(text):
-        return int(text) if text.isdigit() else text
+        try:
+            return int(text)
+        except ValueError:
+            return text
+        # return int(text) if text.isdigit() else text
 
     def natural_keys(text):
         '''
@@ -4947,7 +4962,8 @@ def natural_glob(*args):
         http://nedbatchelder.com/blog/200712/human_sorting.html
         (See Toothy's implementation in the comments)
         '''
-        return [atoi(c) for c in re.split('(\d+)', text)]
+        return [atoi(c) for c in re.split('(-?\d+)', text)]
+
     return sorted(glob.glob(os.path.join(*args)), key=natural_keys)
 
 # photonConverter[A][B](x):
