@@ -650,9 +650,16 @@ class BaseWindow(QtWidgets.QMainWindow):
     def handleFolderDrop(self, folder):
         if "VAna" in folder or "HAna" in folder:
             # handle a QWP sweep drop
-            laserParams, rawData = hsg.hsg_combine_qwp_sweep(folder, save=False, verbose=False)
-            _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams, vertAnaDir="VAna" in folder,
-                                    series=folder)
+            try:
+                laserParams, rawData = hsg.hsg_combine_qwp_sweep(folder, save=False, verbose=False)
+                _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams, vertAnaDir="VAna" in folder,
+                                        series=folder)
+            except:
+                laserParams, rawData = hsg.hsg_combine_qwp_sweep(folder, save=False,
+                                                                 verbose=False,
+                                                                 loadNorm=True)
+                print(rawData)
+                raise
             # pass the first file so you can load general parameters.
             # The only thing that should change between parameters is
             # the exact FEL settings, and the rotation angle.
@@ -1721,7 +1728,8 @@ class QWPSweepWindow(HSGWindow):
         S0, S1, S2, S3 = self.fitDict["S0"][idx, 1], self.fitDict["S1"][idx, 1], \
                          self.fitDict["S2"][idx, 1], self.fitDict["S3"][idx, 1]
         curvefunc = hsg.makeCurve(0.25, "vana" in self.dataObj.fname.lower())
-        angs = np.linspace(0, 337.5, 100)
+
+        angs = np.linspace(self.rawData[1:,0].min(), self.rawData[1:,0].max(), 100)
         self.ui.gRaw.plot(angs, curvefunc(angs, S0, S1, S2, S3), pen=a.opts["pen"])
 
 

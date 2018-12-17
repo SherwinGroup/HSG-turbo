@@ -94,7 +94,12 @@ class CCD(object):
             param_str = ''
             line = f.readline()
             while line[0] == '#':
-                param_str += line[1:]
+                ### changed 09/17/18
+                # This line assumed there was a single '#'
+                # param_str += line[1:]
+                # while this one handles everal (because I found old files
+                # which had '## <text>...'
+                param_str += line.replace("#", "")
                 line = f.readline()
             # Parse the JSON string
             try:
@@ -3141,7 +3146,7 @@ def pmt_sorter(folder_path, plot_individual = True):
 def stitch_abs_results(main, new):
     raise NotImplementedError
 
-def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False,
+def hsg_combine_qwp_sweep(path, loadNorm = True, save = False, verbose=False,
                           skipOdds = True):
     """
     Given a path to data taken from rotating the QWP (doing polarimetry),
@@ -3208,7 +3213,11 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False,
         specs = proc_n_plotCCD(path, keep_empties=True, verbose=verbose)
 
         for sp in specs:
-            sp.parameters["series"] = round(float(sp.parameters["rotatorAngle"]), 2)
+            try:
+                sp.parameters["series"] = round(float(sp.parameters["rotatorAngle"]), 2)
+            except KeyError:
+                # Old style of formatting
+                sp.parameters["series"] = round(float(sp.parameters["detectorHWP"]), 2)
         specs = hsg_combine_spectra(specs, ignore_weaker_lowers=False)
         if not save:
             # If you don't want to save them, set everything up for doing Bytes objects
@@ -3246,7 +3255,7 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = True, verbose=False,
                                      "nir": specs[0].parameters["nir_lambda"],
                                      "thz": specs[0].parameters["fel_lambda"], },
                                  only_even=skipOdds)
-            sbData, lAlpha, lGamma, nir, thz = getData(path)
+            sbData, lAlpha, lGamma, nir, thz = getData(os.path.basename(path))
 
         laserParams = {
             "lAlpha": lAlpha,
@@ -3404,10 +3413,12 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         try:
             p, pcov = curve_fit(makeCurve(etan, vertAnaDir), angles, sbData, p0=p0)
         except ValueError:
-            print("value error")
-            print(angles)
-            print(sbData)
-            raise
+            # This is getting tossed around, especially when looking at noisy data,
+            # especially with the laser line, and it's fitting erroneous values.
+            # Ideally, I should be cutting this out and not even returning them,
+            # but that's immedaitely causing
+            p = np.nan*np.array(p0)
+            pcov = np.eye(len(p))
 
 
         if plot and plotRaw(sbIdx, sbNum):
@@ -4343,6 +4354,10 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
         # There's a file with only 1 sb and it happens to be first
         # in the list.
         num_params = spectrum_list[0].sb_results.shape[0]
+    except AttributeError:
+        # The first file has no sidebands, so just hardcode it, as stated below.
+        num_params=0
+
     # Rarely, there's an issue where I'm doing some testing and there's a set
     # where the first file has no sidebands in it, so the above thing returns 0
     # It seems really silly to do a bunch of testing to try and correct for that, so
@@ -4380,18 +4395,26 @@ def save_parameter_sweep(spectrum_list, file_name, folder_str, param_name, unit,
             # TODO: (08/14/18) the .ndim==1 isn't the correct check, since it fails
             # when looking at the laser line. Need to test this with a real
             # empty data set, vs data set with 1 sb
-            if not spec or spec.sb_results.ndim == 1:
-                if spec.sb_results[0] == 0:
+            #
+            #
+            # (08/28/18) I'm not sure what the "not spec" is trying to handle
+            #      spec.sb_results is None occurs when _no_ sidebands were fit
+            #     spec.sb_results.ndim == 1 happens when only one sideband is found
+            if not spec or spec.sb_results is None or spec.sb_results.ndim == 1:
+                if spec.sb_results is None:
+                    # Flag no sidebands are afound
+                    noSidebands = True
+                elif spec.sb_results[0] == 0:
+                    # Cast it to 2d to allow slicing later on. Not sure hwy this is
+                    # only done if the laser line is the one found.
                     spec.sb_results = np.atleast_2d(spec.sb_results)
-
-
                 elif skip_empties:
                     continue
                 else:
                     noSidebands = True
-        except AttributeError:
+        except (AttributeError, TypeError):
+            # continue
             raise
-            continue
 
         # Make an sb_results of all zeroes where we'll fill
         # in the sideband info we found
@@ -5632,7 +5655,8 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
             spectrum.save_processing(save[0], save[1], index=index)
             index += 1
         elif isinstance(save, str):
-            spectrum.save_processing(os.path.basename(save), os.path.dirname(save),
+            dirr = os.path.dirname(save) if os.path.dirname(save) else '.' # if you just pass a filename tos ave
+            spectrum.save_processing(os.path.basename(save), dirr,
                                      index=index)
             index += 1
     if plot:

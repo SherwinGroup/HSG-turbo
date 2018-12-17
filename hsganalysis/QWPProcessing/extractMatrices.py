@@ -44,6 +44,16 @@ def makeT(J, ang):
 
     return T
 
+def makeJfromT(T, ang):
+    """take a T matrix as saved from processing,
+    return a fully shaped J matrix"""
+
+    U = makeU(ang)
+    J = np.einsum("ij,jlx,lm->imx", U, T, U.conj().T)
+
+    return J
+
+
 def unflattenJ(jVec):
     jVec = np.array(jVec)
     j =  (jVec[:3]+1j*jVec[3:])

@@ -3,7 +3,23 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from interactivePG import PolarImagePlot
 import interactivePG as pg
 
-def createFan(alphas, gammas, **kwargs):
+
+"""
+12/17/18
+This is an older version of making fan diagrams, it would create indpedent polarImagePlots
+and then add them on top of each other, and things were a little gross.
+
+the fanDiagram class is a little bit cleaner, keeping everything together and
+is a bit tidier. At least, it makes much nicer plots for figures
+"""
+
+
+def createFan(alphas, gammas,
+              plotEllipseHelpers=True,
+              showGamma=True,
+              showCenterEllipse=True,
+              showInfoText=True,
+              **kwargs):
     """
     Produces a fan diagram
     alphas/gammas should be the matrices saved from the FanCompiler, of form:
@@ -27,10 +43,10 @@ def createFan(alphas, gammas, **kwargs):
     """
 
     defaults = {
-        "plotEllipseHelpers": True,
-        "showGamma": True,
-        "showCenterEllipse": True,
-        "showInfoText": True,
+        "plotEllipseHelpers": plotEllipseHelpers,
+        "showGamma": showGamma,
+        "showCenterEllipse": showCenterEllipse,
+        "showInfoText": showInfoText,
     }
     defaults.update(kwargs)
 
@@ -99,6 +115,7 @@ def createFan(alphas, gammas, **kwargs):
     # For some reason, this is important. It doesn't seem to re-render it properly
     # showing the full gamma range.
     pgam.ui.histogram.autoHistogramRange()
+    palp.ui.histogram.autoHistogramRange()
 
 
     #p(olarziation)e(llipse)
@@ -186,7 +203,7 @@ def createFan(alphas, gammas, **kwargs):
         pgam.show()
     return palp, pgam
 
-def saveAndRenderFan(p1, p2, fname, **kwargs):
+def saveAndRenderFan(p1, p2, fname, hideHistograms=False):
     """
     Save fan diagrams to file, with the full image, and color bars on the alpha/gamma
     values
@@ -199,11 +216,15 @@ def saveAndRenderFan(p1, p2, fname, **kwargs):
     :return:
     """
 
-    defaults = {
-        "hideHistograms": False
-    }
+    # defaults = {
+    #     "hideHistograms": False
+    # }
+    #
+    # defaults.update(kwargs)
 
-    if defaults["hideHistograms"]:
+    doSvg = fname.endswith(".svg")
+
+    if hideHistograms:
         # Hide the histogram data (and shrink the plot)
         # to avoid confusing people
         p1.ui.histogram.plot.hide()
@@ -224,9 +245,19 @@ def saveAndRenderFan(p1, p2, fname, **kwargs):
     width = r1.width() + r2.width() + rc.width()
 
     height = rc.height()
+    if doSvg:
+        from PyQt5 import QtSvg
+        outputImage = QtSvg.QSvgGenerator()
+        outputImage.setFileName(fname)
+        outputImage.setSize(QtCore.QSize(int(width), int(height)))
 
-    outputImage = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32)
-    outputImage.fill(QtGui.QColor("white"))
+        outputImage.setResolution(96) # I'm not sure why it has to be this...
+    else:
+        outputImage = QtGui.QImage(width*4, height*4, QtGui.QImage.Format_ARGB32)
+        # outputImage.setDotsPerMeterX(650 * 100 / 2.54)
+        # outputImage.setDotsPerMeterY(650 * 100 / 2.54)
+        outputImage.setDevicePixelRatio(4)
+        outputImage.fill(QtGui.QColor("white"))
 
     outputPainter = QtGui.QPainter(outputImage)
 
@@ -242,7 +273,7 @@ def saveAndRenderFan(p1, p2, fname, **kwargs):
     r1.moveLeft(rc.width()+r2.width())
     hist1.render(outputPainter, r1)
 
-
-    ret = outputImage.save(fname)
+    if not doSvg:
+        ret = outputImage.save(fname)
 
     outputPainter.end()
