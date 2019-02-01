@@ -1668,13 +1668,8 @@ class QWPSweepWindow(HSGWindow):
                                   self.fitDict["DOP"][:, 1],
                                   self.fitDict["DOP"][:, 2],
                                   'ko-')
-
-
-
-
-
-
-
+        self.ui.gFits.setYRange(0, 1)
+        self.ui.gFits.setYRange(0, 1)
 
 
     def updateAnglesPlot(self):

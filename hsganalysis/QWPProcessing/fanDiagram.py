@@ -1,8 +1,9 @@
 import numpy as np
-
 from PyQt5 import QtGui, QtCore, QtWidgets
 from interactivePG import PolarImageItem, PolarAxis
-from pyqtgraph import GraphicsView, HistogramLUTWidget, ViewBox, mkColor
+from pyqtgraph import GraphicsView, HistogramLUTWidget, ViewBox, mkColor, TextItem, Point
+from .extractMatrices import *
+from .expFanCompiler import *
 
 
 class FanDiagram(QtGui.QWidget):
@@ -52,6 +53,7 @@ class FanDiagram(QtGui.QWidget):
             self.view = ViewBox()
         else:
             self.view = view
+
 
         self.centralView.setCentralItem(self.view)
         self.view.setAspectLocked(True)
@@ -157,7 +159,28 @@ class FanDiagram(QtGui.QWidget):
         )
 
 
-    def export(self, fname, hideHistograms=True):
+        self.titleItem = TextItem()
+        self.titleItem.setAnchor(Point(0.5, 1)) # anchor on bottom-center
+        self.titleItem.setColor("k")
+        self.titleItem.setFont(QtGui.QFont("Arial", 15))
+        self.view.addItem(self.titleItem, ignoreBounds=True)
+
+        self.show()
+        QtWidgets.QApplication.processEvents()
+        self.view.updateViewRange(True, True)
+
+    def setAlphaImage(self, img):
+        self.alphaItem.setImage(img)
+
+    def setGammaImage(self, img):
+        self.gammaItem.setImage(img)
+
+    def setImages(self, alpha, gamma):
+        self.setAlphaImage(alpha)
+        self.setGammaImage(gamma)
+
+    def export(self, fname, hideHistograms=True,
+               pngScale = 4):
         """
         Save fan diagrams to file, with the full image, and color bars on the alpha/gamma
         values
@@ -207,12 +230,12 @@ class FanDiagram(QtGui.QWidget):
             # were fuckingup without it
             outputImage.setResolution(96)
         else:
-            outputImage = QtGui.QImage(width * 4, height * 4,
+            outputImage = QtGui.QImage(width * pngScale, height * pngScale,
                                        QtGui.QImage.Format_ARGB32)
             # outputImage.setDotsPerMeterX(650 * 100 / 2.54)
             # outputImage.setDotsPerMeterY(650 * 100 / 2.54)
             # this gives a moderatly high quality image
-            outputImage.setDevicePixelRatio(4)
+            outputImage.setDevicePixelRatio(pngScale)
             outputImage.fill(QtGui.QColor("white"))
 
         outputPainter = QtGui.QPainter(outputImage)
@@ -229,9 +252,9 @@ class FanDiagram(QtGui.QWidget):
 
     def setViewRadius(self, r):
         # Set the view range of the fan diagram such that radius r is visible
-        self.view.setRange(QtCore.QRect(-r, -r, 2*r, 2*r))
+        self.view.setRange(QtCore.QRect(-r, -r, 2*r, 2*r), padding=0)
 
-    def hideHistogramAxes(self):
+    def hideHistogramAxes(self, hideTicks=True):
         # Hide the histogram region item and plots and all that for
         # less excessive plots
         self.histGamma.region.hide()
@@ -241,12 +264,17 @@ class FanDiagram(QtGui.QWidget):
         self.histAlpha.item.oldPaint = self.histAlpha.item.paint
         self.histAlpha.item.paint = lambda *x: None
 
+        if hideTicks:
+            [ii.hide() for ii in self.histAlpha.item.gradient.ticks.keys()]
+            [ii.hide() for ii in self.histGamma.item.gradient.ticks.keys()]
+
+        QtWidgets.QApplication.processEvents()
         # Hard coded numbers which make it look like the axes values line up with
         # the gradient item
         self.histGamma.axis.setRange(-46.75, 46.75)
         self.histAlpha.axis.setRange(-94, 94)
 
-    def showHistogramAxes(self):
+    def showHistogramAxes(self, showTicks=True):
         try:
             self.histGamma.item.paint = self.histGamma.item.oldPaint
             self.histAlpha.item.paint = self.histAlpha.item.oldPaint
@@ -257,4 +285,64 @@ class FanDiagram(QtGui.QWidget):
             return
         self.histGamma.region.show()
         self.histAlpha.region.show()
+
+
+        if showTicks:
+            [ii.show() for ii in self.histAlpha.item.gradient.ticks.keys()]
+            [ii.show() for ii in self.histGamma.item.gradient.ticks.keys()]
+
+    @staticmethod
+    def fromTMatrix(tMatrix, angle = 45, sbs=None):
+        if isinstance(tMatrix, str):
+            # a file is passed
+            if sbs is not None:
+                # Pass an array of sbs with a string, and this'll parse
+                # out the sidebands which aren't included in  the passed array
+                wantsbs = sbs
+            else:
+                wantsbs = None
+            tMatrix, sbs = loadT(tMatrix)
+            if wantsbs is not None:
+                try:
+                    wantIdx = [sbs.tolist().index(ii) for ii in wantsbs]
+                    sbs = sbs[wantIdx]
+                    tMatrix = tMatrix[..., wantIdx]
+                    assert np.all(wantsbs == sbs)
+                except ValueError as e:
+                    raise IndexError("Invalid sideband requested ({} is not in loaded)".format(
+                        e.args[0].split(' ')[0]
+                    ))
+                except AssertionError:
+                    raise IndexError("Invalid sideband requested")
+
+        jMatrix = makeJfromT(tMatrix, angle)
+        if sbs is None:
+            raise RuntimeWarning("Desired sidebands to plot should be specified as kwarg sbs")
+            sbs = np.arange(8, 38, 2)
+
+        alpha, gamma = jonesToFans(sbs = sbs, J=jMatrix)
+        return FanDiagram(alpha, gamma)
+
+    def setTitle(self, title="", adjustBounds=True):
+        # self.axes["azimuthal"].update()
+        self.titleItem.setText(title)
+
+        # Move the title so the bottom is at the top of the outer axis
+        self.titleItem.setPos(0, self.axes["azimuthal"].fullBoundingRect.top())
+        QtWidgets.QApplication.processEvents()
+        self.titleItem.setPos(0, self.axes["azimuthal"].fullBoundingRect.top())
+        QtWidgets.QApplication.processEvents()
+        # print(self.titleItem.mapRectToView(self.titleItem.boundingRect()))
+
+        if adjustBounds:
+            top = self.titleItem.mapRectToView(self.titleItem.boundingRect()).top()
+            # print("top", top)
+            bottom = self.axes["azimuthal"].fullBoundingRect.bottom()
+            # print("bottom", bottom)
+            w = abs(top-bottom)
+            # print("new rect", QtCore.QRectF(-w/2, top, w, w))
+            self.view.setRange(QtCore.QRectF(-w/2, top, w, w), padding=0)
+            self.view.setRange(QtCore.QRectF(-w/2, top, w, w), padding=0)
+            # self.view.update()
+
 

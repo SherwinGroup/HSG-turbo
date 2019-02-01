@@ -216,7 +216,7 @@ class FanCompiler(object):
 
     @staticmethod
     def fromDataFolder(folder, wantedSBs, keepErrors = False, negateNIR = True,
-                       eta=None):
+                       eta=None, doNorms = False):
         """
         Create a fan compiler by passing the data path. Handles looping through the
         folder's sub-folders to find
@@ -238,7 +238,7 @@ class FanCompiler(object):
             if "skip" in nirFolder.lower(): continue
             laserParams, rawData = hsg.hsg_combine_qwp_sweep(nirFolder, save=False,
                                                              verbose=False,
-                                                             loadNorm=False)
+                                                             loadNorm=doNorms)
 
             _, fitDict = hsg.proc_n_fit_qwp_data(rawData, laserParams,
                                                  vertAnaDir="VAna" in nirFolder,
@@ -306,6 +306,11 @@ class FanCompiler(object):
         :return:
         """
         data = self.buildAll()
+        if not self._e:
+            # You didn't keep track of errors when loading datasets, so just return
+            # the data sets
+            return data["alpha"], data["gamma"], data["S0"]
+
         if withErrors:
             return data["alpha"], data["gamma"], data["S0"]
         alphaData = np.column_stack((data["alpha"][:, 0], data["alpha"][:, 1::2]))
@@ -336,7 +341,7 @@ class FanCompiler(object):
         :return:
         """
 
-        if not os.path.exists(os.path.dirname(fname)):
+        if os.path.dirname(fname) and not os.path.exists(os.path.dirname(fname)):
             os.mkdir(os.path.dirname(fname))
 
         oh = "#\n" * 100

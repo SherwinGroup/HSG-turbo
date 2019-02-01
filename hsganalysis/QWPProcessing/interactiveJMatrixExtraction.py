@@ -250,6 +250,8 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
     tabWid = QtWidgets.QTabWidget(mainwid)
 
     palp, pgam = createFan(plotFanNIRs, sbs)
+    # from hsganalysis.QWPProcessing.fanDiagram import FanDiagram
+
 
     def updateJ():
 
@@ -279,13 +281,16 @@ def makeInteractiveFanWidget(compiledAlpha, compiledGamma, crystalOrientation,
                 niralpha = compiledAlpha[0, idx+1]
                 if np.abs(compiledGamma[0, idx+1])>1: continue # finite gamma don't make
                 # sense in this plot
-                reconstructedAlpha[1:,
-                    np.argwhere(reconstructedAlpha[0, :].astype(int) == niralpha)[0][0]
-                ] = compiledAlpha[1:, idx+1]
+                try:
+                    reconstructedAlpha[1:,
+                        np.argwhere(reconstructedAlpha[0, :].astype(int) == niralpha)[0][0]
+                    ] = compiledAlpha[1:, idx+1]
 
-                reconstructedGamma[1:,
-                    np.argwhere(reconstructedGamma[0, :].astype(int) == niralpha)[0][0]
-                ] = compiledGamma[1:, idx+1]
+                    reconstructedGamma[1:,
+                        np.argwhere(reconstructedGamma[0, :].astype(int) == niralpha)[0][0]
+                    ] = compiledGamma[1:, idx+1]
+                except IndexError:
+                    print("Warning! Unable to slice in NIR alpha = {}".format(niralpha))
 
         palp.setImage(reconstructedAlpha[1:, 1:])
         pgam.setImage(reconstructedGamma[1:, 1:])

@@ -10,6 +10,7 @@ indicating the creation/recollision times.
 
 import sys
 import json
+import interactivePG as ipg
 from PyQt5 import QtWidgets
 import pyqtgraph as pg
 from three_step_first_ui import Ui_Form

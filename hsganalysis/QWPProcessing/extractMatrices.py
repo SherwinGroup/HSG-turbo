@@ -16,8 +16,12 @@ def dtr(a):
 def makeU(t):
     # unitary rotation matrix between x/y and sigma+- bases
     # t is the crystal rotation angle. By note below, it should be relative to [011]
-    t = dtr(t-45) # +45 because I'm relative to [011], Matrix wants [010]
-                # I SHOULD DOUBLE CHECK THAT IT'S +45 NOT -45
+    # t = dtr(t-45) # +45 because I'm relative to [011], Matrix wants [010]
+    #             # I SHOULD DOUBLE CHECK THAT IT'S +45 NOT -45
+
+    # no, fuck it, I'm tired of thinking of angles right now. Pass the damn angle relative
+    # to [010], sort it out yourself.
+    t = dtr(t)
     a =    np.exp(-1j * t)
     b =   -np.exp( 1j * t)
     c = 1j*np.exp(-1j * t)
@@ -167,11 +171,51 @@ def saveT(T, sbs, out):
     :param out:
     :return:
     """
-    T = T.transpose(2, 0, 1)
-    flatT = T.reshape(-1, 4).view(float).reshape(-1, 8)
+    print("input shape:", T.shape, T.dtype)
+    T = np.array(T.transpose(2, 0, 1))
+
+    ## I'm nervous of trusting how numpy handles .view() on complex types. I feel like
+    # I've seen it swap orders or something, where I've had to change the loadT function
+    # to compensate. I guess when in doubt, process data from scratch, save it and
+    # reload it and make sure the memory and disk matrices agree.
+
+    # 01/04/18 No, fuck this. I don't trust view at all. I'm looking at two different
+    # T matrices, and in one instance this gets reordered as
+    #     ReT++,ReT+-,ReT-+,ReT--,ImT++,ImT+-,ImT-+,ImT--
+    # while in another, it does it as
+    #     ReT++,ImT++,ReT+-,ImT+-,ReT-+,ImT-+,ReT--,ImT--
+    #
+    # I have no fucking clue why it does it that way, but I'm sick and fucking tired of it
+    # So no more
+    #
+    # flatT = T.reshape(-1, 4).view(float).reshape(-1, 8)
+
+    flatT = T.reshape(-1, 4)
+    flatT = np.column_stack((flatT.real, flatT.imag))
+
+    # I'm also going to complicate this, because I want to save it like qile's matlab
+    # code save his files, so that we can use the same loading.
+    # As of 12/19/18, I believe the above code should be ordering columns as,
+
+    ###   0    1     2     3      4     5    6     7
+    ### ReT++,ReT+-,ReT-+,ReT--,ImT++,ImT+-,ImT-+,ImT--
+
+    # Qile saves as
+    ###   0    1     2     3      4     5    6     7
+    ### ReT--,ImT--,ReT+-,ImT+-,ReT-+,ImT-+,ReT++,ImT++
+
+    reorder = [ 3, 7, 1, 5, 2, 6, 0, 4 ]
+
+    flatT = flatT[:, reorder]
+
+
+
     flatT = np.column_stack((sbs, flatT))
 
     header = "SB,ReT++,ImT++,ReT+-,ImT+-,ReT-+,ImT-+,ReT--,ImT--"
+    header = "SB,ReT++,ReT+-,ReT-+,ReT--,Im++,Im+-,Im-+,Im--"
+
+    header = "SB,ReT--,ImT--,ReT+-,ImT+-,ReT-+,ImT-+,ReT++,ImT++"
     np.savetxt(out,
                flatT, header=header, comments='', delimiter=',',
                fmt="%.6f")
@@ -188,9 +232,21 @@ def loadT(name):
     sbs = d[:,0]
 
     T = d[:, 1:5]+1j*d[:, 5:]
-    T = d[:, 1::2] + 1j * d[:, 2::2]
+    # T = d[:, 1::2] + 1j * d[:, 2::2]
     T = T.reshape(-1, 2, 2)
     T = T.transpose(1, 2, 0)
+
+
+    T = d[:, 1::2] + 1j * d[:, 2::2]
+
+    ## Reversing the axis gets back into
+    # T++, T+-, T-+, T--, which makes it easier to then
+    #             reshape it to appropriate 2x2 matrices
+    #  and then                      put them in the correct indices.
+    T = T[:, ::-1].reshape(-1, 2, 2).transpose(2, 1, 0)
+    # T = T.reshape(-1, 2, 2)
+
+
     return T, sbs
 
 

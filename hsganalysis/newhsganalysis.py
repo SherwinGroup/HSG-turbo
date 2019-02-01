@@ -3257,12 +3257,12 @@ def hsg_combine_qwp_sweep(path, loadNorm = True, save = False, verbose=False,
                                  only_even=skipOdds)
             sbData, lAlpha, lGamma, nir, thz = getData(os.path.basename(path))
 
-        laserParams = {
-            "lAlpha": lAlpha,
-            "lGamma": lGamma,
-            "nir": nir,
-            "thz": thz
-        }
+    laserParams = {
+        "lAlpha": lAlpha,
+        "lGamma": lGamma,
+        "nir": nir,
+        "thz": thz
+    }
 
     # get which sidebands were found in this data set
     # first two rows are origin header, second is sideband number
@@ -4988,6 +4988,18 @@ def natural_glob(*args):
         return [atoi(c) for c in re.split('(-?\d+)', text)]
 
     return sorted(glob.glob(os.path.join(*args)), key=natural_keys)
+
+def convertTime(timeStr):
+    """
+    The data file headers have the timestamp of data collection. Sometimes you want to
+    convert that to numbers for data's sake, but I constantly forget the functions
+    to convert it from the time-stamp string. So here you go
+    :param timeStr: the time as a string from the data file
+    :return: int of the time since the epoch
+    """
+    import time
+    return time.mktime(time.strptime(timeStr, "%x %X%p"))
+
 
 # photonConverter[A][B](x):
 #    convert x from A to B.
