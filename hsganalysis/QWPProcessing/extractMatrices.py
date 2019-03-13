@@ -111,6 +111,11 @@ def findJ(alphas, gammas=None, **kwargs):
           ]
         useful for continuing into processing (and JonesVector maths).
 
+        NOTE: You probably shouldn't use the "Return Flat" argument for saving.
+        Instead, get the J matrix back and use saveT() to avoid accidentally
+        introducing errors from difference in the order of the columns of the flattened
+        matrix in this function vs saveT/loadT
+
     You can also just pass a FanCompiler object and it'll pull the alpha/gamma from
     that.
 
@@ -128,25 +133,30 @@ def findJ(alphas, gammas=None, **kwargs):
     sbs = alphas[1:,0]
     nirAlphas = alphas[0, 1:]
     nirGammas = gammas[0, 1:]
+    # This SbStateGetter makes it more convenient to get the alpha and gamma
+    # angles for a specific sideband and NIR alpha
     sbGetter = SbStateGetter(alphas[1:, 1:], gammas[1:, 1:], sbs, nirAlphas)
 
-
+    ## Initialize the matrices
     outputFlatJMatrix = np.empty((len(sbs),9))
     outputJMatrix = np.empty((2, 2, len(sbs)), dtype=complex)
 
-
+    # There's one J matrix for each sideband order, so naturally have to iterate over
+    # each sideband
     for idx, sb in enumerate(sbs):
+        # Get the list of alpha and gamma angles for each of the NIR Alphas used
         als, gms = zip(*[sbGetter(sb, ii) for ii in nirAlphas])
+        # Check to make sure all of the data is reasonable (not nan, meaning the sideband
+        # wasn't observed for all NIRalpha, or infinite when the fits fucked up)
+        # Leaving these in causes issues for the minimizer, so they have to be skipped
         if not any(np.isfinite(als)) or not any(np.isfinite(gms)):
-            # print("Dataset is not finitie", sb)
-            # print(als, gms)
-            # Keep the shapes and names right
-            # Do some python magic so I can still use p.x further.
+            # Do some python magic so I can still use p.x further and not have to
+            # wrap everything in a try/except
             p = type("_", (object, ), {"x": np.array([np.nan]*3 + [0]*3)})
         else:
             sbJones = JV(alpha=als, gamma=gms)
             nirJones = JV(alpha=nirAlphas, gamma=nirGammas)
-
+            # Note: We current'y don't do error propagation at this step
             costfunc = lambda jmatrix: np.linalg.norm(solver([nirJones, sbJones], jmatrix))
 
             p = minimize(costfunc, x0=np.ones(6))
@@ -171,7 +181,6 @@ def saveT(T, sbs, out):
     :param out:
     :return:
     """
-    print("input shape:", T.shape, T.dtype)
     T = np.array(T.transpose(2, 0, 1))
 
     ## I'm nervous of trusting how numpy handles .view() on complex types. I feel like
@@ -179,7 +188,7 @@ def saveT(T, sbs, out):
     # to compensate. I guess when in doubt, process data from scratch, save it and
     # reload it and make sure the memory and disk matrices agree.
 
-    # 01/04/18 No, fuck this. I don't trust view at all. I'm looking at two different
+    # 01/04/19 No, fuck this. I don't trust view at all. I'm looking at two different
     # T matrices, and in one instance this gets reordered as
     #     ReT++,ReT+-,ReT-+,ReT--,ImT++,ImT+-,ImT-+,ImT--
     # while in another, it does it as

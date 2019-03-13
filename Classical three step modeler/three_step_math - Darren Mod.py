@@ -194,7 +194,7 @@ class Window(QtWidgets.QWidget):
 
         f = lambda ph: np.abs(energy-minir(ph))
 
-        p = spo.minimize(f, 60, method="Nelder-Mead")
+        p = spo.minimize(f, float(self.ui.lineEdit_phase.text()), method="Nelder-Mead")
 
         self.ui.lineEdit_tot_ke_rec.blockSignals(True)
         self.ui.lineEdit_phase.setText("{:.3f}".format(p.x[0]))
