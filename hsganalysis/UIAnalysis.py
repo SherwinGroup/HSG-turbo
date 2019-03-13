@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     from UI.qwpCompWin_ui import Ui_PolarimeterWindow
     from UI.draggablePlotWidget import DraggablePlotWidget, DraggableViewBox
 try:
-    import interactivePG as ipg
+    import hsganalysis.ipg as ipg
 except:
     raise
 import newhsganalysis as hsg

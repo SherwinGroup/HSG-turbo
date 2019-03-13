@@ -1,7 +1,7 @@
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
-from interactivePG import PolarImagePlot
-import interactivePG as pg
+from hsganalysis.ipg import PolarImagePlot
+import hsganalysis.ipg as pg
 
 
 """

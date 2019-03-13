@@ -1,11 +1,11 @@
 import numpy as np
-import interactivePG as pg
+import hsganalysis.ipg as pg
 import matplotlib.pylab as plt
 import glob
 import os
 import json
 import hsganalysis as hsg
-from interactivePG import PolarImagePlot
+from hsganalysis.ipg import PolarImagePlot
 from PyQt5 import QtCore, QtGui, QtWidgets
 from scipy.optimize import minimize
 from hsganalysis import newhsganalysis

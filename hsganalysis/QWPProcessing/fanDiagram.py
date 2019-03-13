@@ -1,6 +1,6 @@
 import numpy as np
 from PyQt5 import QtGui, QtCore, QtWidgets
-from interactivePG import PolarImageItem, PolarAxis
+from hsganalysis.ipg import PolarImageItem, PolarAxis
 from pyqtgraph import GraphicsView, HistogramLUTWidget, ViewBox, mkColor, TextItem, Point
 from .extractMatrices import *
 from .expFanCompiler import *
