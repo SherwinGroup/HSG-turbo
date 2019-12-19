@@ -155,8 +155,8 @@ class CCD(object):
 class Photoluminescence(CCD):
     def __init__(self, fname):
         """
-        This object handles PL-type data. The only distinction from the parent class 
-        is that the CCD data gets normalized to the exposure time to make different 
+        This object handles PL-type data. The only distinction from the parent class
+        is that the CCD data gets normalized to the exposure time to make different
         exposures directly comparable.
 
         creates:
@@ -170,7 +170,7 @@ class Photoluminescence(CCD):
 
         # Create a copy of the array , and then normalize the signal and the errors
         # by the exposure time
-        self.proc_data = np.array(self.ccd_data) 
+        self.proc_data = np.array(self.ccd_data)
         self.proc_data[:, 1] = self.proc_data[:, 1] / self.parameters['exposure']
         self.proc_data[:, 2] = self.proc_data[:, 2] / self.parameters['exposure']
 
@@ -3176,7 +3176,7 @@ class TheoryMatrix(object):
         etas_header += 'unitless, unitless, unitless, unitless, unitless \n'
         # Creates origin frienldy header for the eta's
 
-        eta_fname = 'eta_g1' + str(gamma1) + '_g2' + str(gamma2) + r'.txt'
+        eta_fname = 'eta_g1_' + str(gamma1) + '_g2_' + str(gamma2) + r'.txt'
         eta_path = os.path.join(eta_folder,eta_fname)
         #creates the file for this run of etas
 
@@ -3836,14 +3836,14 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
 
     if eta is None:
         """
-        It might be easier for the end user to do this by passing eta(wavelength) instead of eta(sborder), 
+        It might be easier for the end user to do this by passing eta(wavelength) instead of eta(sborder),
         but then this function would need to carry around wavelengths, which is extra work. It could convert
-        between NIR/THz wavelengths to SB order, but it's currently unclear whether you'd rather use what the WS6 
+        between NIR/THz wavelengths to SB order, but it's currently unclear whether you'd rather use what the WS6
         claims, or what the sidebands say, and you'd probably want to take the extra step to ensure the SB fit rseults
-        if using the spectromter wavelengths. In general, if you have a function as etal(wavelength), you'd probably 
-        want to pass this as 
+        if using the spectromter wavelengths. In general, if you have a function as etal(wavelength), you'd probably
+        want to pass this as
         eta = lambda x: etal(1239.84/(nirEv + x*THzEv))
-        assuming nirEv/THzEv are the photon energies of the NIR/THz. 
+        assuming nirEv/THzEv are the photon energies of the NIR/THz.
         """
         eta = lambda x: 0.25
 
