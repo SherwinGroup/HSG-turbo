@@ -17,7 +17,7 @@ def generateMC(alpha, gamma=None, angle=0, niter = 4000,
     multiple processors.
     :param alpha: Alpha angles as Nx3 [sb, alpha, alpha err]
     :param gamma: Gamma angles as Nx3 [sb, gamma, gamma err]
-    :param angle: The angle of the THz WITH RESPECT TO [011]
+    :param angle: The angle of the THz WITH RESPECT TO [010] 
     :param niter: How many iterations/repititions of the MC to run
     :param ncores: How many cores to run it on. Defaults to all
     :param returnFull: If true, returns an Nx2x2xniter of all the T matrices. If
@@ -92,9 +92,15 @@ def errorPropagator(num, den, dnum, dden):
     dratio = np.sqrt(((a**2+b**2)**2*dx**2*x**2+(a**2+b**2)**2*dy**2*y**2+a**2*da**2*(x**2+y**2)**2+b**2*db**2*(x**2+y**2)**2)/((a**2+b**2)*(x**2+y**2)**3))
 
     ang = np.angle(num/den, deg=True)
-    dang = np.sqrt(a**4*(dy**2*x**2+dx**2*y**2)+b**2*(da**2*(x**2+y**2)**2+b**2*(
-            dy**2*x**2+dx**2*y**2))+a**2*(db**2*(x**2+y**2)**2+2*b**2*(dy**2*x**2+dx**2*y**2)))/(
-            (a**2+b**2)*(x**2+y**2))
+    dang = np.sqrt((x**2*dy**2)/(x**2+y**2)**2+(y**2*dx**2)/(x**2+y**2)**2+
+            (a**2*db**2)/(a**2+b**2)**2+(b**2*da**2)/(a**2+b**2)**2)
+    # ToDo: Rewrite this in a more legible way, this is written in a rather obtuse way
+    # so I want to make it easier to parse. Both errors are the correct quadrature sums
+    # of derivatives multiplied by the proper error. However the form in which they are 
+    # written does not make this clear
+
+
+
     dang = np.rad2deg(np.abs(dang))
 
 

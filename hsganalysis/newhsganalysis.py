@@ -1971,7 +1971,7 @@ class HighSidebandPMT(PMT):
                 if verbose:
                     print("\t\tarea < 0")
                 continue
-            elif area < cutoff * error:  # Two seems like a good cutoff?
+            elif area < cutoff/5 * error:  # Two seems like a good cutoff?
                 if verbose:
                     print("\t\tI did not keep sideband")
                 continue
@@ -2349,7 +2349,7 @@ class HighSidebandPMTOld(PMT):
                 if verbose:
                     print("area less than 0", sideband[0])
                 continue
-            elif area < 1.5 * error:  # Two seems like a good cutoff?
+            elif area < 1.0 * error:  # Two seems like a good cutoff?
                 if verbose:
                     print("I did not keep sideband ", sideband[0])
                 continue
@@ -2796,6 +2796,478 @@ class FullHighSideband(FullSpectrum):
 
         if verbose:
             print("Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname)))
+
+class TheoryMatrix(object):
+    def __init__(self,ThzField,Thzomega,nir_wl,dephase):
+        '''
+        This class is designed to handle everything for creating theory
+        matrices and comparing them to experiement.
+
+        Init defines some constants that are used throughout the calculation
+        and puts somethings in proper units.
+
+        Parameters:
+        :ThzField: Give in kV/cm.
+        :Thzomega: Give in Ghz.
+        :nir_wl: Give in nanometers.
+        :dephase: Detuning, give in meV
+        '''
+
+        self.F = ThzField * 10**5
+        self.Thz_w = Thzomega * 10**9 * 2*np.pi
+        self.nir_wl = nir_wl * 10**(-9)
+        self.dephase = dephase* 1.602*10**(-22)
+        self.n_ref = 0
+        self.iterations = 0
+
+    def mu_generator(self,gamma1,gamma2):
+        '''
+        Given gamma1 and gamma2 produces mu+- according to
+
+        mu+- = electron mass/(mc^-1+gamma1 -+ 2*gamma2)
+
+        Note that this formula is only accurate for THz and NIR
+        polarized along [010]. The general form requires gamma3 as well
+
+        Parameters:
+        :gamma1: Gamma1 parameter in the luttinger hamiltonian.
+            Textbook value of 6.85
+        :gamma2: Gamma2 parameter in the luttinger hamiltonian.
+            Textbook value of 2.1
+
+        Returns: mu_p, mu_m effective mass of of mu plus/minus
+        '''
+
+        emass = 9.109*10**(-31) # bare electron mass in kg
+        m_cond = 0.0665 # Effective mass of conduction band
+
+        mu_p = emass/( 1/m_cond + gamma1 - 2*gamma2 ) # Calculates mu_plus
+        mu_m = emass/( 1/m_cond + gamma1 + 2*gamma2 ) # Calculates mu_minus
+
+        return mu_p,mu_m
+
+    def alpha_value(self,x):
+        '''
+        alpha parameter given by Qile's notes on two band model for a given x
+
+        Parameters:
+        :x: the argument of the calculation. Give in radians
+
+        Returns:
+        :alpha_val: the alpha parameter given in Qile's notes
+        '''
+
+        alpha_val = np.cos(x/2) - np.sin(x/2)/(x/2)
+        # This does the calculation. Pretty straightforward
+
+        return alpha_val
+
+    def gamma_value(self,x):
+        '''
+        gamma parameter given by Qile's notes on two band model
+
+        Parameters:
+        :x: Argument of the calculation. Give in radians
+
+        Returns:
+        :gamma_val: the gamma parameter given in Qile's notes
+        '''
+
+        gamma_val = np.sin(x/2)/(x/2)
+        # does the calculation
+
+        return gamma_val
+
+    def Up(self,mu):
+        '''
+        Calculates the ponderemotive energy
+        Ponderemotive energy given by
+
+        U = e^2*F_THz^2/(4*mu*w_THz^2)
+
+        Parameters:
+        :F: Thz field. Give in V/m
+        :mu: effective mass. Give in kg
+        :w: omega,  the THz freqeuncy. Give in angular frequency.
+
+        Returns:
+        :u: The ponderemotive energy
+        '''
+        F = self.F
+        w = self.Thz_w
+
+        echarge = 1.602*10**(-19) # electron charge in Coulombs
+
+        u = echarge**(2)*F**(2)/(4*mu*w**2) # calculates the ponderemotive energy
+
+        return u
+
+    def integrand(self,x,mu,n):
+        '''
+        Calculate the integrand to integrate A_n+- in two_band_model pdf eqn 13.
+        Given in the new doc pdf from Qile as I_d^(2n)
+
+        Parameters:
+        :x: Argument of integrand equal to omega*t. This is the variable integrated
+            over.
+        :dephase: dephasing rate. Should be a few meV, ~the width of the exciton
+            absorption peak (according to Qile). Should be float
+        :w: Frequency of THz in radians.
+        :F: Thz field in V/m
+        :mu: reduced mass give in kg
+        :n: Order of the sideband
+
+        Returns:
+        :result: The value of the integrand for a given x value
+        '''
+        hbar = 1.055*10**(-34) # hbar in Joule*seconds
+        F = self.F
+        w = self.Thz_w
+        dephase = self.dephase
+
+        exp_arg = (-dephase*x/w + 1j*self.Up(F,mu,w)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x)
+        # Argument of the exponential part of the integrand
+
+        bessel_arg = x*self.Up(F,mu,w)*self.alpha_value(x)*self.gamma_value(x)/(hbar*w)
+        # Argument of the bessel function
+
+        bessel = spl.jv(n,bessel_arg)
+        # calculates the J_n(bessel_arg) bessel function
+
+        result = np.exp(exp_arg)*bessel/x
+        # This is the integrand for a given x
+
+        return result
+
+    def scale_J_n_T(self,Jraw,Jxx,observedSidebands,crystalAngle,saveFileName,
+        index,save_results=True, scale_to_i=True):
+        '''
+        This function takes the raw J from fan_n_Tmat or findJ and scales it with
+        Jxx found from scaling sideband strengths with the laser line/PMT
+
+        In regular processing we actually find all the matrices normalized to Jxx
+
+        Now can scale to a given sideband order.
+        This is to allow comparision between the measured sideband powers,
+        normalized by the PMT, to the evalueated Path Integral from the two band
+        model. By normalizing the measured values and integrals to a given
+        sideband index, we can remove the physical constants from the evaluation.
+
+        :param Jraw: set of matrices from findJ
+        :param Jxx: sb_results from PMT and CCD data
+        :param observedSidebands: np array of observed sidebands. Data will be
+            cropped such that these sidebands are included in everything.
+        :param crystalAngle: (Float) Angle of the sample from the 010 crystal face
+        :saveFileName: Str of what you want to call the text files to be saved
+        :save_results: Boolean controls if things are saved to txt files.
+            Currently saves scaled J and T
+        :param index: the sideband index to which we want to normalize.
+        :param saveFileName: Str of what you want to call the text files to be saved.
+        :param scale_to_i: Boolean that controls to normalize to the ith sideband
+            True -> Scale to ith | False -> scale to laser line
+
+        returns: scaledJ, scaledT matrices scaled by Jxx strengths
+        '''
+        # Initialize the array for scaling
+        Jxx_scales = np.array([ ])
+        self.n_ref = index
+
+        if scale_to_i:
+            for idx in np.arange(len(Jxx[:,0])):
+                if Jxx[idx,0] == index:
+                    scale_to = Jxx[idx,3]
+                    print('scale to:',scale_to)
+                    # sets the scale_to to be Jxx for the ith sideband
+        else:
+            scale_to = 1 # just makes this 1 if you don't want to scale to i
+
+        scaledJ = Jraw # initialize the scaled J matrix
+
+        for idx in np.arange(len(Jxx[:,0])):
+            if Jxx[idx,0] in observedSidebands:
+                Jxx_scales = np.append(Jxx_scales,Jxx[idx,3]/scale_to)
+                print('Scaling sb order',Jxx[idx,0])
+                # Creates scaling factor
+
+        for idx in np.arange(len(Jxx_scales)):
+                scaledJ[:,:,idx] = Jraw[:,:,idx]*Jxx_scales[idx]
+                # For each sideband scales Jraw by Jxx_scales
+
+        scaledT = qwp.extractMatrices.makeT(scaledJ,crystalAngle)
+        # Makes scaledT from our new scaledJ
+
+        if save_results:
+            qwp.extractMatrices.saveT(scaledJ, observedSidebands, "{}_scaledJMatrix.txt".format(saveFileName))
+            qwp.extractMatrices.saveT(scaledT, observedSidebands, "{}_scaledTMatrix.txt".format(saveFileName))
+            # Saves the matrices
+
+        return scaledJ, scaledT
+
+    def normalized_integrals(self,gamma1,gamma2,n,n_ref):
+        '''
+        Returns the plus and minus eta for a given sideband order, normalized
+        to order n_ref (should probably be 10?). This whole calculation relies
+        on calculating the ratio of these quantities to get rid of some troubling
+        constants. So you need a reference integral.
+
+        eta(n)+- =
+        (w_nir + 2*n*w_thz)^2/(w_nir + 2*n_ref*w_thz)^2 * (int(n)+-)^2/(int(n_ref)+)^2
+
+        This takes gamma1 and gamma2 and gives the effective mass via mu_generator.
+        It then calculates the normalized integrals for both mu's and gives eta,
+        which is the integrals squared with some prefactors.
+        Then you feed this into a cost function that varies gamma1 and gamma2.
+
+        Parameters:
+        :dephase: dephasing rate. Should be a few meV, ~the width of the exciton
+            absorption peak (according to Qile). Should be float
+        :lambda_nir: wavelength of NIR in nm
+        :w_thz: frequency in GHz of fel. DO NOT give in angular form, the code
+            does that for you.
+        :F: THz field strength
+        :gamma1: Gamma1 parameter in the luttinger hamiltonian.
+            Textbook value of 6.85
+        :gamma2: Gamma2 parameter in the luttinger hamiltonian.
+            Textbook value of 2.1
+        :n: Order of sideband for this integral
+        :n_ref: Order of the reference integral which everything will be divided by
+
+        Returns: eta_p, eta_m the values of the eta parameter normalized to the
+            appropriate sideband order for plus and minus values of mu.
+        '''
+
+        mu_p,mu_m = sefl.mu_generator(gamma1,gamma2)
+        # gets the plus/minus effective mass
+        omega_thz = self.Thz_w # FEL frequency
+
+        omega_nir = 2.998*10**8/(self.nir_wl) *2*np.pi
+        # NIR frequency, takes nm (wavelength) and gives angular Hz
+
+        Field = self.F # THz field
+
+        re_int_ref = int.quad(lambda x: np.real(integrand(
+            x,dephase,omega_thz,Field,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
+        re_int_p = int.quad(lambda x: np.real(integrand(
+            x,dephase,omega_thz,Field,mu_p,n)),0,np.inf,limit = 10000)[0]
+        re_int_m = int.quad(lambda x: np.real(integrand(
+            x,dephase,omega_thz,Field,mu_m,n)),0,np.inf,limit = 10000)[0]
+        # Ok so these integrands are complex valued, but the int.quad integration
+        #   does not work with that. So we split the integral up into two parts,
+        #   real and imaginary parts. These lines calculate the real part for the
+        #   reference, plus, and minus integrals.
+        # The integrals currently are limited to 10,000 iterations. No clue if that's
+        #   a good amount or what. We could potentially make this simpler by doing
+        #   a trapezoidal rule but I don't know how well that works with infinite
+        #   integrals. We would need to define an upper cutoff.
+        # We define the lambda function here to set all the values of the integrand
+        #   function we want except for the variable of integration x
+
+        im_int_ref = int.quad(lambda x: np.imag(integrand(
+            x,dephase,omega_thz,Field,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
+        im_int_p = int.quad(lambda x: np.imag(integrand(
+            x,dephase,omega_thz,Field,mu_p,n)),0,np.inf,limit = 10000)[0]
+        im_int_m = int.quad(lambda x: np.imag(integrand(
+            x,dephase,omega_thz,Field,mu_m,n)),0,np.inf,limit = 10000)[0]
+        # Same as above but these are the imaginary parts of the integrals.
+
+        int_ref = re_int_ref + 1j*im_int_ref
+        int_p = re_int_p + 1j*im_int_p
+        int_m = re_int_m + 1j*im_int_m
+        # All the king's horses and all the king's men putting together our integrals
+        #   again. :)
+
+        prefactor = ((omega_nir + 2*n*omega_thz)**2)/((omega_nir + 2*n_ref*omega_thz)**2)
+        # This prefactor is the ratio of energy of the nth sideband to the reference
+
+
+        eta_p = prefactor*(int_p**2)/(int_ref**2)
+        eta_m = prefactor*(int_m**2)/(int_ref**2)
+        # Putting everthing together in one tasty little result
+
+        return eta_p,eta_m
+
+    def cost_func(self,gamma1,gamma2,observedSidebands,n_ref,Jexp,gc_fname,eta_folder):
+        '''
+        This will sum up a cost function that takes the difference between
+        the theory generated eta's and experimental scaled matrices
+
+        eta+/eta+_ref = |Jxx|^2
+        eta-/eta+_ref = |Jyy-Jxx/4|^2/|3/4|^2
+
+        The cost function is given as
+
+        Sqrt(|eta+(theory)-eta+(experiment)|^2 + |eta-(theory)-eta-(experiment)|^2)
+
+        Where the J elements have been scaled to the n_ref sideband (Jxx_nref)
+        This is designed to run over and over again as you try different
+        gamma values. On my (Joe) lab computer a single run takes ~300-400 sec.
+
+        The function keeps track of values by writing a file with iteration,
+        gamma1, gamma2, and cost for each run. This lets you keep track of the
+        results as you run.
+
+        Parameters:
+        :dephase: dephasing rate. Should be a few meV, ~the width of the exciton
+            absorption peak (according to Qile). Should be float
+        :lambda_nir: wavelength of NIR in nm
+        :w_thz: frequency of fel
+        :F: THz field strength in kV/cm
+        :gamma1: Gamma1 parameter in the luttinger hamiltonian.
+            Textbook value of 6.85
+        :gamma2: Gamma2 parameter in the luttinger hamiltonian.
+            Textbook value of 2.1
+        :n: Order of sideband for this integral
+        :n_ref: Order of the reference integral which everything will be divided by
+        :observedSidebands: List or array of observed sidebands. The code will
+            loop over sidebands in this array.
+        :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
+            to the theoretical values. Pass in the not flattened way.
+        :gc_fname: File name for the gammas and cost results
+        :eta_folder: Folder name for the eta lists to go in
+
+        Returns:
+        :costs: Cumulative cost function for that run
+        :eta_list: list of eta for's for each sideband order of the form
+
+        sb order | eta_plus theory | eta_plus experiment | eta_minus thoery | eta_minus experiment
+        .
+        .
+        .
+
+        '''
+
+        costs = 0 # initialize the costs for this run
+        t_start = time.time() # keeps track of the time the run started.
+        eta_list = np.array([0,0,0,0,0])
+
+        dephase = self.dephase
+        lambda_nir = self.nir_wl
+        w_thz = self.Thz_w
+        F = self.F
+
+        for idx in np.arange(len(observedSidebands)):
+            n = observedSidebands[idx]
+            # loops over observed sidebands and gets the n for that sideband
+            eta_p,eta_m = self.normalized_integrals(dephase,lambda_nir,w_thz,F,
+                gamma1,gamma2,n,n_ref)
+            # calculates eta from the normalized_integrals function
+
+            exp_p = np.abs(J[0,0,idx])**2
+            exp_m = np.abs(J[1,1,idx]-J[0,0,idx])**2/(9/16)
+            # calculates the experimental plus and minus values
+
+            costs += np.sqrt( np.abs(eta_p-exp_p)**2 + np.abs(eta_m-exp_m)**2 )
+            # Adds the cost function for this sideband to the overall cost function
+
+            this_etas = np.array([n,eta_p,exp_p,eta_m,exp_m])
+            eta_list = np.vstack((eta_list,this_etas))
+
+        self.iterations += 1
+        # Ups the iterations counter
+
+        g_n_c = str(iterations)+','+str(gamma1)+','+str(gamma2)+','+str(costs)+'\n'
+        # String version of iteration, gamma1, gamma2, cost with a new line
+        gc_file = open(gc_fname,'a') #opens the gamma/cost file in append mode
+        gc_file.write(g_n_c) # writes the new line to the file
+        gc_file.close() # closes the file
+
+        etas_header = "#\n"*100
+        etas_header += 'sb order, eta_plus theory, eta_plus experiment, eta_minus thoery, eta_minus experiment \n'
+        etas_header += 'unitless, unitless, unitless, unitless, unitless \n'
+        # Creates origin frienldy header for the eta's
+
+        eta_fname = 'eta_g1' + str(gamma1) + '_g2' + str(gamma2) + r'.txt'
+        eta_path = os.path.join(eta_folder,eta_fname)
+        #creates the file for this run of etas
+
+        eta_list = eta_list[1:,:]
+        np.savetxt(eta_path,eta_list, delimiter = ',',
+            header = etas_header, comments = '') #save the etas for these gammas
+
+
+        t_taken = time.time()-t_start # calcuates time taken for this run
+
+        print("  ")
+        print("---------------------------------------------------------------------")
+        print("  ")
+        print('Iteration number ',iterations,' done')
+        print('for gamma1, gamma2 = ',gamma1,gamma2)
+        print('Cost function is = ',costs)
+        print('This calculation took ',t_taken,' seconds')
+        print("  ")
+        print("---------------------------------------------------------------------")
+        print("  ")
+        # These print statements help you keep track of what's going on as this
+        #   goes on and on and on.
+
+
+        return costs
+
+    def gamma_sweep(self,gamma1_array,gamma2_array,observedSidebands,n_ref,
+        Jexp,gc_fname,eta_folder,save_results = True):
+        '''
+        This function calculates the integrals and cost function for an array of
+        gamma1 and gamma2. You can pass any array of gamma1 and gamma2 values and
+        this will return the costs for all those values. Let's you avoid the
+        weirdness of fitting algorithims.
+
+        Parameters:
+        :dephase: dephasing rate. Should be a few meV, ~the width of the exciton
+            absorption peak (according to Qile). Should be float
+        :lambda_nir: wavelength of NIR in nm
+        :w_thz: frequency of fel
+        :F: THz field strength
+        :gamma1: Gamma1 parameter in the luttinger hamiltonian.
+            Textbook value of 6.85
+        :gamma2: Gamma2 parameter in the luttinger hamiltonian.
+            Textbook value of 2.1
+        :n: Order of sideband for this integral
+        :n_ref: Order of the reference integral which everything will be divided by
+        :observedSidebands: List or array of observed sidebands. The code will
+            loop over sidebands in this array.
+        :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
+            to the theoretical values. Pass in the not flattened way.
+        :gc_fname: File name for the gammas and cost functions
+        :eta_folder: Folder name for the eta lists to go in
+
+        Returns: gamma_cost_array of form
+        gamma1 | gamma2 | cost |
+        .           .       .
+        .           .       .
+        .           .       .
+
+        This is just running cost_func over and over again essentially.
+        '''
+
+        dephase = self.dephase
+        lambda_nir = self.nir_wl
+        w_thz = self.Thz_w
+        F = self.F
+
+        gamma_cost_array = np.array([0,0,0])
+        # Initialize the gamma cost array
+
+        for gamma1 in gamma1_array:
+            for gamma2 in gamma2_array:
+                cost = self.cost_func(dephase,gamma1,gamma2,lambda_nir,w_thz,F,
+                    observedSidebands,n_ref,Jexp,gc_fname,eta_folder)
+                this_costngamma = np.array([gamma1,gamma2,cost])
+                gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
+                # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
+                #   and cost to the overall array.
+
+        gamma_cost_array = gamma_cost_array[1:,:]
+
+        if save_results:
+            sweepcosts_header = "#\n"*100
+            sweepcosts_header += 'Gamma1, Gamma2, Cost Function \n'
+            sweepcosts_header += 'unitless, unitless, unitless \n'
+
+            np.savetxt('sweep_costs.txt',gc_array,delimiter = ',',
+                header = sweepcosts_header, comments = '')
+
+        return gamma_cost_array
+
 
 ####################
 # Fitting functions
