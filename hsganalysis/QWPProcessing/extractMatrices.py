@@ -196,6 +196,7 @@ def saveT(T, sbs, out):
     #
     # I have no fucking clue why it does it that way, but I'm sick and fucking tired of it
     # So no more
+    # 12/02/19 - How do you really feel Darren?
     #
     # flatT = T.reshape(-1, 4).view(float).reshape(-1, 8)
 
@@ -226,8 +227,7 @@ def saveT(T, sbs, out):
 
     header = "SB,ReT--,ImT--,ReT+-,ImT+-,ReT-+,ImT-+,ReT++,ImT++"
     np.savetxt(out,
-               flatT, header=header, comments='', delimiter=',',
-               fmt="%.6f")
+               flatT, header=header, comments='', delimiter=',')
     print("saved {}\n".format(out))
 
 def loadT(name):

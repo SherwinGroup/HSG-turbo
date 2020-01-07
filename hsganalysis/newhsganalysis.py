@@ -1919,7 +1919,7 @@ class HighSidebandPMT(PMT):
         if verbose:
             print("Sidebands included", self.sb_list)
 
-    def integrate_sidebands(self, verbose=False, cutoff=1.5, **kwargs):
+    def integrate_sidebands(self, verbose=False, cutoff=1.0, **kwargs):
         """
         This method will integrate the sidebands to find their strengths, and then
         use a magic number to define the width, since they are currently so utterly
@@ -2092,9 +2092,9 @@ class HighSidebandPMT(PMT):
             self.parameters['normalized?'] = False
             return
         else:
-            laser_index = np.where(self.sb_results[:, 0] == 0)[0][0]
+            laser_index = np.where(self.sb_results[:,0] == 0)[0][0]
             if verbose:
-                print("sb_results", self.sb_results[laser_index, :])
+                print("sb_results", self.sb_results)
                 print("laser_index", laser_index)
 
             laser_strength = np.array(self.sb_results[laser_index, 3:5])
@@ -2103,9 +2103,13 @@ class HighSidebandPMT(PMT):
                 print("Laser_strength", laser_strength)
 
             for sb in self.sb_results:
+                if verbose:
+                    print("\torder {}, strength {}, error {}".format(sb[0], sb[3], sb[4]))
                 sb[4] = (sb[3] / laser_strength[0]) * np.sqrt(
                     (sb[4] / sb[3]) ** 2 + (laser_strength[1] / laser_strength[0]) ** 2)
                 sb[3] = sb[3] / laser_strength[0]
+                if verbose:
+                    print("\torder {}, strength {}, error {}".format(sb[0], sb[3], sb[4]))
             for sb in list(self.full_dict.values()):
                 sb[3] = (sb[2] / laser_strength[0]) * np.sqrt(
                     (sb[3] / sb[2]) ** 2 + (laser_strength[1] / laser_strength[0]) ** 2)
@@ -2476,11 +2480,14 @@ class HighSidebandPMTOld(PMT):
 
             if verbose:
                 print("Laser_strength", laser_strength)
-
             for sb in self.sb_results:
+                if verbose:
+                    print("\torder {}, strength {}, error {}".format(sb[0], sb[3], sb[4]))
                 sb[4] = (sb[3] / laser_strength[0]) * np.sqrt(
                     (sb[4] / sb[3]) ** 2 + (laser_strength[1] / laser_strength[0]) ** 2)
                 sb[3] = sb[3] / laser_strength[0]
+                if verbose:
+                    print("\torder {}, strength {}, error {}".format(sb[0], sb[3], sb[4]))
             for sb in list(self.full_dict.values()):
                 sb[3] = (sb[2] / laser_strength[0]) * np.sqrt(
                     (sb[3] / sb[2]) ** 2 + (laser_strength[1] / laser_strength[0]) ** 2)
@@ -3307,7 +3314,7 @@ def makeCurve(eta, isVertical):
     return analyzerCurve
 
 def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir = True, plot=False,
-                        save = False, plotRaw = lambda sbidx, sbnum: False, series = '', eta=None,
+                        save = False, plotRaw = lambda sbidx, sbnum: False, series = '', eta=None, fourier = True,
                         **kwargs):
     """
     Fit a set of sideband data vs QWP angle to get the stoke's parameters
@@ -3322,6 +3329,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
     :param plotRaw: callable that takes an index of the sb and sb number, returns true to plot the raw curve
     :param series: a string to be put in the header for the origin files
     :param eta: a function to call to calculate the desired retardance. Input will be the SB order.
+    :param fourier: Will use Fourier analysis over a fit funciton if True
 
     if saveStokes is in kwargs and False, it will not save the stokes parameters, since I rarely actually use them.
     :return:
@@ -3402,80 +3410,137 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
         #     print("\tlooking at sideband", sbNum)
         sbData = allSbData[1:, sbIdx]
         sbDataErr = allSbData[1:, sbIdx + 1]
-
-        # try:
-        #     p0 = sbFits[-1][1:8:2]
-        # except:
-        #     p0 = [1, 1, 0, 0]
-        p0 = [1, 1, 0, 0]
-
-        etan = eta(sbNum)
-        try:
-            p, pcov = curve_fit(makeCurve(etan, vertAnaDir), angles, sbData, p0=p0)
-        except ValueError:
-            # This is getting tossed around, especially when looking at noisy data,
-            # especially with the laser line, and it's fitting erroneous values.
-            # Ideally, I should be cutting this out and not even returning them,
-            # but that's immedaitely causing
-            p = np.nan*np.array(p0)
-            pcov = np.eye(len(p))
-
-
-        if plot and plotRaw(sbIdx, sbNum):
-            # pg.figure("{}: sb {}".format(dataName, sbNum))
-            plt.figure("All Curves")
-            plt.errorbar(angles, sbData, sbDataErr, 'o-', name=f"{series}, {sbNum}")
-            # plt.plot(angles, sbData,'o-', label="Data")
-            fineAngles = np.linspace(angles.min(), angles.max(), 300)
-            # plt.plot(fineAngles,
-            #         makeCurve(eta, "V" in dataName)(fineAngles, *p0), name="p0")
-            plt.plot(fineAngles,
-                    makeCurve(etan, vertAnaDir)(fineAngles, *p))
-            # plt.show()
-            plt.ylim(0, 1)
-            plt.xlim(0, 360)
-            plt.ylabel("Normalized Intensity")
-            plt.xlabel("QWP Angle (&theta;)")
-            print(f"\t{series} {sbNum}, p={p}")
+        if fourier:
+            # We want to do Fourier Analysis
+            # I've hard coded the maximum expected variance from QWP retardance to be
+            # 5 degrees (converted to radians bc of small angle approximation).
+            # Not sure how to deal with the fact that this method leaves no variance 
+            # for the S3 paramter.
+            f0 = 0
+            f2 = 0
+            f4 = 0
+            df0 = 0
+            df2 = 0 
+            df4 = 0
+            for k in range(0,16,1):
+                f0 = f0 + allSbData[k+1,sbIdx]
+                f2 = f2 + allSbData[k+1,sbIdx]*np.exp(-1j*4*np.pi*k/16)
+                f4 = f4 + allSbData[k+1,sbIdx]*np.exp(-1j*8*np.pi*k/16)
+                df0 = df0 + allSbData[k+1, sbIdx+1]
+                df2 = df2 + allSbData[k+1,sbIdx+1]*np.exp(-1j*4*np.pi*k/16)
+                df4 = df4 + allSbData[k+1,sbIdx]*np.exp(-1j*8*np.pi*k/16)
+            
+            
 
 
-        # get the errors
-        d = np.sqrt(np.diag(pcov))
-        thisData = [sbNum] + list(p) + list(d)
-        d0, d1, d2, d3 = d
-        S0, S1, S2, S3 = p
-        # reorder so errors are after values
-        thisData = [thisData[i] for i in [0, 1, 5, 2, 6, 3, 7, 4, 8]]
+            phi = 5*2*np.pi/180 
+            # Generate the Stokes parameters from the Fourier Components
+            S0 = (f0 - 2*f4.real)/(2*np.pi)
+            S1 = 2*f4.real/(np.pi)
+            S2 = -2*f4.imag/(np.pi)
+            S3 = f2.imag/(np.pi)
+            # For the Error Propagation, I say phi = 0 and dPhi = 2*phi (value set above)
+            d0 = np.sqrt(((-2*f4.real)/(np.pi)*2*phi)**2 + (df0/(2*np.pi))**2 + (-df4.imag/np.pi)**2)
+            d1 = np.sqrt((-4*f4.real*phi/np.pi)**2 + (2*df4.real/np.pi)**2)
+            d2 = np.sqrt((4*f4.imag*phi/np.pi)**2 + (-2*df4.imag/np.pi)**2)
+            d3 = -df2.imag/np.pi
 
-        sbFitsDict["S0"].append([sbNum, S0, d0])
-        sbFitsDict["S1"].append([sbNum, S1, d1])
-        sbFitsDict["S2"].append([sbNum, S2, d2])
-        sbFitsDict["S3"].append([sbNum, S3, d3])
+            # Calculate the alpha, gamma, DOP and errors from Stokes parameters
+            thisAlpha = np.arctan2(S2, S1) / 2 * 180. / np.pi
+            thisAlphaError = np.sqrt(d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2)
+            thisGamma = np.arctan2(S3, np.sqrt(S1 ** 2 + S2 ** 2)) / 2 * 180. / np.pi
+            thisGammaError = np.sqrt(d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + ((d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
+            (S1 ** 2 + S2 ** 2))) / (S1 ** 2 + S2 ** 2 + S3 ** 2)
+            thisDOP = np.sqrt(S1 ** 2 + S2 ** 2 + S3 ** 2) / S0
+            thisDOPerror = np.sqrt(((S1**2*d1**2 + S2**2*d2**2 + S3**2*d3**2))/(S1**2 + S2**2 + S3**2) + (S1**2 + S2**2 + S3**2)*d0**2/(S0**2))/(S0**2) 
 
-        # append alpha value
-        thisData.append(np.arctan2(S2, S1) / 2 * 180. / np.pi)
-        # append alpha error
-        variance = (d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2) ** 2
-        thisData.append(np.sqrt(variance) * 180. / np.pi)
+            # Append The stokes parameters and errors to the dictionary output.
+            sbFitsDict["S0"].append([sbNum, S0, d0])
+            sbFitsDict["S1"].append([sbNum, S1, d1])
+            sbFitsDict["S2"].append([sbNum, S2, d2])
+            sbFitsDict["S3"].append([sbNum, S3, d3])
+            sbFitsDict["alpha"].append([sbNum, thisAlpha, thisAlphaError])
+            sbFitsDict["gamma"].append([sbNum, thisGamma, thisGammaError])
+            sbFitsDict["DOP"].append([sbNum, thisDOP, thisDOPerror])
+            toAppend = [sbNum, S0, d0, S1, d1, S2, d2, S3, d3, thisAlpha, thisAlphaError, thisGamma, thisGammaError, thisDOP, thisDOPerror]
+            sbFits.append(toAppend)
 
-        sbFitsDict["alpha"].append([sbNum, thisData[-2], thisData[-1]])
+        # Otherwise we will do the normal fit
+        else:
 
-        # append gamma value
-        thisData.append(np.arctan2(S3, np.sqrt(S1 ** 2 + S2 ** 2)) / 2 * 180. / np.pi)
-        # append gamma error
-        variance = (d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + (d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
-        (S1 ** 2 + S2 ** 2) * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2)
-        thisData.append(np.sqrt(variance) * 180. / np.pi)
-        sbFitsDict["gamma"].append([sbNum, thisData[-2], thisData[-1]])
+            # try:
+            #     p0 = sbFits[-1][1:8:2]
+            # except:
+            #     p0 = [1, 1, 0, 0]
+            p0 = [1, 1, 0, 0]
 
-        # append degree of polarization
-        thisData.append(np.sqrt(S1 ** 2 + S2 ** 2 + S3 ** 2) / S0)
-        variance = ((d1 ** 2 * S0 ** 2 * S1 ** 2 + d0 ** 2 * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2 + S0 ** 2 * (
-        d2 ** 2 * S2 ** 2 + d3 ** 2 * S3 ** 2)) / (S0 ** 4 * (S1 ** 2 + S2 ** 2 + S3 ** 2)))
-        thisData.append(np.sqrt(variance))
-        sbFitsDict["DOP"].append([sbNum, thisData[-2], thisData[-1]])
+            etan = eta(sbNum)
+            try:
+                p, pcov = curve_fit(makeCurve(etan, vertAnaDir), angles, sbData, p0=p0)
+            except ValueError:
+                # This is getting tossed around, especially when looking at noisy data,
+                # especially with the laser line, and it's fitting erroneous values.
+                # Ideally, I should be cutting this out and not even returning them,
+                # but that's immedaitely causing
+                p = np.nan*np.array(p0)
+                pcov = np.eye(len(p))
 
-        sbFits.append(thisData)
+
+            if plot and plotRaw(sbIdx, sbNum):
+                # pg.figure("{}: sb {}".format(dataName, sbNum))
+                plt.figure("All Curves")
+                plt.errorbar(angles, sbData, sbDataErr, 'o-', name=f"{series}, {sbNum}")
+                # plt.plot(angles, sbData,'o-', label="Data")
+                fineAngles = np.linspace(angles.min(), angles.max(), 300)
+                # plt.plot(fineAngles,
+                #         makeCurve(eta, "V" in dataName)(fineAngles, *p0), name="p0")
+                plt.plot(fineAngles,
+                        makeCurve(etan, vertAnaDir)(fineAngles, *p))
+                # plt.show()
+                plt.ylim(0, 1)
+                plt.xlim(0, 360)
+                plt.ylabel("Normalized Intensity")
+                plt.xlabel("QWP Angle (&theta;)")
+                print(f"\t{series} {sbNum}, p={p}")
+
+
+            # get the errors
+            d = np.sqrt(np.diag(pcov))
+            thisData = [sbNum] + list(p) + list(d)
+            d0, d1, d2, d3 = d
+            S0, S1, S2, S3 = p
+            # reorder so errors are after values
+            thisData = [thisData[i] for i in [0, 1, 5, 2, 6, 3, 7, 4, 8]]
+
+            sbFitsDict["S0"].append([sbNum, S0, d0])
+            sbFitsDict["S1"].append([sbNum, S1, d1])
+            sbFitsDict["S2"].append([sbNum, S2, d2])
+            sbFitsDict["S3"].append([sbNum, S3, d3])
+
+            # append alpha value
+            thisData.append(np.arctan2(S2, S1) / 2 * 180. / np.pi)
+            # append alpha error
+            variance = (d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2) ** 2
+            thisData.append(np.sqrt(variance) * 180. / np.pi)
+
+            sbFitsDict["alpha"].append([sbNum, thisData[-2], thisData[-1]])
+
+            # append gamma value
+            thisData.append(np.arctan2(S3, np.sqrt(S1 ** 2 + S2 ** 2)) / 2 * 180. / np.pi)
+            # append gamma error
+            variance = (d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + (d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
+            (S1 ** 2 + S2 ** 2) * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2)
+            thisData.append(np.sqrt(variance) * 180. / np.pi)
+            sbFitsDict["gamma"].append([sbNum, thisData[-2], thisData[-1]])
+
+            # append degree of polarization
+            thisData.append(np.sqrt(S1 ** 2 + S2 ** 2 + S3 ** 2) / S0)
+            variance = ((d1 ** 2 * S0 ** 2 * S1 ** 2 + d0 ** 2 * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2 + S0 ** 2 * (
+            d2 ** 2 * S2 ** 2 + d3 ** 2 * S3 ** 2)) / (S0 ** 4 * (S1 ** 2 + S2 ** 2 + S3 ** 2)))
+            thisData.append(np.sqrt(variance))
+            sbFitsDict["DOP"].append([sbNum, thisData[-2], thisData[-1]])
+
+            sbFits.append(thisData)
 
     sbFits = np.array(sbFits)
     sbFitsDict = {k: np.array(v) for k, v in sbFitsDict.items()}
@@ -5646,6 +5711,10 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
         spectrum.integrate_sidebands(verbose=verbose, **kwargs)
         spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
         # because process sidebands can't handle the laser line
+
+        #Not sure what the comment above is talking about. After looking carefully at how the program finds the laser line and
+        #normallizes the rest of the PMT data, it looks like the .laser_line function is working as intended.
+
         # print spectrum.full_dict
         if plot:
             plt.figure('PMT data')
@@ -5654,7 +5723,7 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
                              marker='o', label="{} {}".format(spectrum.parameters["series"],sb))
             plt.figure('Sideband strengths')
             plt.yscale("log")
-            plt.errorbar(spectrum.sb_results[:, 1], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
+            plt.errorbar(spectrum.sb_results[:, 0], spectrum.sb_results[:, 3], spectrum.sb_results[:, 4],
                          label=spectrum.parameters['series'], marker='o')
         if plot and confirm_fits:
             plt.figure('PMT confirm fits')

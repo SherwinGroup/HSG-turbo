@@ -16,7 +16,7 @@ from pyqtgraph.parametertree import Parameter
 import newhsganalysis as hsg
 
 try:
-    from .UI.mainWin_ui import Ui_MainWindow
+    from mainWin_ui import Ui_MainWindow
     from .UI.qwpCompWin_ui import Ui_PolarimeterWindow
     from .UI.draggablePlotWidget import DraggablePlotWidget, DraggableViewBox
 except ModuleNotFoundError:
