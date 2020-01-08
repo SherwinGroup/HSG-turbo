@@ -14,15 +14,19 @@ import glob
 import errno
 import copy
 import json
+import time
 import warnings
 import numpy as np
 from scipy.optimize import curve_fit
 import scipy.interpolate as spi
 import scipy.optimize as spo
+import scipy.integrate as intgt
 import scipy.fftpack as fft
+import scipy.special as spl
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 import itertools as itt
+from hsganalysis.QWPProcessing.extractMatrices import makeT,saveT
 np.set_printoptions(linewidth=500)
 
 # One of the main results is the HighSidebandCCD.sb_results array. These are the
@@ -2925,10 +2929,10 @@ class TheoryMatrix(object):
         w = self.Thz_w
         dephase = self.dephase
 
-        exp_arg = (-dephase*x/w + 1j*self.Up(F,mu,w)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x)
+        exp_arg = (-dephase*x/(hbar*w) + 1j*self.Up(mu)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x)
         # Argument of the exponential part of the integrand
 
-        bessel_arg = x*self.Up(F,mu,w)*self.alpha_value(x)*self.gamma_value(x)/(hbar*w)
+        bessel_arg = x*self.Up(mu)*self.alpha_value(x)*self.gamma_value(x)/(hbar*w)
         # Argument of the bessel function
 
         bessel = spl.jv(n,bessel_arg)
@@ -2993,12 +2997,12 @@ class TheoryMatrix(object):
                 scaledJ[:,:,idx] = Jraw[:,:,idx]*Jxx_scales[idx]
                 # For each sideband scales Jraw by Jxx_scales
 
-        scaledT = qwp.extractMatrices.makeT(scaledJ,crystalAngle)
+        scaledT = makeT(scaledJ,crystalAngle)
         # Makes scaledT from our new scaledJ
 
         if save_results:
-            qwp.extractMatrices.saveT(scaledJ, observedSidebands, "{}_scaledJMatrix.txt".format(saveFileName))
-            qwp.extractMatrices.saveT(scaledT, observedSidebands, "{}_scaledTMatrix.txt".format(saveFileName))
+            saveT(scaledJ, observedSidebands, "{}_scaledJMatrix.txt".format(saveFileName))
+            saveT(scaledT, observedSidebands, "{}_scaledTMatrix.txt".format(saveFileName))
             # Saves the matrices
 
         return scaledJ, scaledT
@@ -3036,7 +3040,7 @@ class TheoryMatrix(object):
             appropriate sideband order for plus and minus values of mu.
         '''
 
-        mu_p,mu_m = sefl.mu_generator(gamma1,gamma2)
+        mu_p,mu_m = self.mu_generator(gamma1,gamma2)
         # gets the plus/minus effective mass
         omega_thz = self.Thz_w # FEL frequency
 
@@ -3045,11 +3049,6 @@ class TheoryMatrix(object):
 
         Field = self.F # THz field
 
-        re_int_ref = int.quad(lambda x: np.real(integrand(
-            x,dephase,omega_thz,Field,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
-        re_int_p = int.quad(lambda x: np.real(integrand(
-            x,dephase,omega_thz,Field,mu_p,n)),0,np.inf,limit = 10000)[0]
-        re_int_m = int.quad(lambda x: np.real(integrand(
             x,dephase,omega_thz,Field,mu_m,n)),0,np.inf,limit = 10000)[0]
         # Ok so these integrands are complex valued, but the int.quad integration
         #   does not work with that. So we split the integral up into two parts,
