@@ -3049,8 +3049,13 @@ class TheoryMatrix(object):
 
         Field = self.F # THz field
 
-            x,dephase,omega_thz,Field,mu_m,n)),0,np.inf,limit = 10000)[0]
-        # Ok so these integrands are complex valued, but the int.quad integration
+        re_int_ref = intgt.quad(lambda x: np.real(self.integrand(
+            x,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
+        re_int_p = intgt.quad(lambda x: np.real(self.integrand(
+            x,mu_p,n)),0,np.inf,limit = 10000)[0]
+        re_int_m = intgt.quad(lambda x: np.real(self.integrand(
+            x,mu_m,n)),0,np.inf,limit = 10000)[0]
+        # Ok so these integrands are complex valued, but the intgt.quad integration
         #   does not work with that. So we split the integral up into two parts,
         #   real and imaginary parts. These lines calculate the real part for the
         #   reference, plus, and minus integrals.
@@ -3061,12 +3066,12 @@ class TheoryMatrix(object):
         # We define the lambda function here to set all the values of the integrand
         #   function we want except for the variable of integration x
 
-        im_int_ref = int.quad(lambda x: np.imag(integrand(
-            x,dephase,omega_thz,Field,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
-        im_int_p = int.quad(lambda x: np.imag(integrand(
-            x,dephase,omega_thz,Field,mu_p,n)),0,np.inf,limit = 10000)[0]
-        im_int_m = int.quad(lambda x: np.imag(integrand(
-            x,dephase,omega_thz,Field,mu_m,n)),0,np.inf,limit = 10000)[0]
+        im_int_ref = intgt.quad(lambda x: np.imag(self.integrand(
+            x,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
+        im_int_p = intgt.quad(lambda x: np.imag(self.integrand(
+            x,mu_p,n)),0,np.inf,limit = 10000)[0]
+        im_int_m = intgt.quad(lambda x: np.imag(self.integrand(
+            x,mu_m,n)),0,np.inf,limit = 10000)[0]
         # Same as above but these are the imaginary parts of the integrals.
 
         int_ref = re_int_ref + 1j*im_int_ref
@@ -3079,8 +3084,8 @@ class TheoryMatrix(object):
         # This prefactor is the ratio of energy of the nth sideband to the reference
 
 
-        eta_p = prefactor*(int_p**2)/(int_ref**2)
-        eta_m = prefactor*(int_m**2)/(int_ref**2)
+        eta_p = prefactor*(np.abs(int_p)**2)/(np.abs(int_ref)**2)
+        eta_m = prefactor*(np.abs(int_m)**2)/(np.abs(int_ref)**2)
         # Putting everthing together in one tasty little result
 
         return eta_p,eta_m
@@ -3147,12 +3152,11 @@ class TheoryMatrix(object):
         for idx in np.arange(len(observedSidebands)):
             n = observedSidebands[idx]
             # loops over observed sidebands and gets the n for that sideband
-            eta_p,eta_m = self.normalized_integrals(dephase,lambda_nir,w_thz,F,
-                gamma1,gamma2,n,n_ref)
+            eta_p,eta_m = self.normalized_integrals(gamma1,gamma2,n,n_ref)
             # calculates eta from the normalized_integrals function
 
-            exp_p = np.abs(J[0,0,idx])**2
-            exp_m = np.abs(J[1,1,idx]-J[0,0,idx])**2/(9/16)
+            exp_p = np.abs(Jexp[0,0,idx])**2
+            exp_m = np.abs(Jexp[1,1,idx]-Jexp[0,0,idx])**2/(9/16)
             # calculates the experimental plus and minus values
 
             costs += np.sqrt( np.abs(eta_p-exp_p)**2 + np.abs(eta_m-exp_m)**2 )
@@ -3164,7 +3168,7 @@ class TheoryMatrix(object):
         self.iterations += 1
         # Ups the iterations counter
 
-        g_n_c = str(iterations)+','+str(gamma1)+','+str(gamma2)+','+str(costs)+'\n'
+        g_n_c = str(self.iterations)+','+str(gamma1)+','+str(gamma2)+','+str(costs)+'\n'
         # String version of iteration, gamma1, gamma2, cost with a new line
         gc_file = open(gc_fname,'a') #opens the gamma/cost file in append mode
         gc_file.write(g_n_c) # writes the new line to the file
@@ -3189,7 +3193,7 @@ class TheoryMatrix(object):
         print("  ")
         print("---------------------------------------------------------------------")
         print("  ")
-        print('Iteration number ',iterations,' done')
+        print('Iteration number ',self.iterations,' done')
         print('for gamma1, gamma2 = ',gamma1,gamma2)
         print('Cost function is = ',costs)
         print('This calculation took ',t_taken,' seconds')
@@ -3226,7 +3230,7 @@ class TheoryMatrix(object):
             loop over sidebands in this array.
         :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
             to the theoretical values. Pass in the not flattened way.
-        :gc_fname: File name for the gammas and cost functions
+        :gc_fname: File name for the gammas and cost functions, include .txt
         :eta_folder: Folder name for the eta lists to go in
 
         Returns: gamma_cost_array of form
@@ -3248,8 +3252,8 @@ class TheoryMatrix(object):
 
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
-                cost = self.cost_func(dephase,gamma1,gamma2,lambda_nir,w_thz,F,
-                    observedSidebands,n_ref,Jexp,gc_fname,eta_folder)
+                cost = self.cost_func(gamma1,gamma2,observedSidebands,
+                    n_ref,Jexp,gc_fname,eta_folder)
                 this_costngamma = np.array([gamma1,gamma2,cost])
                 gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
@@ -3262,7 +3266,8 @@ class TheoryMatrix(object):
             sweepcosts_header += 'Gamma1, Gamma2, Cost Function \n'
             sweepcosts_header += 'unitless, unitless, unitless \n'
 
-            np.savetxt('sweep_costs.txt',gc_array,delimiter = ',',
+            sweep_name = 'sweep_costs_' + gc_fname
+            np.savetxt(sweep_name,gamma_cost_array,delimiter = ',',
                 header = sweepcosts_header, comments = '')
 
         return gamma_cost_array
