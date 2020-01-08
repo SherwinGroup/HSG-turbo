@@ -9,7 +9,7 @@ from hsganalysis.ipg import PolarImagePlot
 from PyQt5 import QtCore, QtGui, QtWidgets
 from scipy.optimize import minimize
 from hsganalysis import newhsganalysis
-from hsganalysis import JonesVector as JV
+from hsganalysis.jones import JonesVector as JV
 newhsganalysis.plt = pg
 np.set_printoptions(linewidth=400)
 

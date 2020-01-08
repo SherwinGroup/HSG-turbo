@@ -260,349 +260,349 @@ def loadT(name):
     return T, sbs
 
 
-    def fan_n_Tmat(file,observedSidebands,crystalAngle,saveFileName,save_results=False,Plot=True):
-        """
-        This function will take a folder of polarimetry scans and produce
-        DOP, alpha/gamma, J and T matrices, Fan, and Matrix Relations
-
-        :param file: String of folder name containing 4 polarimetry scans
-        :param observedSidebands: np array of observed sidebands. Data will be
-            cropped such that these sidebands are included in everything.
-        :param crystalAngle: (Float) Angle of the sample from the 010 crystal face
-        :saveFileName: Str of what you want to call the text files to be saved
-        :save_results: Boolean controls if things are saved to txt files.
-            Currently saves DOP, alpha, gamma, J matrix, T matrix, Fan, and Matrix
-            Relations
-        :Plot: Boolean controls if plots are displayed
-
-        :return: DOP,alpha,gamma,J matrix, T matrix, Matrix Relations
-        """
-
-        # Make a list of folders for the fan data
-        datasets = hsg.natural_glob(file, "*")
-
-        # FanCompiler class keeps alpha and gamma data together for different pols
-        fanData = FanCompiler(observedSidebands)
-
-        # Initialize arrays for DOP
-        dop00 = np.array([])
-        dop45 = np.array([])
-        dop90 = np.array([])
-        dopn45 = np.array([])
-
-        for data in datasets:
-            laserParams, rawData = hsg.hsg_combine_qwp_sweep(data)
-            _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False, laserParams = laserParams,wantedSbs = observedSidebands)
-            # Add the new alpha and gamma sets to the fan class
-            fanData.addSet(fitDict)
-
-            # Get Stoke Parameters
-            s0 = fitDict['S0']
-            s1 = fitDict['S1']
-            s2 = fitDict['S2']
-            s3 = fitDict['S3']
-
-            # Trims the Stoke Parameters down to remove any sidebands beyond observedSidebands
-            # This does mean that it won't calculate the DOP for any extra sidebands, even if
-            # the software detected them.
-
-            while s0[-1,0] > observedSidebands[-1]:
-                s0 = s0[:-1,:]
-                s1 = s1[:-1,:]
-                s2 = s2[:-1,:]
-                s3 = s3[:-1,:]
-
-            # This actually calculates the DOP and DOP error
-            dop = s0
-            dop[1:,1] = np.sqrt((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)/s0[1:,1]
-            dop[1:,2] = np.sqrt( (s1[1:,1]**2)*(s1[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s2[1:,1]**2)*(s2[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s3[1:,1]**2)*(s3[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)) + ((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)*s0[1:,2]**2/s0[1:,1]**4
-
-            # Save according to alpha. This will break if you use an alpha not in the usual
-            #   0,45,90,-45 range.
-            if laserParams['lAlpha'] == 00:
-                dop00 = dop[1:,:]
-            if laserParams['lAlpha'] == 45:
-                dop45 = dop[1:,:]
-            if laserParams['lAlpha'] == 90:
-                dop90 = dop[1:,:]
-            if laserParams['lAlpha'] == -45:
-                dopn45 = dop[1:,:]
-
-        # Put into appropriate form for saving
-        totdop = [dop00,dop45[:,1:],dop90[:,1:],dopn45[:,1:]]
-        totdop = np.hstack(totdop)
-
-        # Saves as txt file with columns, SB Order, 00 DOP and error, 45 DOP and error,
-        # 90 DOP and error, -45 DOP and error
-        if save_results:
-            np.savetxt(saveFileName + "_DOP.txt", totdop, delimiter=',', header=
-                'SB Order, 00 DOP, 00 DOP Error, 45 DOP, 45 DOP Error, 90 DOP, 90 DOP Error, -45 DOP, -45 DOP Error')
-
-
-        # Building the fan compiler causes it to make  2D np arrays with the alpha and
-        # gamma angles where each column is a different alpha_NIR excitation
-        alphaData, gammaData, _ = fanData.build()
-
-        # save the alpha and gamma results
-        if save_results:
-            fanData.buildAndSave(saveFileName + "_{}.txt")
-
-        # Now we need to calculate the Jones matrices.
-        J = findJ(alphaData,gammaData)
-
-        # Get the T matrix:
-        T = makeT(J,crystalAngle)
-
-        # and save the matrices
-        if save_results:
-            saveT(J, observedSidebands, "{}_JMatrix.txt".format(saveFileName))
-            saveT(T, observedSidebands, "{}_TMatrix.txt".format(saveFileName))
-
-        #Now make a Fan Diagram:
-
-        from PyQt5 import QtWidgets
-        app = QtWidgets.QApplication([])
-
-        # interpolate so we have alpha and gamma for all excitation pols
-        resampledAlpha, resampledGamma = jonesToFans(observedSidebands, J)
-
-        # And create the fan
-        f = FanDiagram(resampledAlpha, resampledGamma)
-        # And show the fann
-        if Plot:
-            f.show()
-            app.exec_()
-
-        # ToDo: Add code for making the fans look nicer
-
-        # You can save the fan with
-        if save_results:
-            f.export(saveFileName+"_fanDiagram.png")
-
-        # And to look at the ratios of the T matrix directly:
-        if Plot:
-            pg.figure("Magnitudes")
-            pg.plot(observedSidebands,
-                    np.abs(T[0,0,:]/T[1,1,:]),
-                    'o-',
-                    label="T++/T--")
-            pg.plot(observedSidebands,
-                    np.abs(T[0,1,:]/T[1,0,:]),
-                    'o-',
-                    label="T+-/T-+")
-
-            pg.figure("Angles")
-            pg.plot(observedSidebands,
-                    np.angle(T[0,0,:]/T[1,1,:], deg=True),
-                    'o-',
-                    label="T++/T--")
-            pg.plot(observedSidebands,
-                    np.angle(T[0,1,:]/T[1,0,:], deg=True),
-                    'o-',
-                    label="T+-/T-+")
-
-            pg.show()
-
-        # Ok this is sort of a quick way to get what I want for Origin plotting
-        # the relevant T matrix values
-        #
-        # ToDo: Format the text files to fit with the standards of other txt files
-
-        tmag = np.transpose(np.array([observedSidebands,np.abs(T[0,0,:]/T[1,1,:]),np.abs(T[0,1,:]/T[1,0,:])]))
-        tang = np.transpose(np.array([observedSidebands,np.angle(T[0,0,:]/T[1,1,:], deg = True),np.angle(T[0,1,:]/T[1,0,:], deg = True)]))
-
-        if save_results:
-            np.savetxt(saveFileName + "_{}.txt".format("TmatrixMag"), tmag, delimiter=',', header='SB Order, |T++/T--|, |T+-/T-+|')
-            np.savetxt(saveFileName + "_{}.txt".format("TmatrixAng"), tang, delimiter=',', header='SB Order, Angle(T++/T--), Angle(T+-/T-+)')
-
-        return totdop,alphaData,gammaData,J,T,tmag,tang
-
-    def fan_generator(file,observedSidebands,crystalAngle,saveFileName,save_results=False,Plot=True):
-        '''
-        This is a split off from fan_n_Tmat that just handles the fan. Apparently
-        some of the fan creation stops scripts from running so to avoid that we're
-        seperating the creation of the fan into this.
-
-        :param file: String of folder name containing 4 polarimetry scans
-        :param observedSidebands: np array of observed sidebands. Data will be
-            cropped such that these sidebands are included in everything.
-        :param crystalAngle: (Float) Angle of the sample from the 010 crystal face
-        :saveFileName: Str of what you want to call the text files to be saved
-        :save_results: Boolean controls if the fan diagram png is saved.
-
-        Returns:
-        :f: This is a fan object. I'm not really sure how to mess with these in
-            greater depth.
-        '''
-        # Make a list of folders for the fan data
-        datasets = hsg.natural_glob(file, "*")
-
-        # FanCompiler class keeps alpha and gamma data together for different pols
-        fanData = FanCompiler(observedSidebands)
-
-        for data in datasets:
-            laserParams, rawData = hsg.hsg_combine_qwp_sweep(data)
-            _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False, laserParams = laserParams,wantedSbs = observedSidebands)
-            # Add the new alpha and gamma sets to the fan class
-            fanData.addSet(fitDict)
-
-        alphaData, gammaData, _ = fanData.build()
-
-        from PyQt5 import QtWidgets
-        app = QtWidgets.QApplication([])
-
-        # interpolate so we have alpha and gamma for all excitation pols
-        resampledAlpha, resampledGamma = jonesToFans(observedSidebands, J)
-
-        # And create the fan
-        f = FanDiagram(resampledAlpha, resampledGamma)
-        # And show the fann
-        if Plot:
-            f.show()
-            app.exec_()
-
-        # ToDo: Add code for making the fans look nicer
-
-        # You can save the fan with
-        if save_results:
-            f.export(saveFileName+"_fanDiagram.png")
-
-        return f
-
-    def J_T_proc(file,observedSidebands,crystalAngle,saveFileName,save_results=False,Plot=False):
-        """
-        This function will take a folder of polarimetry scans and produce
-        DOP, alpha/gamma, J and T matrices, and Matrix Relations This is the same
-        as fan_n_Tmat but doesn't create the fan itself. Otherwise creates pretty
-        much everything one would need.
-
-        :param file: String of folder name containing 4 polarimetry scans
-        :param observedSidebands: np array of observed sidebands. Data will be
-            cropped such that these sidebands are included in everything.
-        :param crystalAngle: (Float) Angle of the sample from the 010 crystal face
-        :saveFileName: Str of what you want to call the text files to be saved
-        :save_results: Boolean controls if things are saved to txt files.
-            Currently saves DOP, alpha, gamma, J matrix, T matrix, Fan, and Matrix
-            Relations
-        :Plot: Boolean controls if plots of matrix relations are displayed
-
-        :return: DOP,alpha,gamma,J matrix, T matrix, Matrix Relations
-        """
-
-        # Make a list of folders for the fan data
-        datasets = hsg.natural_glob(file, "*")
-
-        # FanCompiler class keeps alpha and gamma data together for different pols
-        fanData = FanCompiler(observedSidebands)
-
-        # Initialize arrays for DOP
-        dop00 = np.array([])
-        dop45 = np.array([])
-        dop90 = np.array([])
-        dopn45 = np.array([])
-
-        for data in datasets:
-            laserParams, rawData = hsg.hsg_combine_qwp_sweep(data)
-            _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False, laserParams = laserParams,wantedSbs = observedSidebands)
-            # Add the new alpha and gamma sets to the fan class
-            fanData.addSet(fitDict)
-
-            # Get Stoke Parameters
-            s0 = fitDict['S0']
-            s1 = fitDict['S1']
-            s2 = fitDict['S2']
-            s3 = fitDict['S3']
-
-            # Trims the Stoke Parameters down to remove any sidebands beyond observedSidebands
-            # This does mean that it won't calculate the DOP for any extra sidebands, even if
-            # the software detected them.
-
-            while s0[-1,0] > observedSidebands[-1]:
-                s0 = s0[:-1,:]
-                s1 = s1[:-1,:]
-                s2 = s2[:-1,:]
-                s3 = s3[:-1,:]
-
-            # This actually calculates the DOP and DOP error
-            dop = s0
-            dop[1:,1] = np.sqrt((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)/s0[1:,1]
-            dop[1:,2] = np.sqrt( (s1[1:,1]**2)*(s1[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s2[1:,1]**2)*(s2[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s3[1:,1]**2)*(s3[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)) + ((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)*s0[1:,2]**2/s0[1:,1]**4
-
-            # Save according to alpha. This will break if you use an alpha not in the usual
-            #   0,45,90,-45 range.
-            if laserParams['lAlpha'] == 00:
-                dop00 = dop[1:,:]
-            if laserParams['lAlpha'] == 45:
-                dop45 = dop[1:,:]
-            if laserParams['lAlpha'] == 90:
-                dop90 = dop[1:,:]
-            if laserParams['lAlpha'] == -45:
-                dopn45 = dop[1:,:]
-
-        # Put into appropriate form for saving
-        totdop = [dop00,dop45[:,1:],dop90[:,1:],dopn45[:,1:]]
-        totdop = np.hstack(totdop)
-
-        # Saves as txt file with columns, SB Order, 00 DOP and error, 45 DOP and error,
-        # 90 DOP and error, -45 DOP and error
-        if save_results:
-            np.savetxt(saveFileName + "_DOP.txt", totdop, delimiter=',', header=
-                'SB Order, 00 DOP, 00 DOP Error, 45 DOP, 45 DOP Error, 90 DOP, 90 DOP Error, -45 DOP, -45 DOP Error')
-
-
-        # Building the fan compiler causes it to make  2D np arrays with the alpha and
-        # gamma angles where each column is a different alpha_NIR excitation
-        alphaData, gammaData, _ = fanData.build()
-
-        # save the alpha and gamma results
-        if save_results:
-            fanData.buildAndSave(saveFileName + "_{}.txt")
-
-        # Now we need to calculate the Jones matrices.
-        J = findJ(alphaData,gammaData)
-
-        # Get the T matrix:
-        T = makeT(J,crystalAngle)
-
-        # and save the matrices
-        if save_results:
-            saveT(J, observedSidebands, "{}_JMatrix.txt".format(saveFileName))
-            saveT(T, observedSidebands, "{}_TMatrix.txt".format(saveFileName))
-
-        # And to look at the ratios of the T matrix directly:
-        if Plot:
-            pg.figure("Magnitudes")
-            pg.plot(observedSidebands,
-                    np.abs(T[0,0,:]/T[1,1,:]),
-                    'o-',
-                    label="T++/T--")
-            pg.plot(observedSidebands,
-                    np.abs(T[0,1,:]/T[1,0,:]),
-                    'o-',
-                    label="T+-/T-+")
-
-            pg.figure("Angles")
-            pg.plot(observedSidebands,
-                    np.angle(T[0,0,:]/T[1,1,:], deg=True),
-                    'o-',
-                    label="T++/T--")
-            pg.plot(observedSidebands,
-                    np.angle(T[0,1,:]/T[1,0,:], deg=True),
-                    'o-',
-                    label="T+-/T-+")
-
-            pg.show()
-
-        # Ok this is sort of a quick way to get what I want for Origin plotting
-        # the relevant T matrix values
-        #
-        # ToDo: Format the text files to fit with the standards of other txt files
-
-        tmag = np.transpose(np.array([observedSidebands,np.abs(T[0,0,:]/T[1,1,:]),np.abs(T[0,1,:]/T[1,0,:])]))
-        tang = np.transpose(np.array([observedSidebands,np.angle(T[0,0,:]/T[1,1,:], deg = True),np.angle(T[0,1,:]/T[1,0,:], deg = True)]))
-
-        if save_results:
-            np.savetxt(saveFileName + "_{}.txt".format("TmatrixMag"), tmag, delimiter=',', header='SB Order, |T++/T--|, |T+-/T-+|')
-            np.savetxt(saveFileName + "_{}.txt".format("TmatrixAng"), tang, delimiter=',', header='SB Order, Angle(T++/T--), Angle(T+-/T-+)')
-
-        return totdop,alphaData,gammaData,J,T,tmag,tang
+def fan_n_Tmat(file,observedSidebands,crystalAngle,saveFileName,save_results=False,Plot=True):
+    """
+    This function will take a folder of polarimetry scans and produce
+    DOP, alpha/gamma, J and T matrices, Fan, and Matrix Relations
+
+    :param file: String of folder name containing 4 polarimetry scans
+    :param observedSidebands: np array of observed sidebands. Data will be
+        cropped such that these sidebands are included in everything.
+    :param crystalAngle: (Float) Angle of the sample from the 010 crystal face
+    :saveFileName: Str of what you want to call the text files to be saved
+    :save_results: Boolean controls if things are saved to txt files.
+        Currently saves DOP, alpha, gamma, J matrix, T matrix, Fan, and Matrix
+        Relations
+    :Plot: Boolean controls if plots are displayed
+
+    :return: DOP,alpha,gamma,J matrix, T matrix, Matrix Relations
+    """
+
+    # Make a list of folders for the fan data
+    datasets = hsg.natural_glob(file, "*")
+
+    # FanCompiler class keeps alpha and gamma data together for different pols
+    fanData = FanCompiler(observedSidebands)
+
+    # Initialize arrays for DOP
+    dop00 = np.array([])
+    dop45 = np.array([])
+    dop90 = np.array([])
+    dopn45 = np.array([])
+
+    for data in datasets:
+        laserParams, rawData = hsg.hsg_combine_qwp_sweep(data)
+        _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False, laserParams = laserParams,wantedSbs = observedSidebands)
+        # Add the new alpha and gamma sets to the fan class
+        fanData.addSet(fitDict)
+
+        # Get Stoke Parameters
+        s0 = fitDict['S0']
+        s1 = fitDict['S1']
+        s2 = fitDict['S2']
+        s3 = fitDict['S3']
+
+        # Trims the Stoke Parameters down to remove any sidebands beyond observedSidebands
+        # This does mean that it won't calculate the DOP for any extra sidebands, even if
+        # the software detected them.
+
+        while s0[-1,0] > observedSidebands[-1]:
+            s0 = s0[:-1,:]
+            s1 = s1[:-1,:]
+            s2 = s2[:-1,:]
+            s3 = s3[:-1,:]
+
+        # This actually calculates the DOP and DOP error
+        dop = s0
+        dop[1:,1] = np.sqrt((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)/s0[1:,1]
+        dop[1:,2] = np.sqrt( (s1[1:,1]**2)*(s1[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s2[1:,1]**2)*(s2[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s3[1:,1]**2)*(s3[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)) + ((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)*s0[1:,2]**2/s0[1:,1]**4
+
+        # Save according to alpha. This will break if you use an alpha not in the usual
+        #   0,45,90,-45 range.
+        if laserParams['lAlpha'] == 00:
+            dop00 = dop[1:,:]
+        if laserParams['lAlpha'] == 45:
+            dop45 = dop[1:,:]
+        if laserParams['lAlpha'] == 90:
+            dop90 = dop[1:,:]
+        if laserParams['lAlpha'] == -45:
+            dopn45 = dop[1:,:]
+
+    # Put into appropriate form for saving
+    totdop = [dop00,dop45[:,1:],dop90[:,1:],dopn45[:,1:]]
+    totdop = np.hstack(totdop)
+
+    # Saves as txt file with columns, SB Order, 00 DOP and error, 45 DOP and error,
+    # 90 DOP and error, -45 DOP and error
+    if save_results:
+        np.savetxt(saveFileName + "_DOP.txt", totdop, delimiter=',', header=
+            'SB Order, 00 DOP, 00 DOP Error, 45 DOP, 45 DOP Error, 90 DOP, 90 DOP Error, -45 DOP, -45 DOP Error')
+
+
+    # Building the fan compiler causes it to make  2D np arrays with the alpha and
+    # gamma angles where each column is a different alpha_NIR excitation
+    alphaData, gammaData, _ = fanData.build()
+
+    # save the alpha and gamma results
+    if save_results:
+        fanData.buildAndSave(saveFileName + "_{}.txt")
+
+    # Now we need to calculate the Jones matrices.
+    J = findJ(alphaData,gammaData)
+
+    # Get the T matrix:
+    T = makeT(J,crystalAngle)
+
+    # and save the matrices
+    if save_results:
+        saveT(J, observedSidebands, "{}_JMatrix.txt".format(saveFileName))
+        saveT(T, observedSidebands, "{}_TMatrix.txt".format(saveFileName))
+
+    #Now make a Fan Diagram:
+
+    from PyQt5 import QtWidgets
+    app = QtWidgets.QApplication([])
+
+    # interpolate so we have alpha and gamma for all excitation pols
+    resampledAlpha, resampledGamma = jonesToFans(observedSidebands, J)
+
+    # And create the fan
+    f = FanDiagram(resampledAlpha, resampledGamma)
+    # And show the fann
+    if Plot:
+        f.show()
+        app.exec_()
+
+    # ToDo: Add code for making the fans look nicer
+
+    # You can save the fan with
+    if save_results:
+        f.export(saveFileName+"_fanDiagram.png")
+
+    # And to look at the ratios of the T matrix directly:
+    if Plot:
+        pg.figure("Magnitudes")
+        pg.plot(observedSidebands,
+                np.abs(T[0,0,:]/T[1,1,:]),
+                'o-',
+                label="T++/T--")
+        pg.plot(observedSidebands,
+                np.abs(T[0,1,:]/T[1,0,:]),
+                'o-',
+                label="T+-/T-+")
+
+        pg.figure("Angles")
+        pg.plot(observedSidebands,
+                np.angle(T[0,0,:]/T[1,1,:], deg=True),
+                'o-',
+                label="T++/T--")
+        pg.plot(observedSidebands,
+                np.angle(T[0,1,:]/T[1,0,:], deg=True),
+                'o-',
+                label="T+-/T-+")
+
+        pg.show()
+
+    # Ok this is sort of a quick way to get what I want for Origin plotting
+    # the relevant T matrix values
+    #
+    # ToDo: Format the text files to fit with the standards of other txt files
+
+    tmag = np.transpose(np.array([observedSidebands,np.abs(T[0,0,:]/T[1,1,:]),np.abs(T[0,1,:]/T[1,0,:])]))
+    tang = np.transpose(np.array([observedSidebands,np.angle(T[0,0,:]/T[1,1,:], deg = True),np.angle(T[0,1,:]/T[1,0,:], deg = True)]))
+
+    if save_results:
+        np.savetxt(saveFileName + "_{}.txt".format("TmatrixMag"), tmag, delimiter=',', header='SB Order, |T++/T--|, |T+-/T-+|')
+        np.savetxt(saveFileName + "_{}.txt".format("TmatrixAng"), tang, delimiter=',', header='SB Order, Angle(T++/T--), Angle(T+-/T-+)')
+
+    return totdop,alphaData,gammaData,J,T,tmag,tang
+
+def fan_generator(file,observedSidebands,crystalAngle,saveFileName,save_results=False,Plot=True):
+    '''
+    This is a split off from fan_n_Tmat that just handles the fan. Apparently
+    some of the fan creation stops scripts from running so to avoid that we're
+    seperating the creation of the fan into this.
+
+    :param file: String of folder name containing 4 polarimetry scans
+    :param observedSidebands: np array of observed sidebands. Data will be
+        cropped such that these sidebands are included in everything.
+    :param crystalAngle: (Float) Angle of the sample from the 010 crystal face
+    :saveFileName: Str of what you want to call the text files to be saved
+    :save_results: Boolean controls if the fan diagram png is saved.
+
+    Returns:
+    :f: This is a fan object. I'm not really sure how to mess with these in
+        greater depth.
+    '''
+    # Make a list of folders for the fan data
+    datasets = hsg.natural_glob(file, "*")
+
+    # FanCompiler class keeps alpha and gamma data together for different pols
+    fanData = FanCompiler(observedSidebands)
+
+    for data in datasets:
+        laserParams, rawData = hsg.hsg_combine_qwp_sweep(data)
+        _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False, laserParams = laserParams,wantedSbs = observedSidebands)
+        # Add the new alpha and gamma sets to the fan class
+        fanData.addSet(fitDict)
+
+    alphaData, gammaData, _ = fanData.build()
+
+    from PyQt5 import QtWidgets
+    app = QtWidgets.QApplication([])
+
+    # interpolate so we have alpha and gamma for all excitation pols
+    resampledAlpha, resampledGamma = jonesToFans(observedSidebands, J)
+
+    # And create the fan
+    f = FanDiagram(resampledAlpha, resampledGamma)
+    # And show the fann
+    if Plot:
+        f.show()
+        app.exec_()
+
+    # ToDo: Add code for making the fans look nicer
+
+    # You can save the fan with
+    if save_results:
+        f.export(saveFileName+"_fanDiagram.png")
+
+    return f
+
+def J_T_proc(file,observedSidebands,crystalAngle,saveFileName,save_results=False,Plot=False):
+    """
+    This function will take a folder of polarimetry scans and produce
+    DOP, alpha/gamma, J and T matrices, and Matrix Relations This is the same
+    as fan_n_Tmat but doesn't create the fan itself. Otherwise creates pretty
+    much everything one would need.
+
+    :param file: String of folder name containing 4 polarimetry scans
+    :param observedSidebands: np array of observed sidebands. Data will be
+        cropped such that these sidebands are included in everything.
+    :param crystalAngle: (Float) Angle of the sample from the 010 crystal face
+    :saveFileName: Str of what you want to call the text files to be saved
+    :save_results: Boolean controls if things are saved to txt files.
+        Currently saves DOP, alpha, gamma, J matrix, T matrix, Fan, and Matrix
+        Relations
+    :Plot: Boolean controls if plots of matrix relations are displayed
+
+    :return: DOP,alpha,gamma,J matrix, T matrix, Matrix Relations
+    """
+
+    # Make a list of folders for the fan data
+    datasets = hsg.natural_glob(file, "*")
+
+    # FanCompiler class keeps alpha and gamma data together for different pols
+    fanData = FanCompiler(observedSidebands)
+
+    # Initialize arrays for DOP
+    dop00 = np.array([])
+    dop45 = np.array([])
+    dop90 = np.array([])
+    dopn45 = np.array([])
+
+    for data in datasets:
+        laserParams, rawData = hsg.hsg_combine_qwp_sweep(data)
+        _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False, laserParams = laserParams,wantedSbs = observedSidebands)
+        # Add the new alpha and gamma sets to the fan class
+        fanData.addSet(fitDict)
+
+        # Get Stoke Parameters
+        s0 = fitDict['S0']
+        s1 = fitDict['S1']
+        s2 = fitDict['S2']
+        s3 = fitDict['S3']
+
+        # Trims the Stoke Parameters down to remove any sidebands beyond observedSidebands
+        # This does mean that it won't calculate the DOP for any extra sidebands, even if
+        # the software detected them.
+
+        while s0[-1,0] > observedSidebands[-1]:
+            s0 = s0[:-1,:]
+            s1 = s1[:-1,:]
+            s2 = s2[:-1,:]
+            s3 = s3[:-1,:]
+
+        # This actually calculates the DOP and DOP error
+        dop = s0
+        dop[1:,1] = np.sqrt((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)/s0[1:,1]
+        dop[1:,2] = np.sqrt( (s1[1:,1]**2)*(s1[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s2[1:,1]**2)*(s2[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2) + (s3[1:,1]**2)*(s3[1:,2]**2)/(s0[1:,1]**2)/((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)) + ((s1[1:,1])**2+(s2[1:,1])**2+(s3[1:,1])**2)*s0[1:,2]**2/s0[1:,1]**4
+
+        # Save according to alpha. This will break if you use an alpha not in the usual
+        #   0,45,90,-45 range.
+        if laserParams['lAlpha'] == 00:
+            dop00 = dop[1:,:]
+        if laserParams['lAlpha'] == 45:
+            dop45 = dop[1:,:]
+        if laserParams['lAlpha'] == 90:
+            dop90 = dop[1:,:]
+        if laserParams['lAlpha'] == -45:
+            dopn45 = dop[1:,:]
+
+    # Put into appropriate form for saving
+    totdop = [dop00,dop45[:,1:],dop90[:,1:],dopn45[:,1:]]
+    totdop = np.hstack(totdop)
+
+    # Saves as txt file with columns, SB Order, 00 DOP and error, 45 DOP and error,
+    # 90 DOP and error, -45 DOP and error
+    if save_results:
+        np.savetxt(saveFileName + "_DOP.txt", totdop, delimiter=',', header=
+            'SB Order, 00 DOP, 00 DOP Error, 45 DOP, 45 DOP Error, 90 DOP, 90 DOP Error, -45 DOP, -45 DOP Error')
+
+
+    # Building the fan compiler causes it to make  2D np arrays with the alpha and
+    # gamma angles where each column is a different alpha_NIR excitation
+    alphaData, gammaData, _ = fanData.build()
+
+    # save the alpha and gamma results
+    if save_results:
+        fanData.buildAndSave(saveFileName + "_{}.txt")
+
+    # Now we need to calculate the Jones matrices.
+    J = findJ(alphaData,gammaData)
+
+    # Get the T matrix:
+    T = makeT(J,crystalAngle)
+
+    # and save the matrices
+    if save_results:
+        saveT(J, observedSidebands, "{}_JMatrix.txt".format(saveFileName))
+        saveT(T, observedSidebands, "{}_TMatrix.txt".format(saveFileName))
+
+    # And to look at the ratios of the T matrix directly:
+    if Plot:
+        pg.figure("Magnitudes")
+        pg.plot(observedSidebands,
+                np.abs(T[0,0,:]/T[1,1,:]),
+                'o-',
+                label="T++/T--")
+        pg.plot(observedSidebands,
+                np.abs(T[0,1,:]/T[1,0,:]),
+                'o-',
+                label="T+-/T-+")
+
+        pg.figure("Angles")
+        pg.plot(observedSidebands,
+                np.angle(T[0,0,:]/T[1,1,:], deg=True),
+                'o-',
+                label="T++/T--")
+        pg.plot(observedSidebands,
+                np.angle(T[0,1,:]/T[1,0,:], deg=True),
+                'o-',
+                label="T+-/T-+")
+
+        pg.show()
+
+    # Ok this is sort of a quick way to get what I want for Origin plotting
+    # the relevant T matrix values
+    #
+    # ToDo: Format the text files to fit with the standards of other txt files
+
+    tmag = np.transpose(np.array([observedSidebands,np.abs(T[0,0,:]/T[1,1,:]),np.abs(T[0,1,:]/T[1,0,:])]))
+    tang = np.transpose(np.array([observedSidebands,np.angle(T[0,0,:]/T[1,1,:], deg = True),np.angle(T[0,1,:]/T[1,0,:], deg = True)]))
+
+    if save_results:
+        np.savetxt(saveFileName + "_{}.txt".format("TmatrixMag"), tmag, delimiter=',', header='SB Order, |T++/T--|, |T+-/T-+|')
+        np.savetxt(saveFileName + "_{}.txt".format("TmatrixAng"), tang, delimiter=',', header='SB Order, Angle(T++/T--), Angle(T+-/T-+)')
+
+    return totdop,alphaData,gammaData,J,T,tmag,tang
