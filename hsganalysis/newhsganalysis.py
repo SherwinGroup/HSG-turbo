@@ -2809,7 +2809,7 @@ class FullHighSideband(FullSpectrum):
             print("Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname)))
 
 class TheoryMatrix(object):
-    def __init__(self,ThzField,Thzomega,nir_wl,dephase):
+    def __init__(self,ThzField,Thzomega,nir_wl,dephase,detune):
         '''
         This class is designed to handle everything for creating theory
         matrices and comparing them to experiement.
@@ -2821,13 +2821,17 @@ class TheoryMatrix(object):
         :ThzField: Give in kV/cm.
         :Thzomega: Give in Ghz.
         :nir_wl: Give in nanometers.
-        :dephase: Detuning, give in meV
+        :dephase: Dephasing, give in meV.
+            Should roughly be the width of absorption peaks
+        :detune: Detuning, give in eV.
+            Difference between NIR excitation and band gap
         '''
 
         self.F = ThzField * 10**5
         self.Thz_w = Thzomega * 10**9 * 2*np.pi
         self.nir_wl = nir_wl * 10**(-9)
         self.dephase = dephase* 1.602*10**(-22)
+        self.detune = detune*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
 
@@ -2913,6 +2917,58 @@ class TheoryMatrix(object):
 
         return u
 
+    def phonon_dephase(self,n):
+        '''
+        Step function that will compare the energy gained by the sideband to the
+        energy of the phonon (36.6meV). If the energy is less than the phonon,
+        return zero. If it's more return the scattering rate as determined by
+        Constantinou and Ridley (1990).
+
+        I ran the numbers and got something a little weird, so there's that
+        '''
+
+        thz_omega = self.Thz_w
+        hbar = 1.055*10**(-34)
+        thz_ev = n*hbar*thz_omega/(1.602*10**-22) # converts to meV
+        phonon_ev = 36.6 # phonon energy in mev
+
+        emass = 9.109*10**(-31) # bare electron mass in kg
+        m_cond = 0.0665 # Effective mass of conduction band
+        m_eff = emass*m_cond
+
+
+        # if thz_ev< phonon_ev:
+        if thz_ev<phonon_ev:
+            # print('No phonon for order',n)
+            return 0
+
+        else:
+            # epi_length = 500*10**(-9)
+            # # k_n = np.sqrt(n*hbar*thz_omega*2*m_eff)/hbar
+            # k_n = np.sqrt(phonon_ev*(1.06*10**(-22))*2*m_eff)/hbar
+            # # This is approximating the k for each sideband as being constant,
+            # #   taking the k to be the electron k at the energy of the phonon.
+            # W0 = 7.7*10**12 # characteristic rate
+            # Q0 = 126.375
+            #
+            # kpart = 1/np.sqrt(
+            #     np.pi**4+2*np.pi**2*2*np.pi*( 2*(k_n*epi_length)**2-Q0**2 )+np.pi**4 )
+            # energypart = 71.3 # I just calculated this since it's constant
+            # pi_part = 1.327 # Again just calculated this
+            #
+            # fullW = W0*0.5*energypart*pi_part*kpart*(1)
+            # # part in parentheses has no theory backing, just trying it out
+            # # fullW = 0
+
+            # Trying out W as 1/100fs
+            fullW = 1*10**13
+            # print('Phonon for order',n)
+
+            return fullW
+
+
+
+
     def integrand(self,x,mu,n):
         '''
         Calculate the integrand to integrate A_n+- in two_band_model pdf eqn 13.
@@ -2935,8 +2991,10 @@ class TheoryMatrix(object):
         F = self.F
         w = self.Thz_w
         dephase = self.dephase
+        detune = self.detune
+        pn_dephase = self.phonon_dephase(n)
 
-        exp_arg = (-dephase*x/(hbar*w) + 1j*self.Up(mu)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x)
+        exp_arg = (-dephase*x/(hbar*w)-pn_dephase*x/w + 1j*self.Up(mu)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x-1j*detune*x/(hbar*w))
         # Argument of the exponential part of the integrand
 
         bessel_arg = x*self.Up(mu)*self.alpha_value(x)*self.gamma_value(x)/(hbar*w)
@@ -3056,20 +3114,26 @@ class TheoryMatrix(object):
 
         Field = self.F # THz field
 
+        hbar = 1.055*10**(-34) # hbar in Joule*seconds
+        dephase = self.dephase
+        int_cutoff = hbar*omega_thz/dephase*10
+        # This cuts off the integral when x* dephase/hbaromega = 10
+        # Therefore the values of the integrand will be reduced by a value
+        # of e^(-10) which is about 4.5*10^(-5)
+
         re_int_ref = intgt.quad(lambda x: np.real(self.integrand(
-            x,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
+            x,mu_p,n_ref)),0,int_cutoff,limit = 10000)[0]
         re_int_p = intgt.quad(lambda x: np.real(self.integrand(
-            x,mu_p,n)),0,np.inf,limit = 10000)[0]
+            x,mu_p,n)),0,int_cutoff,limit = 10000)[0]
         re_int_m = intgt.quad(lambda x: np.real(self.integrand(
-            x,mu_m,n)),0,np.inf,limit = 10000)[0]
+            x,mu_m,n)),0,int_cutoff,limit = 10000)[0]
         # Ok so these integrands are complex valued, but the intgt.quad integration
         #   does not work with that. So we split the integral up into two parts,
         #   real and imaginary parts. These lines calculate the real part for the
         #   reference, plus, and minus integrals.
         # The integrals currently are limited to 10,000 iterations. No clue if that's
         #   a good amount or what. We could potentially make this simpler by doing
-        #   a trapezoidal rule but I don't know how well that works with infinite
-        #   integrals. We would need to define an upper cutoff.
+        #   a trapezoidal rule.
         # We define the lambda function here to set all the values of the integrand
         #   function we want except for the variable of integration x
 
@@ -3153,6 +3217,7 @@ class TheoryMatrix(object):
 
         dephase = self.dephase
         lambda_nir = self.nir_wl
+        omega_nir = 2.998*10**8/(self.nir_wl) *2*np.pi
         w_thz = self.Thz_w
         F = self.F
 
@@ -3162,12 +3227,16 @@ class TheoryMatrix(object):
             eta_p,eta_m = self.normalized_integrals(gamma1,gamma2,n,n_ref)
             # calculates eta from the normalized_integrals function
 
-            exp_p = np.abs(Jexp[0,0,idx])**2
-            exp_m = np.abs(Jexp[1,1,idx]-Jexp[0,0,idx])**2/(9/16)
-            # calculates the experimental plus and minus values
+            prefactor = ((omega_nir + 2*n*w_thz)**2)/((omega_nir + 2*n_ref*w_thz)**2)
 
-            costs += np.sqrt( np.abs(eta_p-exp_p)**2 + np.abs(eta_m-exp_m)**2 )
+            exp_p = prefactor*np.abs(Jexp[0,0,idx])**2
+            exp_m = prefactor*np.abs(Jexp[1,1,idx]-Jexp[0,0,idx])**2/(9/16)
+            # calculates the experimental plus and minus values
+            # 1/9/20 added prefactor to these bad boys
+
+            costs += np.sqrt( np.abs(eta_p/eta_m-exp_p/exp_m)**2 )
             # Adds the cost function for this sideband to the overall cost function
+            # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
 
             this_etas = np.array([n,eta_p,exp_p,eta_m,exp_m])
             eta_list = np.vstack((eta_list,this_etas))
@@ -3175,7 +3244,11 @@ class TheoryMatrix(object):
         self.iterations += 1
         # Ups the iterations counter
 
-        g_n_c = str(self.iterations)+','+str(gamma1)+','+str(gamma2)+','+str(costs)+'\n'
+        g1rnd = round(gamma1,3)
+        g2rnd = round(gamma2,3)
+        # Round gamma1,gamma2 to remove float rounding bullshit
+
+        g_n_c = str(self.iterations)+','+str(g1rnd)+','+str(g2rnd)+','+str(costs)+'\n'
         # String version of iteration, gamma1, gamma2, cost with a new line
         gc_file = open(gc_fname,'a') #opens the gamma/cost file in append mode
         gc_file.write(g_n_c) # writes the new line to the file
@@ -3186,7 +3259,8 @@ class TheoryMatrix(object):
         etas_header += 'unitless, unitless, unitless, unitless, unitless \n'
         # Creates origin frienldy header for the eta's
 
-        eta_fname = 'eta_g1_' + str(gamma1) + '_g2_' + str(gamma2) + r'.txt'
+
+        eta_fname = 'eta_g1_' + str(g1rnd) + '_g2_' + str(g2rnd) + r'.txt'
         eta_path = os.path.join(eta_folder,eta_fname)
         #creates the file for this run of etas
 
@@ -3257,6 +3331,13 @@ class TheoryMatrix(object):
         gamma_cost_array = np.array([0,0,0])
         # Initialize the gamma cost array
 
+        gammas_costs = np.array([])
+        # This is just for initializing the gamma costs file
+
+        np.savetxt(gc_fname, gammas_costs, delimiter = ',',
+            header = gammacosts_header, comments = '')
+        # create the gamma cost file
+
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
                 cost = self.cost_func(gamma1,gamma2,observedSidebands,
@@ -3268,14 +3349,19 @@ class TheoryMatrix(object):
 
         gamma_cost_array = gamma_cost_array[1:,:]
 
-        if save_results:
-            sweepcosts_header = "#\n"*100
-            sweepcosts_header += 'Gamma1, Gamma2, Cost Function \n'
-            sweepcosts_header += 'unitless, unitless, unitless \n'
-
-            sweep_name = 'sweep_costs_' + gc_fname
-            np.savetxt(sweep_name,gamma_cost_array,delimiter = ',',
-                header = sweepcosts_header, comments = '')
+        # if save_results:
+        #     sweepcosts_header = "#\n"*100
+        #     sweepcosts_header += 'Gamma1, Gamma2, Cost Function \n'
+        #     sweepcosts_header += 'unitless, unitless, unitless \n'
+        #
+        #     sweep_name = 'sweep_costs_' + gc_fname
+        #     np.savetxt(sweep_name,gamma_cost_array,delimiter = ',',
+        #         header = sweepcosts_header, comments = '')
+        # Ok so right now I think I am going to get rid of saving this file
+        #   since it has the same information as the file that is saved in
+        #   cost_func but that file is updated every interation where this
+        #   one only works at the end. So if the program gets interrupted
+        #   the other one will still give you some information.
 
         return gamma_cost_array
 
@@ -3890,13 +3976,13 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             # We want to do Fourier Analysis
             # I've hard coded the maximum expected variance from QWP retardance to be
             # 5 degrees (converted to radians bc of small angle approximation).
-            # Not sure how to deal with the fact that this method leaves no variance 
+            # Not sure how to deal with the fact that this method leaves no variance
             # for the S3 paramter.
             f0 = 0
             f2 = 0
             f4 = 0
             df0 = 0
-            df2 = 0 
+            df2 = 0
             df4 = 0
             for k in range(0,16,1):
                 f0 = f0 + allSbData[k+1,sbIdx]
@@ -3905,11 +3991,11 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
                 df0 = df0 + allSbData[k+1, sbIdx+1]
                 df2 = df2 + allSbData[k+1,sbIdx+1]*np.exp(-1j*4*np.pi*k/16)
                 df4 = df4 + allSbData[k+1,sbIdx]*np.exp(-1j*8*np.pi*k/16)
-            
-            
 
 
-            phi = 5*2*np.pi/180 
+
+
+            phi = 5*2*np.pi/180
             # Generate the Stokes parameters from the Fourier Components
             S0 = (f0 - 2*f4.real)/(2*np.pi)
             S1 = 2*f4.real/(np.pi)
@@ -3928,7 +4014,7 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             thisGammaError = np.sqrt(d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + ((d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
             (S1 ** 2 + S2 ** 2))) / (S1 ** 2 + S2 ** 2 + S3 ** 2)
             thisDOP = np.sqrt(S1 ** 2 + S2 ** 2 + S3 ** 2) / S0
-            thisDOPerror = np.sqrt(((S1**2*d1**2 + S2**2*d2**2 + S3**2*d3**2))/(S1**2 + S2**2 + S3**2) + (S1**2 + S2**2 + S3**2)*d0**2/(S0**2))/(S0**2) 
+            thisDOPerror = np.sqrt(((S1**2*d1**2 + S2**2*d2**2 + S3**2*d3**2))/(S1**2 + S2**2 + S3**2) + (S1**2 + S2**2 + S3**2)*d0**2/(S0**2))/(S0**2)
 
             # Append The stokes parameters and errors to the dictionary output.
             sbFitsDict["S0"].append([sbNum, S0, d0])
