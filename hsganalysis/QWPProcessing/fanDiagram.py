@@ -190,7 +190,7 @@ class FanDiagram(QtGui.QWidget):
         # causes a conflict because the title is placed with respect to the
         # view region)
         self.view.addItem(self.titleItem, ignoreBounds=True)
-
+        
         self.show()
         # Arbitrary forcing updates to try and track down why some things don't
         # update correctly
