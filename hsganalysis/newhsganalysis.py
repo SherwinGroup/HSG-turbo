@@ -2835,6 +2835,7 @@ class TheoryMatrix(object):
         self.detune = detune*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
+        self.max_iter = 0
 
     def mu_generator(self,gamma1,gamma2):
         '''
@@ -2962,8 +2963,11 @@ class TheoryMatrix(object):
             # # fullW = 0
 
             # Trying out W as 1/100fs
-            fullW = 1*10**13
+            # fullW = 1*10**13
             # print('Phonon for order',n)
+
+            # Turning phonon off for now
+            fullW = 0
 
             return fullW
 
@@ -2995,7 +2999,7 @@ class TheoryMatrix(object):
         detune = self.detune
         pn_dephase = self.phonon_dephase(n)
 
-        exp_arg = (-dephase*x/(hbar*w)-pn_dephase*x/w + 1j*self.Up(mu)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x-1j*detune*x/(hbar*w))
+        exp_arg = (-dephase*x/(hbar*w)-pn_dephase*x/w + 1j*x*self.Up(mu)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x-1j*detune*x/(hbar*w))
         # Argument of the exponential part of the integrand
 
         bessel_arg = x*self.Up(mu)*self.alpha_value(x)*self.gamma_value(x)/(hbar*w)
@@ -3081,7 +3085,8 @@ class TheoryMatrix(object):
         constants. So you need a reference integral.
 
         eta(n)+- =
-        (w_nir + 2*n*w_thz)^2/(w_nir + 2*n_ref*w_thz)^2 * (int(n)+-)^2/(int(n_ref)+)^2
+        (w_nir + 2*n*w_thz)^2/(w_nir + 2*n_ref*w_thz)^2 *
+        (mu_+-/mu_ref)^2 * (int(n)+-)^2/(int(n_ref)+)^2
 
         This takes gamma1 and gamma2 and gives the effective mass via mu_generator.
         It then calculates the normalized integrals for both mu's and gives eta,
@@ -3155,9 +3160,11 @@ class TheoryMatrix(object):
         prefactor = ((omega_nir + 2*n*omega_thz)**2)/((omega_nir + 2*n_ref*omega_thz)**2)
         # This prefactor is the ratio of energy of the nth sideband to the reference
 
+        m_pre = (mu_m/mu_p)**2
+        # There is a term of mu/mu_ref in the eta expression. For the
 
         eta_p = prefactor*(np.abs(int_p)**2)/(np.abs(int_ref)**2)
-        eta_m = prefactor*(np.abs(int_m)**2)/(np.abs(int_ref)**2)
+        eta_m = prefactor*m_pre*(np.abs(int_m)**2)/(np.abs(int_ref)**2)
         # Putting everthing together in one tasty little result
 
         return eta_p,eta_m
@@ -3247,7 +3254,8 @@ class TheoryMatrix(object):
 
         g1rnd = round(gamma1,3)
         g2rnd = round(gamma2,3)
-        # Round gamma1,gamma2 to remove float rounding bullshit
+        costs_rnd = round(costs,5)
+        # Round gamma1,gamma2,costs to remove float rounding bullshit
 
         g_n_c = str(self.iterations)+','+str(g1rnd)+','+str(g2rnd)+','+str(costs)+'\n'
         # String version of iteration, gamma1, gamma2, cost with a new line
@@ -3255,13 +3263,19 @@ class TheoryMatrix(object):
         gc_file.write(g_n_c) # writes the new line to the file
         gc_file.close() # closes the file
 
-        etas_header = "#\n"*100
+        etas_header = "#\n"*95
+        etas_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
+        etas_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
+        etas_header += f'# Field Strength: {self.F/(10**5)} kV/cm \n'
+        etas_header += f'# THz Frequency: {self.Thz_w/(10**9 * 2*np.pi)} GHz \n'
+        etas_header += f'# NIR Wavelength: {self.nir_wl/(10**(-9))} nm \n'
         etas_header += 'sb order, eta_plus theory, eta_plus experiment, eta_minus thoery, eta_minus experiment \n'
         etas_header += 'unitless, unitless, unitless, unitless, unitless \n'
         # Creates origin frienldy header for the eta's
 
 
-        eta_fname = 'eta_g1_' + str(g1rnd) + '_g2_' + str(g2rnd) + r'.txt'
+        # eta_fname = 'eta_g1_' + str(g1rnd) + '_g2_' + str(g2rnd) + r'.txt'
+        eta_fname = f'eta_g1_{g1rnd}_g2_{g2rnd}.txt'
         eta_path = os.path.join(eta_folder,eta_fname)
         #creates the file for this run of etas
 
@@ -3270,14 +3284,14 @@ class TheoryMatrix(object):
             header = etas_header, comments = '') #save the etas for these gammas
 
 
-        t_taken = time.time()-t_start # calcuates time taken for this run
+        t_taken = round(time.time()-t_start,5) # calcuates time taken for this run
 
         print("  ")
         print("---------------------------------------------------------------------")
         print("  ")
-        print('Iteration number ',self.iterations,' done')
-        print('for gamma1, gamma2 = ',gamma1,gamma2)
-        print('Cost function is = ',costs)
+        print(f'Iteration number {self.iterations} / {self.max_iter} done')
+        print('for gamma1, gamma2 = ',g1rnd,g2rnd)
+        print('Cost function is = ',costs_rnd)
         print('This calculation took ',t_taken,' seconds')
         print("  ")
         print("---------------------------------------------------------------------")
@@ -3329,11 +3343,23 @@ class TheoryMatrix(object):
         w_thz = self.Thz_w
         F = self.F
 
+        self.max_iter = len(gamma1_array)*len(gamma2_array)
+
         gamma_cost_array = np.array([0,0,0])
         # Initialize the gamma cost array
 
         gammas_costs = np.array([])
         # This is just for initializing the gamma costs file
+
+        gammacosts_header = "#\n"*95
+        gammacosts_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
+        gammacosts_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
+        gammacosts_header += f'# Field Strength: {self.F/(10**5)} kV/cm \n'
+        gammacosts_header += f'# THz Frequency: {self.Thz_w/(10**9 * 2*np.pi)} GHz \n'
+        gammacosts_header += f'# NIR Wavelength: {self.nir_wl/(10**(-9))} nm \n'
+        gammacosts_header += 'Iteration, Gamma1, Gamma2, Cost Function \n'
+        gammacosts_header += 'unitless, unitless, unitless, unitless \n'
+        # Creates origin frienldy header for gamma costs
 
         np.savetxt(gc_fname, gammas_costs, delimiter = ',',
             header = gammacosts_header, comments = '')
