@@ -6460,7 +6460,16 @@ def create_full_spectra(folder_path, skipLaser = True, *args, **kwargs):
     return output
 
 class Berry(object):
-    def _init_(self, g1, g2, g3):
+    """
+    w = [Theta, k, (k,n)]
+    v = [Theta, k, (u1...u4,x,y,z), (uij)]
+    du = [k, n, m, i]
+    A = [Theta, k, n, m, i]
+    dA = [k, n, m, i, j] = djAi
+    O = [Theta, k, n, m, i, j]
+    Phase = [Theta, n]
+    """
+    def __init__(self, g1, g2, g3, steps, angSteps, below=True):
         """
        The Berry Class is used for calculating the Berry physics from the
        defined parameters of the Luttinger Hamiltonian.
@@ -6473,174 +6482,194 @@ class Berry(object):
        :param g2 - the Gamma2 Luttinger parameter
        :param g3 - the Gamma3 Luttinger parameter
         """
-        self.g1 = g1
-        self.g2 = g2
-        self.g3 = g3
+        # Qile's way of calculating the Kane gamma factors
+        P = 10.493      #eV*A, Conduction band fit of y=p*x^2
+        a_bhor = 0.53   #A, Bohr Radius
+        ryd = 13.6      #eV, Rydberg
+        P_eff = (P/a_bhor)**2/ryd
+        E_g = 1.506     #eV, Gap Energy
+        # Kane Parameters
+        g18 = g1 - P_eff/(3*E_g)
+        g28 = g2 - P_eff/(6*E_g)
+        g38 = g3 - P_eff/(6*E_g)
+        self.g1 = g18
+        self.g2 = g28
+        self.g3 = g38
 
-    def Luttinger(self,theta,steps,BZfrac,above=False):
-    '''
-    Calculates the Luttinger Hamiltonian based on the input parameters
+        self.st = steps
+        self.ang = angSteps
+        self.below = below
 
-    :theta: Sample orientation with respect to the [010] Axis
-    :step: Number of steps to be calculated in Hamiltonian
-    :BZfrac: The fraction of the Brillouin Zone calculated
-    :above: Excite below or above the gap of GaAs
-    '''
-    self.th = theta*pi/180    #radians
-    self.st = steps
-    self.BZf = BZfrac
-    # Spin Matrices
-    Sx = np.array([[0,np.sqrt(3)/2, 0,0],[np.sqrt(3)/2,0,1,0],
-        [0,1,0,np.sqrt(3)/2],[0,0,np.sqrt(3)/2,0]])
-    Sy = np.array([[0,np.sqrt(3)/(2*1j), 0,0],[-np.sqrt(3)/(2*1j),0,(1/1j),0],
-        [0,-(1/1j),0,np.sqrt(3)/(2*1j)],[0,0,-np.sqrt(3)/(2*1j),0]])
-    Sz = np.array([[3/2,0,0,0],[0,1/2,0,0],[0,0,-1/2,0],[0,0,0,-3/2]])
+        self.w = np.zeros((self.ang, self.st,5))
+        self.v = np.zeros((self.ang, self.st,7,4))
+        if below:
+            self.A = np.zeros((self.ang,self.st,4,4,2))
+            self.O = np.zeros((self.ang,self.st,4,4,2,2))
+        else:
+            self.A = np.zeros((self.ang,self.st,4,4,3))
+            self.O = np.zeros((self.ang,self.st,4,4,3,3))
 
-    # Pauli Matrices
-    p0 = np.array([[1,0],[0,1]])
-    px = np.array([[0,1],[1,0]])
-    py = np.array([[0,-1j],[1j,0]])
-    pz = np.array([[1,0],[0,-1]])
 
-    # Fraction of Brilioun Zone Traversed
-    kmax = self.BZf * 2*np.pi/(5.6325)
-    hbar = 1.054572 * 10**(-34) #m^2 kg/s
-    hbarc = 0.197326 * 10**(4) #Angstrom eV
-    eMass = 9.109383 #kg
-    NIRWavelength = 8230 #Angstrom
+    def Luttinger(self,theta,BZfrac):
+        '''
+        Calculates the Luttinger Hamiltonian based on the input parameters
 
-    h = np.zeros((self.st,4,4))
-    w = np.zeros((self.st,5,1))
-    v = np.zeros((self.st,4,4))
-    i=0
+        :theta: Sample orientation with respect to the [010] Axis
+        :BZfrac: The fraction of the Brillouin Zone calculated
+        '''
+        th = theta*pi/180    #radians
+        BZfrac
+        angIdx = np.int(theta*self.ang/360)
+        # Spin Matrices
+        Sx = np.array([[0,np.sqrt(3)/2, 0,0],[np.sqrt(3)/2,0,1,0],
+            [0,1,0,np.sqrt(3)/2],[0,0,np.sqrt(3)/2,0]])
+        Sy = np.array([[0,np.sqrt(3)/(2*1j), 0,0],[-np.sqrt(3)/(2*1j),0,(1/1j),0],
+            [0,-(1/1j),0,np.sqrt(3)/(2*1j)],[0,0,-np.sqrt(3)/(2*1j),0]])
+        Sz = np.array([[3/2,0,0,0],[0,1/2,0,0],[0,0,-1/2,0],[0,0,0,-3/2]])
 
-    if above:
-        for k in np.arange(0,kmax, kmax/self.st):
-            kx = k*np.cos(self.th)
-            ky = k*np.sin(self.th)
-            kz = (1/(2*np.pi*NIRWavelength))-(1/(2*np.pi*8225))
-            h[i,:,:] = (np.array(-hbar**2/(2*eMass)*((self.g1+5/2*self.g2)*k**2 - 2*g3*(kx*Sx+ky*Sy+kz*Sz)**2 + 
-                2*(self.g3-self.g2)*(kx**2*Sx**2+ky**2*Sy**2+kz**2*Sz**2))))
-            w[i,1:5,0], v[i,:,:] = np.linalg.eig(h[i,:,:]) 
-            w[i,0,0] = k
-            i = i+1            
-    else:
-        for k in np.arange(0,kmax,kmax/self.st):
-            kx = k*np.cos(self.th)
-            ky = k*np.sin(self.th)
-            h[i,0:2,0:2] = np.array(-hbar**2/(2*eMass)*(self.g1*(kx**2+ky**2)*p0 - 
-                2*self.g2*(np.sqrt(3)*(kx**2-ky**2)/2)*px + 2*np.sqrt(3)*self.g3*kx*ky*py + self.g2*(kx**2+ky**2)))
-            h[i,2:4,2:4] = np.array(-hbar**2/(2*eMass)*(self.g1*(kx**2+ky**2)*p0 - 
-                self.g2*(np.sqrt(3)*(kx**2-ky**2))*px - 2*np.sqrt(3)*self.g3*kx*ky*py - self.g2*(kx**2+ky**2)))
-            w[i,1:5,0], v[i,:,:] = np.linalg.eig(h[i,:,:])
-            w[i,0,0] = k
-            i = i+1
-    
-    return w,v
+        # Pauli Matrices
+        p0 = np.array([[1,0],[0,1]])
+        px = np.array([[0,1],[1,0]])
+        py = np.array([[0,-1j],[1j,0]])
+        pz = np.array([[1,0],[0,-1]])
 
-    def LuttingerUbasis(angle,steps,BZfrac,above=False):
-    '''
-    Calculates the Luttinger Hamiltonian based on the input parameters in the Bloch basis
+        # Fraction of Brilioun Zone Traversed
+        kmax = BZfrac * 2*np.pi/(5.6325)
+        hbar =  1 #1.054572 * 10**(-34) #m^2 kg/s
+        hbarc = 0.197326 * 10**(4) #Angstrom eV
+        eMass = 9.109383 #kg
+        NIRWavelength = 8230 #Angstrom
 
-    :g1: Gamma1 Luttinger Parameter
-    :g2: Gamma2 Luttinger Parameter
-    :g3: Gamma3 Luttinger Parameter
-    :theta: Sample orientation with respect to the [010] Axis
-    :step: Number of steps to be calculated in Hamiltonian
-    :BZfrac: The fraction of the Brillouin Zone calculated
-    :above: Excite below or above the gap of GaAs
-    '''
+        h = np.zeros((self.st,4,4))
+        i=0
+        
+        if self.below:
+            for k in np.arange(0,kmax,kmax/self.st):
+                kx = k*np.cos(th)
+                ky = k*np.sin(th)
+                h[i,0:2,0:2] = np.array(-hbar**2/(2*eMass)*(self.g1*(kx**2+ky**2)*p0 - 
+                    2*self.g2*(np.sqrt(3)*(kx**2-ky**2)/2)*px + 2*np.sqrt(3)*self.g3*kx*ky*py + self.g2*(kx**2+ky**2)))
+                h[i,2:4,2:4] = np.array(-hbar**2/(2*eMass)*(self.g1*(kx**2+ky**2)*p0 - 
+                    self.g2*(np.sqrt(3)*(kx**2-ky**2))*px - 2*np.sqrt(3)*self.g3*kx*ky*py - self.g2*(kx**2+ky**2)))
+                self.w[angIdx,i,1:5], self.v[angIdx,i,0:4,:] = np.linalg.eig(h[i,:,:])
+                self.w[angIdx,i,1:5] = np.absolute(self.w[angIdx,i,1:5])
+                self.w[angIdx,i,1:5] = np.sort(self.w[angIdx,i,1:5]) 
+                self.w[angIdx,i,0] = k
+                self.v[angIdx,i,4,:] = kx
+                self.v[angIdx,i,5,:] = ky
+                self.v[angIdx,i,6,:] = 0
+                i = i+1
+        else:
+            for k in np.arange(0,kmax, kmax/self.st):
+                kx = k*np.cos(th)
+                ky = k*np.sin(th)
+                kz = (1/(2*np.pi*NIRWavelength))-(1/(2*np.pi*8225))
+                h[i,:,:] = (np.array(-hbar**2/(2*eMass)*((self.g1+5/2*self.g2)*k**2 - 2*g3*(kx*Sx+ky*Sy+kz*Sz)**2 + 
+                    2*(self.g3-self.g2)*(kx**2*Sx**2+ky**2*Sy**2+kz**2*Sz**2))))
+                self.w[angIdx,i,1:5], self.v[angIdx,i,0:4,:] = np.linalg.eig(h[i,:,:]) 
+                self.w[angIdx,i,1:5] = np.absolute(self.w[angIdx,i,1:5])
+                self.w[angIdx,i,1:5] = np.sort(self.w[angIdx,i,1:5]) 
+                self.w[angIdx,i,0] = k
+                self.v[angIdx,i,4,:] = kx
+                self.v[angIdx,i,5,:] = ky
+                self.v[angIdx,i,6,:] = kz
+                i = i+1    
 
-    self.th = angle*pi/180    #radians
-    self.st = steps
-    self.BZf = BZfrac
-    # Fraction of Brilioun Zone Traversed
-    kmax = self.BZf * 2*np.pi/(5.6325)
-    hbar =  1.054572 * 10**(-34) #m^2 kg/s
-    hbarc = 0.197326 * 10**(4) #Angstrom eV
-    eMass = 9.109383 #kg
-    NIRWavelength = 8230 #Angstrom
 
-    h = np.zeros((steps,4,4))
-    w = np.zeros((steps,5,1))
-    v = np.zeros((steps,7,4))
-    i=0
-    if above:
-        for k in np.arange(0,kmax, kmax/self.st):
-            kx = k*np.cos(self.th)
-            ky = k*np.sin(self.th)
-            kz = (1/(2*np.pi*NIRWavelength))-(1/(2*np.pi*8225))
-            h[i,0,0] = hbar**2/(2*eMass)*(-(g2 + g1)*(kx**2 + ky**2) - (g1 - 2*g2)*kz**2)
-            h[i,0,1] = hbar**2/(2*eMass)*(2*np.sqrt(3)*g3*kz*(kx - 1j*ky))
-            h[i,0,2] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2-ky**2)-2*1j*g3*kx*ky))
-            h[i,0,3] = 0
-            h[i,1,0] = hbar**2/(2*eMass)*(2*np.sqrt(3)*g3*kz*(kx + 1j*ky))
-            h[i,1,1] = hbar**2/(2*eMass)*(-(g1 - g2)*(kx**2 + ky**2) - (g1 + 2*g2)*kz**2)
-            h[i,1,2] = 0
-            h[i,1,3] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2-ky**2)-2*1j*g3*kx*ky))
-            h[i,2,0] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2-ky**2)+2*1j*g3*kx*ky))
-            h[i,2,1] = 0
-            h[i,2,2] = hbar**2/(2*eMass)*(-(g1- g2)*(kx**2 + ky**2) - (g1 + 2*g2)*kz**2)
-            h[i,2,3] = -hbar**2/(2*eMass)*(2*np.sqrt(3)*g3*kz*(kx - 1j*ky))
-            h[i,3,0] = 0
-            h[i,3,1] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2 - ky**2) + 2*1j*g3*kx*ky))
-            h[i,3,2] = -hbar**2/(2*eMass)*(2*np.sqrt(3)*g3*kz*(kx + 1j*ky))
-            h[i,3,3] = hbar**2/(2*eMass)*(-(g1 + g2)*(kx**2 + ky**2) - (g1 - 2*g2)*kz**2)
-            w[i,1:5,0], v[i,0:4,:] = np.linalg.eig(h[i,:,:])
-            w[i,1:5,0] = np.absolute(w[i,1:5,0])
-            w[i,1:5,0] = np.sort(w[i,1:5,0]) 
-            w[i,0,0] = k
-            v[i,4,:] = kx
-            v[i,5,:] = ky
-            v[i,6,:] = kz
-            i = i+1            
-    else:
-        for k in np.arange(0,kmax,kmax/self.st):
-            kx = k*np.cos(self.th)
-            ky = k*np.sin(self.th)
-            h[i,0,0] = hbar**2/(2*eMass)*(-(g2 + g1)*(kx**2 + ky**2))
-            h[i,0,1] = 0
-            h[i,0,2] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2-ky**2)-2*1j*g3*kx*ky))
-            h[i,0,3] = 0
-            h[i,1,0] = 0
-            h[i,1,1] = hbar**2/(2*eMass)*(-(g1 - g2)*(kx**2 + ky**2))
-            h[i,1,2] = 0
-            h[i,1,3] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2-ky**2)-2*1j*g3*kx*ky))
-            h[i,2,0] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2-ky**2)+2*1j*g3*kx*ky))
-            h[i,2,1] = 0
-            h[i,2,2] = hbar**2/(2*eMass)*(-(g1 - g2)*(kx**2 + ky**2))
-            h[i,2,3] = 0
-            h[i,3,0] = 0
-            h[i,3,1] = hbar**2/(2*eMass)*(np.sqrt(3)*(g2*(kx**2-ky**2)+2*1j*g3*kx*ky))
-            h[i,3,2] = 0
-            h[i,3,3] = hbar**2/(2*eMass)*(-(g1 + g2)*(kx**2 + ky**2))
-            #print(h)
-            w[i,1:5,0], v[i,0:4,:] = np.linalg.eig(h[i,:,:])
-            w[i,1:5,0] = np.absolute(w[i,1:5,0])
-            w[i,0,0] = k
-            v[i,4,:] = kx
-            v[i,5,:] = ky
-            v[i,6,:] = 0
-            i = i+1
-    
-    return w,v
+    def LuttingerUbasis(self,theta,BZfrac):
+        '''
+        Calculates the Luttinger Hamiltonian based on the input parameters in the Bloch basis
+        :theta: Sample orientation with respect to the [010] Axis
+        :BZfrac: The fraction of the Brillouin Zone calculated
+        '''
+        th = theta*np.pi/180   #radians
+        self.BZf = BZfrac
+        angIdx = np.int(theta*self.ang/360)
+        # Fraction of Brilioun Zone Traversed
+        kmax = self.BZf * 2*np.pi/(5.6325)
+        hbar =  1.054572 * 10**(-34) #m^2 kg/s
+        hbarc = 0.197326 * 10**(4) #Angstrom eV
+        eMass = 9.109383 #kg
+        NIRWavelength = 8230 #Angstrom
 
-    def NABerryConnection(v, below = True):
+        h = np.zeros((self.st,4,4))
+        i=0
+   
+        if self.below:
+            for k in np.arange(0,kmax,kmax/self.st):
+                kx = k*np.cos(th)
+                ky = k*np.sin(th)
+                h[i,0,0] = hbar**2/(2*eMass)*(-(self.g2 + self.g1)*(kx**2 + ky**2))
+                h[i,0,1] = 0
+                h[i,0,2] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
+                h[i,0,3] = 0
+                h[i,1,0] = 0
+                h[i,1,1] = hbar**2/(2*eMass)*(-(self.g1 - self.g2)*(kx**2 + ky**2))
+                h[i,1,2] = 0
+                h[i,1,3] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
+                h[i,2,0] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)+2j*self.g3*kx*ky))
+                h[i,2,1] = 0
+                h[i,2,2] = hbar**2/(2*eMass)*(-(self.g1 - self.g2)*(kx**2 + ky**2))
+                h[i,2,3] = 0
+                h[i,3,0] = 0
+                h[i,3,1] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)+2j*self.g3*kx*ky))
+                h[i,3,2] = 0
+                h[i,3,3] = hbar**2/(2*eMass)*(-(self.g1 + self.g2)*(kx**2 + ky**2))
+                #print(h)
+                self.w[angIdx,i,1:5], self.v[angIdx,i,0:4,:] = np.linalg.eig(h[i,:,:])
+                self.w[angIdx,i,1:5] = np.absolute(self.w[angIdx,i,1:5])
+                self.w[angIdx,i,1:5] = np.sort(self.w[angIdx,i,1:5]) 
+                self.w[angIdx,i,0] = k
+                self.v[angIdx,i,4,:] = kx
+                self.v[angIdx,i,5,:] = ky
+                self.v[angIdx,i,6,:] = 0
+                i = i+1
+        else:
+            for k in np.arange(0,kmax, kmax/self.st):
+                kx = k*np.cos(th)
+                ky = k*np.sin(th)
+                kz = (1/(2*np.pi*NIRWavelength))-(1/(2*np.pi*8225))
+                h[i,0,0] = hbar**2/(2*eMass)*(-(self.g2 + self.g1)*(kx**2 + ky**2) - (self.g1 - 2*self.g2)*kz**2)
+                h[i,0,1] = hbar**2/(2*eMass)*(2*np.sqrt(3)*self.g3*kz*(kx - 1j*ky))
+                h[i,0,2] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
+                h[i,0,3] = 0
+                h[i,1,0] = hbar**2/(2*eMass)*(2*np.sqrt(3)*self.g3*kz*(kx + 1j*ky))
+                h[i,1,1] = hbar**2/(2*eMass)*(-(self.g1 - self.g2)*(kx**2 + ky**2) - (self.g1 + 2*self.g2)*kz**2)
+                h[i,1,2] = 0
+                h[i,1,3] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
+                h[i,2,0] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)+2j*self.g3*kx*ky))
+                h[i,2,1] = 0
+                h[i,2,2] = hbar**2/(2*eMass)*(-(self.g1- self.g2)*(kx**2 + ky**2) - (self.g1 + 2*self.g2)*kz**2)
+                h[i,2,3] = -hbar**2/(2*eMass)*(2*np.sqrt(3)*self.g3*kz*(kx - 1j*ky))
+                h[i,3,0] = 0
+                h[i,3,1] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2 - ky**2) + 2j*self.g3*kx*ky))
+                h[i,3,2] = -hbar**2/(2*eMass)*(2*np.sqrt(3)*self.g3*kz*(kx + 1j*ky))
+                h[i,3,3] = hbar**2/(2*eMass)*(-(self.g1 + self.g2)*(kx**2 + ky**2) - (self.g1 - 2*self.g2)*kz**2)
+                self.w[angIdx,i,1:5], self.v[angIdx,i,0:4,:] = np.linalg.eig(h[i,:,:])
+                self.w[angIdx,i,1:5] = np.absolute(self.w[angIdx,i,1:5])
+                self.w[angIdx,i,1:5] = np.sort(self.w[angIdx,i,1:5]) 
+                self.w[angIdx,i,0] = k
+                self.v[angIdx,i,4,:] = kx
+                self.v[angIdx,i,5,:] = ky
+                self.v[angIdx,i,6,:] = kz
+                i = i+1 
+
+
+    def NABerryConnection(self,theta):
         """
         Takes in the four conduction band eigenfuntions of the Luttinger Hamiltonian and 
         calculates the non-Abelian Berry Connection as a function of K.
 
         :param v = (steps,7,4) matrix, (4X4) eigenfunctions and (3X4) kx, ky kz.
         """
-
-        if below:
+        th = np.int(theta*self.ang/360)
+        if self.below:
             # Initialize the Berry Connection Matrix
-            A = np.zeros((self.st,4,4,2))
             du = np.zeros((self.st-1,4,4,2))
             for k in range(1,self.st-1,1):
                 for n in range(0,4,1):
                     for i in range(0,2,1):
-                        du[k,n,:,i] = (v[k+1,n,:]-v[k-1,n,:])/(v[k+1,4+i,:]-v[k-1,4+i,:])
+                        du[k-1,n,:,i] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.v[th,k+1,4+i,0]-self.v[th,k-1,4+i,0])
                 # Finding the derivative of the Bloch functions as each
                 # point in K-space.
             
@@ -6648,72 +6677,91 @@ class Berry(object):
                 for n in range(0,4,1):
                     for m in range(0,4,1):
                         for i in range(0,2,1):
-                            A[k,n,m,i] = np.dot(v[k,n,:],du[k,m,:,i])                        
+                            self.A[th,k,n,m,i] = self.v[th,k,n,0]*du[k,m,0,i] + self.v[th,k,n,1]*du[k,m,1,i] + self.v[th,k,n,2]*du[k,m,2,i] + self.v[th,k,n,3]*du[k,m,3,i]
+
+            return self.A                        
         else:
             # Initialize the Berry Connection Matrix with 3 Cartesian Coordinates
-            A = np.zeros((self.st,4,4,3))
-            du = np.zeros((self.st,4,4,3))
+            du = np.zeros((self.st,4,3))
             for k in range(1,self.st-1,1):
                 for n in range(0,4,1):
                     for i in range(0,3,1):
-                        du[k,n,:,i] = (v[k+1,n,:]-v[k-1,n,:])/(v[k+1,4+i,:]-v[k-1,4+i,:])
+                        du[k,n,:,i] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.v[th,k+1,4+i,0]-self.v[th,k-1,4+i,0])
             
             for k in range(0,self.st-1,1):
                 for n in range(0,4,1):
                     for m in range(0,4,1):
                         for i in range(0,3,1):
-                            A[k,n,m,i] = np.dot(v[k,n,:],du[k,m,:,i])       
-        return A
+                            self.A[th,k,n,m,i] = self.v[th,k,n,0]*du[k,m,0,i] + self.v[th,k,n,1]*du[k,m,1,i] + self.v[th,k,n,2]*du[k,m,2,i] + self.v[th,k,n,3]*du[k,m,3,i]
+
     
-    def NABerryCurvature(A, v, below = True):
-    """
-    Calculate the Berry Curvature using the calculated Berry Connection Array.
+    def NABerryCurvature(self,theta):
+        """
+        Calculate the Berry Curvature using the calculated Berry Connection Array.
+        theta - the angle where the Hamiltonian is calculated.
+        """
+        th = np.int(theta*self.ang/360)
+        # Below gap (Kz = 0)
+        if self.below:
+            # Initialize the Berry Curvature Matrix and Array for Derivative of A
+            dA = np.zeros((self.st,4,4,2,2))
 
-    :param A -  The Berry Connection array, of the format (steps,4,4,2) or (steps,4,4,3),
-                for the below and above gap, respectivly. These are the indices (k,m,n,i),
-                where k is the momentum space position, m and n are band indices, and i
-                is the Cartesian coordinate.
-    :param v -  The basis vector used to calculate the Berry Connection. Using it mostly for
-                the calculated k index in Cartesian format.
-    :param below -  Excitation above or below gap, bool variable.
-    """
-    # Below gap (Kz = 0)
-    if below:
-        # Initialize the Berry Curvature Matrix and Array for Derivative of A
-        O = np.zeros((self.st,4,4,2,2))
-        dA = np.zeros((self.st,4,4,2,2))
+            # Calculate the derivative of the Berry Connection
+            for k in range(1,self.st-1,1):
+                for m in range(0,4,1):
+                    for n in range(0,4,1):
+                        for i in range(0,2,1):          #Ai
+                            for j in range(0,2,1):      #dj
+                                dA[k-1,m,n,i,j] = (self.A[th,k+1,m,n,i]-self.A[th,k-1,m,n,i])/(self.v[th,k+1,4+j,0]-self.v[th,k-1,4+j,0])
+            
+            # Calculate the Berry Curvature
+            for k in range(0,self.st-1,1):
+                for m in range(0,4,1):
+                    for n in range (0,4,1):
+                        for i in range(0,2,1):
+                            for j in range(0,2,1):
+                                self.O[th,k,m,n,i,j] = dA[k,m,n,j,i] - dA[k,m,n,i,j]
+            return self.O
+        else:   # Above Gap (kz neq 0)
+            dA = np.zeros((self.st,4,4,3))
+            for k in range(1,self.st,1):
+                for m in range(0,4,1):
+                    for n in range(0,4,1):
+                        for i in range(0,3,1):          #Ai
+                            for j in range(0,3,1):      #dj
+                                dA[k-1,m,n,i,j] = (self.A[th,k+1,m,n,i]-self.A[th,k-1,m,n,i])/(self.v[th,k+1,4+j,0]-self.v[th,k-1,4+j,0])
 
-        # Calculate the derivative of the Berry Connection
-        for k in range(1,self.st-1,1):
-            for m in range(0,4,1):
-                for n in range(0,4,1):
-                    for i in range(0,2,1):          #Ai
-                        for j in range(0,2,1):      #dj
-                            dA[k,m,n,i,j] = (A[k+1,m,n,i]-A[k-1,m,n,i])/(v[k+1,4+j,0]-v[k-1,4+j,0])
+            for k in range(0,self.st-1,1):
+                for m in range(0,4,1):
+                    for n in range (0,4,1):
+                        for i in range(0,2,1):
+                            for j in range(0,2,1):
+                                self.O[th,k,m,n,i,j] = dA[k,m,n,j,i] - dA[k,m,n,i,j]
+
+    def BerryMesh(self,BZf):
+        """
+        Calculates the Berry Values at various theta to create a radial mesh.
+        """
+        angInc = np.int(360/self.ang)
+        for theta in range(0,360, angInc):
+            self.LuttingerUbasis(theta, BZf)
+            self.NABerryConnection(theta)
+            self.NABerryCurvature(theta)
         
-        # Calculate the Berry Curvature
-        for k in range(0,self.st-1,1):
-            for m in range(0,4,1):
-                for n in range (0,4,1):
-                    for i in range(0,2,1):
-                        for j in range(0,2,1):
-                            O[k,m,n,i,j] = dA[k,m,n,j,i] - dA[k,m,n,i,j]
-    else:   # Above Gap (kz neq 0)
-        O = np.zeros((self.st,4,4,3,3))
-        dA = np.zeros((self.st,4,4,3))
+        return self.A, self.O
 
-        for k in range(1,self.st,1):
-            for m in range(0,4,1):
-                for n in range(0,4,1):
-                    for i in range(0,3,1):          #Ai
-                        for j in range(0,3,1):      #dj
-                            dA[k,m,n,i,j] = (A[k+1,m,n,i]-A[k-1,m,n,i])/(v[k+1,4+j,0]-v[k-1,4+j,0])
+    def NABerryPhase(self,bands):
+        """
+        Calculate the Berry Phase from the Berry Mesh Calculation
+        """
 
-        for k in range(1,self.st,1):
-            for m in range(0,4,1):
-                for n in range (0,4,1):
-                    for i in range(0,2,1):
-                        for j in range(0,2,1):
-                            O[k,m,n,i,j] = dA[k,m,n,j,i] - dA[k,m,n,i,j]
-
-    return O
+        Phase = np.zeros((self.st,bands))
+        for k in range(0,self.st,1):
+            dk = k*self.BZf/self.st*2*np.pi/(5.6325)
+            for n in range(0,bands,1):
+                for m in range(0,bands,1):
+                    for t in range(0,self.ang,1):
+                        theta = t*self.ang*np.pi/180
+                        Phase[k,n] = Phase[k,n] + self.A[t,k,n,m,1]*dk*self.ang*np.pi/180*np.cos(theta) - self.A[t,k,n,m,0]*dk*self.ang*np.pi/180*np.sin(theta)
+        
+        return Phase
