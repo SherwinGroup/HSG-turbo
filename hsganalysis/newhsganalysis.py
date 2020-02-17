@@ -2810,7 +2810,7 @@ class FullHighSideband(FullSpectrum):
             print("Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname)))
 
 class TheoryMatrix(object):
-    def __init__(self,ThzField,Thzomega,nir_wl,dephase,detune):
+    def __init__(self,ThzField,Thzomega,nir_wl,dephase,detune,temp=60):
         '''
         This class is designed to handle everything for creating theory
         matrices and comparing them to experiement.
@@ -2824,18 +2824,23 @@ class TheoryMatrix(object):
         :nir_wl: Give in nanometers.
         :dephase: Dephasing, give in meV.
             Should roughly be the width of absorption peaks
-        :detune: Detuning, give in eV.
+        :detune: Detuning, give in meV.
             Difference between NIR excitation and band gap
+        :temp: Temperature, give in K
         '''
 
         self.F = ThzField * 10**5
-        self.Thz_w = Thzomega * 10**9 * 2*np.pi
+        self.Thz_w = Thzomega * 10**9 *2*np.pi
         self.nir_wl = nir_wl * 10**(-9)
         self.dephase = dephase* 1.602*10**(-22)
         self.detune = detune*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
         self.max_iter = 0
+        self.hbar = 1.055*10**(-34) # hbar in Js
+        self.temp = temp
+        self.kb = 8.617*10**(-5) # Boltzmann constant in eV/K
+        self.temp_ev = self.temp*self.kb
 
     def mu_generator(self,gamma1,gamma2):
         '''
@@ -2924,50 +2929,37 @@ class TheoryMatrix(object):
         Step function that will compare the energy gained by the sideband to the
         energy of the phonon (36.6meV). If the energy is less than the phonon,
         return zero. If it's more return the scattering rate as determined by
-        Constantinou and Ridley (1990).
+        Yu and Cordana Eq 5.51
 
-        I ran the numbers and got something a little weird, so there's that
+        This really should be treated as a full integral, but whatever
         '''
 
         thz_omega = self.Thz_w
-        hbar = 1.055*10**(-34)
-        thz_ev = n*hbar*thz_omega/(1.602*10**-22) # converts to meV
-        phonon_ev = 36.6 # phonon energy in mev
+        hbar = self.hbar
+        thz_ev = n*hbar*thz_omega/(1.602*10**-19) # converts to eV
+        phonon_ev = 36.6*10**(-3) # phonon energy in Vv
 
         emass = 9.109*10**(-31) # bare electron mass in kg
         m_cond = 0.0665 # Effective mass of conduction band
         m_eff = emass*m_cond
 
+        phonon_n = 1/(np.exp(phonon_ev/self.temp_ev)-1)
 
-        # if thz_ev< phonon_ev:
         if thz_ev<phonon_ev:
             # print('No phonon for order',n)
             return 0
 
         else:
-            # epi_length = 500*10**(-9)
-            # # k_n = np.sqrt(n*hbar*thz_omega*2*m_eff)/hbar
-            # k_n = np.sqrt(phonon_ev*(1.06*10**(-22))*2*m_eff)/hbar
-            # # This is approximating the k for each sideband as being constant,
-            # #   taking the k to be the electron k at the energy of the phonon.
-            # W0 = 7.7*10**12 # characteristic rate
-            # Q0 = 126.375
-            #
-            # kpart = 1/np.sqrt(
-            #     np.pi**4+2*np.pi**2*2*np.pi*( 2*(k_n*epi_length)**2-Q0**2 )+np.pi**4 )
-            # energypart = 71.3 # I just calculated this since it's constant
-            # pi_part = 1.327 # Again just calculated this
-            #
-            # fullW = W0*0.5*energypart*pi_part*kpart*(1)
-            # # part in parentheses has no theory backing, just trying it out
-            # # fullW = 0
+            W0 = 7.7*10**12 # characteristic rate
 
-            # Trying out W as 1/100fs
-            # fullW = 1*10**13
-            # print('Phonon for order',n)
+            rate_frac = phonon_n*np.sqrt((thz_ev+phonon_ev)/thz_ev)+(
+                phonon_n+1)*np.sqrt((thz_ev-phonon_ev)/thz_ev)+(
+                phonon_ev/thz_ev)*(-phonon_n*np.arcsinh(np.sqrt(
+                phonon_ev/thz_ev))+(phonon_n+1)*np.arcsinh(np.sqrt(
+                (thz_ev-phonon_ev)/thz_ev)))
+            # Got this from Yu and Cordana's book
 
-            # Turning phonon off for now
-            fullW = 0
+            fullW = W0*rate_frac
 
             return fullW
 
@@ -2992,20 +2984,20 @@ class TheoryMatrix(object):
         Returns:
         :result: The value of the integrand for a given x value
         '''
-        hbar = 1.055*10**(-34) # hbar in Joule*seconds
+        hbar = self.hbar
         F = self.F
         w = self.Thz_w
         dephase = self.dephase
         detune = self.detune
         pn_dephase = self.phonon_dephase(n)
 
-        exp_arg = (-dephase*x/(hbar*w)-pn_dephase*x/w + 1j*x*self.Up(mu)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x-1j*detune*x/(hbar*w))
+        exp_arg = (-dephase*x/(hbar*w)-pn_dephase*x/w + 1j*x*self.Up(mu)/(hbar*w)*(self.gamma_value(x)**2-1)+1j*n*x/2-1j*detune*x/(hbar*w))
         # Argument of the exponential part of the integrand
 
         bessel_arg = x*self.Up(mu)*self.alpha_value(x)*self.gamma_value(x)/(hbar*w)
         # Argument of the bessel function
 
-        bessel = spl.jv(n,bessel_arg)
+        bessel = spl.jv(n/2,bessel_arg)
         # calculates the J_n(bessel_arg) bessel function
 
         result = np.exp(exp_arg)*bessel/x
@@ -3120,7 +3112,7 @@ class TheoryMatrix(object):
 
         Field = self.F # THz field
 
-        hbar = 1.055*10**(-34) # hbar in Joule*seconds
+        hbar = self.hbar
         dephase = self.dephase
         int_cutoff = hbar*omega_thz/dephase*10
         # This cuts off the integral when x* dephase/hbaromega = 10
@@ -3128,11 +3120,11 @@ class TheoryMatrix(object):
         # of e^(-10) which is about 4.5*10^(-5)
 
         re_int_ref = intgt.quad(lambda x: np.real(self.integrand(
-            x,mu_p,n_ref)),0,int_cutoff,limit = 10000)[0]
+            x,mu_p,n_ref)),0,int_cutoff,limit = 1000000)[0]
         re_int_p = intgt.quad(lambda x: np.real(self.integrand(
-            x,mu_p,n)),0,int_cutoff,limit = 10000)[0]
+            x,mu_p,n)),0,int_cutoff,limit = 1000000)[0]
         re_int_m = intgt.quad(lambda x: np.real(self.integrand(
-            x,mu_m,n)),0,int_cutoff,limit = 10000)[0]
+            x,mu_m,n)),0,int_cutoff,limit = 1000000)[0]
         # Ok so these integrands are complex valued, but the intgt.quad integration
         #   does not work with that. So we split the integral up into two parts,
         #   real and imaginary parts. These lines calculate the real part for the
@@ -3144,11 +3136,11 @@ class TheoryMatrix(object):
         #   function we want except for the variable of integration x
 
         im_int_ref = intgt.quad(lambda x: np.imag(self.integrand(
-            x,mu_p,n_ref)),0,np.inf,limit = 10000)[0]
+            x,mu_p,n_ref)),0,int_cutoff,limit = 1000000)[0]
         im_int_p = intgt.quad(lambda x: np.imag(self.integrand(
-            x,mu_p,n)),0,np.inf,limit = 10000)[0]
+            x,mu_p,n)),0,int_cutoff,limit = 1000000)[0]
         im_int_m = intgt.quad(lambda x: np.imag(self.integrand(
-            x,mu_m,n)),0,np.inf,limit = 10000)[0]
+            x,mu_m,n)),0,int_cutoff,limit = 1000000)[0]
         # Same as above but these are the imaginary parts of the integrals.
 
         int_ref = re_int_ref + 1j*im_int_ref
@@ -3157,7 +3149,7 @@ class TheoryMatrix(object):
         # All the king's horses and all the king's men putting together our integrals
         #   again. :)
 
-        prefactor = ((omega_nir + 2*n*omega_thz)**2)/((omega_nir + 2*n_ref*omega_thz)**2)
+        prefactor = ((omega_nir +2*n*omega_thz)**2)/((omega_nir +2*n_ref*omega_thz)**2)
         # This prefactor is the ratio of energy of the nth sideband to the reference
 
         m_pre = (mu_m/mu_p)**2
@@ -3235,16 +3227,17 @@ class TheoryMatrix(object):
             eta_p,eta_m = self.normalized_integrals(gamma1,gamma2,n,n_ref)
             # calculates eta from the normalized_integrals function
 
-            prefactor = ((omega_nir + 2*n*w_thz)**2)/((omega_nir + 2*n_ref*w_thz)**2)
+            prefactor = ((omega_nir +2*n*w_thz)**2)/((omega_nir +2*n_ref*w_thz)**2)
 
             exp_p = prefactor*np.abs(Jexp[0,0,idx])**2
-            exp_m = prefactor*np.abs(Jexp[1,1,idx]-Jexp[0,0,idx])**2/(9/16)
+            exp_m = prefactor*np.abs(Jexp[1,1,idx]-Jexp[0,0,idx]/4)**2/(9/16)
             # calculates the experimental plus and minus values
             # 1/9/20 added prefactor to these bad boys
 
-            costs += np.sqrt( np.abs(eta_p/eta_m-exp_p/exp_m)**2 )
+            costs += np.sqrt(np.abs((exp_p-eta_p)/exp_p)**2+np.abs((exp_m-eta_m)/exp_m)**2)
             # Adds the cost function for this sideband to the overall cost function
             # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
+            # 01/30/20 Changed cost function to be relative difference of eta_pm
 
             this_etas = np.array([n,eta_p,exp_p,eta_m,exp_m])
             eta_list = np.vstack((eta_list,this_etas))
@@ -4018,8 +4011,8 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
                 df0 = df0 + allSbData[k+1, sbIdx+1]
                 df2 = df2 + allSbData[k+1,sbIdx+1]*np.exp(-1j*4*np.pi*k/16)
                 df4 = df4 + allSbData[k+1,sbIdx+1]*np.exp(-1j*8*np.pi*k/16)
-            
-            phi = 5*2*np.pi/180 
+
+            phi = 5*2*np.pi/180
             # Generate the Stokes parameters from the Fourier Components
             S0 = (f0 - 2*f4.real)/(2*np.pi)
             S1 = 2*f4.real/(np.pi)
