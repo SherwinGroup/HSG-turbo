@@ -26,6 +26,7 @@ import scipy.special as spl
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 import itertools as itt
+import multiprocessing as mp
 import hsganalysis.QWPProcessing as qwp
 from hsganalysis.QWPProcessing.extractMatrices import makeT,saveT
 np.set_printoptions(linewidth=500)
@@ -2950,26 +2951,7 @@ class TheoryMatrix(object):
             return 0
 
         else:
-<<<<<<< HEAD
-            # epi_length = 500*10**(-9)
-            # # k_n = np.sqrt(n*hbar*thz_omega*2*m_eff)/hbar
-            # k_n = np.sqrt(phonon_ev*(1.06*10**(-22))*2*m_eff)/hbar
-            # # This is approximating the k for each sideband as being constant,
-            # #   taking the k to be the electron k at the energy of the phonon.
             W0 = 7.7*10**12 # characteristic rate
-            # Q0 = 126.375
-            #
-            # kpart = 1/np.sqrt(
-            #     np.pi**4+2*np.pi**2*2*np.pi*( 2*(k_n*epi_length)**2-Q0**2 )+np.pi**4 )
-            # energypart = 71.3 # I just calculated this since it's constant
-            # pi_part = 1.327 # Again just calculated this
-            #
-            # fullW = W0*0.5*energypart*pi_part*kpart*(1)
-            # # part in parentheses has no theory backing, just trying it out
-            # # fullW = 0
-=======
-            W0 = 7.7*10**12 # characteristic rate
->>>>>>> 6193ad199fa5caee5f078f642979c59dc550ec21
 
             rate_frac = phonon_n*np.sqrt((thz_ev+phonon_ev)/thz_ev)+(
                 phonon_n+1)*np.sqrt((thz_ev-phonon_ev)/thz_ev)+(
@@ -2978,12 +2960,7 @@ class TheoryMatrix(object):
                 (thz_ev-phonon_ev)/thz_ev)))
             # Got this from Yu and Cordana's book
 
-<<<<<<< HEAD
-            # Turning phonon off for now
-            fullW = W0
-=======
             fullW = W0*rate_frac
->>>>>>> 6193ad199fa5caee5f078f642979c59dc550ec21
 
             return fullW
 
@@ -3223,9 +3200,11 @@ class TheoryMatrix(object):
             to the theoretical values. Pass in the not flattened way.
         :gc_fname: File name for the gammas and cost results
         :eta_folder: Folder name for the eta lists to go in
+        :i: itteration, for parallel processing output purposes
 
         Returns:
         :costs: Cumulative cost function for that run
+        :i: itteration, for parallel processing output purposes
         :eta_list: list of eta for's for each sideband order of the form
 
         sb order | eta_plus theory | eta_plus experiment | eta_minus thoery | eta_minus experiment
@@ -3254,19 +3233,11 @@ class TheoryMatrix(object):
             prefactor = ((omega_nir +2*n*w_thz)**2)/((omega_nir +2*n_ref*w_thz)**2)
 
             exp_p = prefactor*np.abs(Jexp[0,0,idx])**2
-<<<<<<< HEAD
             exp_m = prefactor*np.abs(Jexp[1,1,idx]-(1/4)*Jexp[0,0,idx])**2/(9/16)
             # calculates the experimental plus and minus values
             # 1/9/20 added prefactor to these bad boys
 
             costs += np.sqrt(np.abs((exp_p-eta_p)/(exp_p))**2 + np.abs((exp_m-eta_m)/(exp_m))**2)
-=======
-            exp_m = prefactor*np.abs(Jexp[1,1,idx]-Jexp[0,0,idx]/4)**2/(9/16)
-            # calculates the experimental plus and minus values
-            # 1/9/20 added prefactor to these bad boys
-
-            costs += np.sqrt(np.abs((exp_p-eta_p)/exp_p)**2+np.abs((exp_m-eta_m)/exp_m)**2)
->>>>>>> 6193ad199fa5caee5f078f642979c59dc550ec21
             # Adds the cost function for this sideband to the overall cost function
             # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
             # 01/30/20 Changed cost function to be relative difference of eta_pm
@@ -3390,6 +3361,8 @@ class TheoryMatrix(object):
             header = gammacosts_header, comments = '')
         # create the gamma cost file
 
+        data = [gamma1_array,gamma2_array]
+
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
                 cost = self.cost_func(gamma1,gamma2,observedSidebands,
@@ -3399,7 +3372,7 @@ class TheoryMatrix(object):
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
                 #   and cost to the overall array.
 
-        gamma_cost_array = gamma_cost_array[1:,:]
+        gamma_cost_array = gamma_cost_final[1:,:]
 
         # if save_results:
         #     sweepcosts_header = "#\n"*100
@@ -4052,19 +4025,19 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             S3 = f2.imag/(np.pi)
             # For the Error Propagation, I say phi = 0 and dPhi = 2*phi (value set above)
             d0 = np.sqrt(((-2*f4.real)/(np.pi)*2*phi)**2 + (df0/(2*np.pi))**2 + (-df4.imag/np.pi)**2)
-            d1 = np.sqrt((-4*f4.real*phi/np.pi)**2 + (2*df4.real/np.pi)**2)
-            d2 = np.sqrt((4*f4.imag*phi/np.pi)**2 + (-2*df4.imag/np.pi)**2)
-            d3 = -df2.imag/np.pi
-
+            d1 = np.absolute(S1)*np.sqrt((df4.real/f4.real)**2 + (2*phi/np.pi)**2)
+            d2 = np.absolute(S2)*np.sqrt((df4.imag/f4.imag)**2 + (2*phi/np.pi)**2)
+            d3 = df2.imag/np.pi
 
             # Calculate the alpha, gamma, DOP and errors from Stokes parameters
             thisAlpha = np.arctan2(S2, S1) / 2 * 180. / np.pi
-            thisAlphaError = np.sqrt(d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2)
+            thisAlphaError = np.sqrt(d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2) * 180./np.pi
             thisGamma = np.arctan2(S3, np.sqrt(S1 ** 2 + S2 ** 2)) / 2 * 180. / np.pi
-            thisGammaError = np.sqrt(d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + ((d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
-            (S1 ** 2 + S2 ** 2))) / (S1 ** 2 + S2 ** 2 + S3 ** 2)
+            thisGammaError = np.sqrt((d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + (d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
+            (S1 ** 2 + S2 ** 2) * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2)) *180. /np.pi
             thisDOP = np.sqrt(S1 ** 2 + S2 ** 2 + S3 ** 2) / S0
-            thisDOPerror = np.sqrt(((S1**2*d1**2 + S2**2*d2**2 + S3**2*d3**2))/(S1**2 + S2**2 + S3**2) + (S1**2 + S2**2 + S3**2)*d0**2/(S0**2))/(S0**2)
+            thisDOPerror = np.sqrt(((d1 ** 2 * S0 ** 2 * S1 ** 2 + d0 ** 2 * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2 + S0 ** 2 * (
+            d2 ** 2 * S2 ** 2 + d3 ** 2 * S3 ** 2)) / (S0 ** 4 * (S1 ** 2 + S2 ** 2 + S3 ** 2))))
 
             # Append The stokes parameters and errors to the dictionary output.
             sbFitsDict["S0"].append([sbNum, S0, d0])
@@ -6321,7 +6294,7 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
     index = 0
     for spectrum in pmt_data:
         spectrum.integrate_sidebands(verbose=verbose, **kwargs)
-        spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
+        #spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
         # because process sidebands can't handle the laser line
 
         #Not sure what the comment above is talking about. After looking carefully at how the program finds the laser line and
