@@ -78,5 +78,5 @@ class Ui_MainWindow(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabSpectrum), _translate("MainWindow", "Spectrum", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabFits), _translate("MainWindow", "Fits", None))
 
-from .draggablePlotWidget import DraggablePlotWidget
+from draggablePlotWidget import DraggablePlotWidget
 from pyqtgraph.parametertree import ParameterTree
