@@ -503,7 +503,16 @@ def J_T_proc(file,observedSidebands,crystalAngle,saveFileName,save_results=False
 
     for data in datasets:
         laserParams, rawData = hsg.hsg_combine_qwp_sweep(data)
-        _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False, laserParams = laserParams,wantedSbs = observedSidebands)
+        try:
+            _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False,
+            laserParams = laserParams,wantedSbs = observedSidebands)
+            # Add the new alpha and gamma sets to the fan class
+        except IndexError:
+            print('incorrect number of files in data folder ',data)
+            print('proceeding without fourier analysis')
+            _, fitDict = hsg.proc_n_fit_qwp_data(rawData,vertAnaDir = False,
+                laserParams = laserParams,
+                wantedSbs = observedSidebands,fourier = False)
         # Add the new alpha and gamma sets to the fan class
         fanData.addSet(fitDict)
 

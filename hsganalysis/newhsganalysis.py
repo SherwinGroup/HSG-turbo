@@ -26,6 +26,7 @@ import scipy.special as spl
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 import itertools as itt
+import multiprocessing as mp
 import hsganalysis.QWPProcessing as qwp
 from hsganalysis.QWPProcessing.extractMatrices import makeT,saveT
 np.set_printoptions(linewidth=500)
@@ -3199,9 +3200,11 @@ class TheoryMatrix(object):
             to the theoretical values. Pass in the not flattened way.
         :gc_fname: File name for the gammas and cost results
         :eta_folder: Folder name for the eta lists to go in
+        :i: itteration, for parallel processing output purposes
 
         Returns:
         :costs: Cumulative cost function for that run
+        :i: itteration, for parallel processing output purposes
         :eta_list: list of eta for's for each sideband order of the form
 
         sb order | eta_plus theory | eta_plus experiment | eta_minus thoery | eta_minus experiment
@@ -3230,11 +3233,11 @@ class TheoryMatrix(object):
             prefactor = ((omega_nir +2*n*w_thz)**2)/((omega_nir +2*n_ref*w_thz)**2)
 
             exp_p = prefactor*np.abs(Jexp[0,0,idx])**2
-            exp_m = prefactor*np.abs(Jexp[1,1,idx]-Jexp[0,0,idx]/4)**2/(9/16)
+            exp_m = prefactor*np.abs(Jexp[1,1,idx]-(1/4)*Jexp[0,0,idx])**2/(9/16)
             # calculates the experimental plus and minus values
             # 1/9/20 added prefactor to these bad boys
 
-            costs += np.sqrt(np.abs((exp_p-eta_p)/exp_p)**2+np.abs((exp_m-eta_m)/exp_m)**2)
+            costs += np.sqrt(np.abs((exp_p-eta_p)/(exp_p))**2 + np.abs((exp_m-eta_m)/(exp_m))**2)
             # Adds the cost function for this sideband to the overall cost function
             # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
             # 01/30/20 Changed cost function to be relative difference of eta_pm
@@ -3358,6 +3361,8 @@ class TheoryMatrix(object):
             header = gammacosts_header, comments = '')
         # create the gamma cost file
 
+        data = [gamma1_array,gamma2_array]
+
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
                 cost = self.cost_func(gamma1,gamma2,observedSidebands,
@@ -3367,7 +3372,7 @@ class TheoryMatrix(object):
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
                 #   and cost to the overall array.
 
-        gamma_cost_array = gamma_cost_array[1:,:]
+        gamma_cost_array = gamma_cost_final[1:,:]
 
         # if save_results:
         #     sweepcosts_header = "#\n"*100
@@ -4027,12 +4032,13 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
 
             # Calculate the alpha, gamma, DOP and errors from Stokes parameters
             thisAlpha = np.arctan2(S2, S1) / 2 * 180. / np.pi
-            thisAlphaError = np.sqrt(d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2)
+            thisAlphaError = np.sqrt(d2 ** 2 * S1 ** 2 + d1 ** 2 * S2 ** 2) / (S1 ** 2 + S2 ** 2) * 180./np.pi
             thisGamma = np.arctan2(S3, np.sqrt(S1 ** 2 + S2 ** 2)) / 2 * 180. / np.pi
-            thisGammaError = np.sqrt(d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + ((d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
-            (S1 ** 2 + S2 ** 2))) / (S1 ** 2 + S2 ** 2 + S3 ** 2)
+            thisGammaError = np.sqrt((d3 ** 2 * (S1 ** 2 + S2 ** 2) ** 2 + (d1 ** 2 * S1 ** 2 + d2 ** 2 * S2 ** 2) * S3 ** 2) / (
+            (S1 ** 2 + S2 ** 2) * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2)) *180. /np.pi
             thisDOP = np.sqrt(S1 ** 2 + S2 ** 2 + S3 ** 2) / S0
-            thisDOPerror = np.sqrt(((S1**2*d1**2 + S2**2*d2**2 + S3**2*d3**2))/(S1**2 + S2**2 + S3**2) + (S1**2 + S2**2 + S3**2)*d0**2/(S0**2))/(S0**2)
+            thisDOPerror = np.sqrt(((d1 ** 2 * S0 ** 2 * S1 ** 2 + d0 ** 2 * (S1 ** 2 + S2 ** 2 + S3 ** 2) ** 2 + S0 ** 2 * (
+            d2 ** 2 * S2 ** 2 + d3 ** 2 * S3 ** 2)) / (S0 ** 4 * (S1 ** 2 + S2 ** 2 + S3 ** 2))))
 
             # Append The stokes parameters and errors to the dictionary output.
             sbFitsDict["S0"].append([sbNum, S0, d0])
@@ -6289,7 +6295,7 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
     index = 0
     for spectrum in pmt_data:
         spectrum.integrate_sidebands(verbose=verbose, **kwargs)
-        spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
+        #spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
         # because process sidebands can't handle the laser line
 
         #Not sure what the comment above is talking about. After looking carefully at how the program finds the laser line and
@@ -6586,10 +6592,10 @@ class Berry(object):
         self.BZf = BZfrac
         angIdx = np.int(theta*self.ang/360)
         # Fraction of Brilioun Zone Traversed
-        kmax = self.BZf * 2*np.pi/(5.6325)
+        kmax = self.BZf * 2*np.pi/(5.6325*10**(-10))
         hbar =  1.054572 * 10**(-34) #m^2 kg/s
         hbarc = 0.197326 * 10**(4) #Angstrom eV
-        eMass = 9.109383 #kg
+        eMass = 9.109383 * 10**(-31)#kg
         NIRWavelength = 8230 #Angstrom
 
         h = np.zeros((self.st,4,4))
@@ -6599,27 +6605,25 @@ class Berry(object):
             for k in np.arange(0,kmax,kmax/self.st):
                 kx = k*np.cos(th)
                 ky = k*np.sin(th)
-                h[i,0,0] = hbar**2/(2*eMass)*(-(self.g2 + self.g1)*(kx**2 + ky**2))
-                h[i,0,1] = 0
-                h[i,0,2] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
+                h[i,0,0] = -hbar**2/(2*eMass)*((self.g2 + self.g1)*(kx**2 + ky**2))
+                h[i,0,1] = -hbar**2/(2*eMass)*(-np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
+                h[i,0,2] = 0
                 h[i,0,3] = 0
-                h[i,1,0] = 0
-                h[i,1,1] = hbar**2/(2*eMass)*(-(self.g1 - self.g2)*(kx**2 + ky**2))
+                h[i,1,0] = -hbar**2/(2*eMass)*(-np.sqrt(3)*(self.g2*(kx**2-ky**2)+2j*self.g3*kx*ky))
+                h[i,1,1] = -hbar**2/(2*eMass)*((self.g1 - self.g2)*(kx**2 + ky**2))
                 h[i,1,2] = 0
-                h[i,1,3] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
-                h[i,2,0] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)+2j*self.g3*kx*ky))
+                h[i,1,3] = 0
+                h[i,2,0] = 0
                 h[i,2,1] = 0
-                h[i,2,2] = hbar**2/(2*eMass)*(-(self.g1 - self.g2)*(kx**2 + ky**2))
-                h[i,2,3] = 0
+                h[i,2,2] = -hbar**2/(2*eMass)*((self.g1 - self.g2)*(kx**2 + ky**2))
+                h[i,2,3] = -hbar**2/(2*eMass)*(-np.sqrt(3)*(self.g2*(kx**2-ky**2)+2j*self.g3*kx*ky))
                 h[i,3,0] = 0
-                h[i,3,1] = hbar**2/(2*eMass)*(np.sqrt(3)*(self.g2*(kx**2-ky**2)+2j*self.g3*kx*ky))
-                h[i,3,2] = 0
-                h[i,3,3] = hbar**2/(2*eMass)*(-(self.g1 + self.g2)*(kx**2 + ky**2))
+                h[i,3,1] = 0
+                h[i,3,2] = -hbar**2/(2*eMass)*(-np.sqrt(3)*(self.g2*(kx**2-ky**2)-2j*self.g3*kx*ky))
+                h[i,3,3] = -hbar**2/(2*eMass)*((self.g1 + self.g2)*(kx**2 + ky**2))
                 #print(h)
                 self.w[angIdx,i,1:5], self.v[angIdx,i,0:4,:] = np.linalg.eig(h[i,:,:])
-                self.w[angIdx,i,1:5] = np.absolute(self.w[angIdx,i,1:5])
-                self.w[angIdx,i,1:5] = np.sort(self.w[angIdx,i,1:5]) 
-                self.w[angIdx,i,0] = k
+                self.w[angIdx,i,0] = k*(5.6325*10**(-10))/(2*np.pi)
                 self.v[angIdx,i,4,:] = kx
                 self.v[angIdx,i,5,:] = ky
                 self.v[angIdx,i,6,:] = 0
@@ -6654,6 +6658,8 @@ class Berry(object):
                 self.v[angIdx,i,6,:] = kz
                 i = i+1 
 
+        return self.v,self.w
+
 
     def NABerryConnection(self,theta):
         """
@@ -6665,28 +6671,65 @@ class Berry(object):
         th = np.int(theta*self.ang/360)
         if self.below:
             # Initialize the Berry Connection Matrix
+            # We are technically meshing in Radial Coordinates, so we are going to have to pull some Jacobian
+            # nonsense to get everything in the proper working order.
             du = np.zeros((self.st-1,4,4,2))
-            for k in range(1,self.st-1,1):
+            
+            if th == 0:
                 for n in range(0,4,1):
-                    for i in range(0,2,1):
-                        du[k-1,n,:,i] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.v[th,k+1,4+i,0]-self.v[th,k-1,4+i,0])
-                # Finding the derivative of the Bloch functions as each
-                # point in K-space.
+                    du[0,n,:,0] = (self.v[59,0,n,:]-self.v[1,0,n,:])/(2*np.pi/self.ang)*self.w[th,0,0]*np.sin(np.pi*theta/180)
+                    du[0,n,:,1] = (self.v[59,0,n,:]-self.v[1,0,n,:])/(2*np.pi/self.ang)*self.w[th,0,0]*np.cos(np.pi*theta/180)
+            elif th == 59:
+                for n in range(0,4,1):
+                    du[0,n,:,0] = (self.v[0,0,n,:]-self.v[58,0,n,:])/(2*np.pi/self.ang)*self.w[th,0,0]*np.sin(np.pi*theta/180)
+                    du[0,n,:,1] = (self.v[0,0,n,:]-self.v[58,0,n,:])/(2*np.pi/self.ang)*self.w[th,0,0]*np.cos(np.pi*theta/180)
+            else:
+                for n in range(0,4,1):
+                    du[0,n,:,0] = (self.v[th+1,0,n,:]-self.v[th-1,0,n,:])/(2*np.pi/self.ang)*self.w[th,0,0]*np.sin(np.pi*theta/180)
+                    du[0,n,:,1] = (self.v[th+1,0,n,:]-self.v[th-1,0,n,:])/(2*np.pi/self.ang)*self.w[th,0,0]*np.cos(np.pi*theta/180)
+
+            if th == 0:
+                for k in range(1,self.st-1,1):
+                    for n in range(0,4,1):
+                        # 0 = x, 1 = y;
+                        du[k,n,:,0] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.w[th,k+1,0]-self.w[th,k-1,0])*np.cos(np.pi*theta/180) - (self.v[59,k,n,:]-self.v[1,k,n,:])/(2*np.pi/self.ang)*self.w[th,k,0]*np.sin(np.pi*theta/180)
+                        du[k,n,:,1] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.w[th,k+1,0]-self.w[th,k-1,0])*np.sin(np.pi*theta/180) + (self.v[59,k,n,:]-self.v[1,k,n,:])/(2*np.pi/self.ang)*self.w[th,k,0]*np.cos(np.pi*theta/180)
+                    # Finding the derivative of the Bloch functions as each
+                    # point in K-space.
+            elif th == 59:
+                for k in range(1,self.st-1,1):
+                    for n in range(0,4,1):
+                        # 0 = x, 1 = y;
+                        du[k,n,:,0] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.w[th,k+1,0]-self.w[th,k-1,0])*np.cos(np.pi*theta/180) - (self.v[1,k,n,:]-self.v[59,k,n,:])/(2*np.pi/self.ang)*self.w[th,k,0]*np.sin(np.pi*theta/180)
+                        du[k,n,:,1] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.w[th,k+1,0]-self.w[th,k-1,0])*np.sin(np.pi*theta/180) + (self.v[1,k,n,:]-self.v[59,k,n,:])/(2*np.pi/self.ang)*self.w[th,k,0]*np.cos(np.pi*theta/180)
+                    # Finding the derivative of the Bloch functions as each
+                    # point in K-space.
+            else:
+                for k in range(1,self.st-1,1):
+                    for n in range(0,4,1):
+                        # 0 = x, 1 = y;
+                        du[k,n,:,0] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.w[th,k+1,0]-self.w[th,k-1,0])*np.cos(np.pi*theta/180) - (self.v[th+1,k,n,:]-self.v[th-1,k,n,:])/(2*np.pi/self.ang)*self.w[th,k,0]*np.sin(np.pi*theta/180)
+                        du[k,n,:,1] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.w[th,k+1,0]-self.w[th,k-1,0])*np.sin(np.pi*theta/180) + (self.v[th+1,k,n,:]-self.v[th-1,k,n,:])/(2*np.pi/self.ang)*self.w[th,k,0]*np.cos(np.pi*theta/180)
+                    # Finding the derivative of the Bloch functions as each
+                    # point in K-space.
             
             for k in range(0,self.st-1,1):
                 for n in range(0,4,1):
                     for m in range(0,4,1):
                         for i in range(0,2,1):
                             self.A[th,k,n,m,i] = self.v[th,k,n,0]*du[k,m,0,i] + self.v[th,k,n,1]*du[k,m,1,i] + self.v[th,k,n,2]*du[k,m,2,i] + self.v[th,k,n,3]*du[k,m,3,i]
-
             return self.A                        
         else:
-            # Initialize the Berry Connection Matrix with 3 Cartesian Coordinates
-            du = np.zeros((self.st,4,3))
-            for k in range(1,self.st-1,1):
-                for n in range(0,4,1):
-                    for i in range(0,3,1):
-                        du[k,n,:,i] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.v[th,k+1,4+i,0]-self.v[th,k-1,4+i,0])
+            # # Initialize the Berry Connection Matrix with 3 Cartesian Coordinates
+            # du = np.zeros((self.st,4,3))
+            # for k in range(1,self.st-1,1):
+            #     for n in range(0,4,1):
+            #             # 0 = x, 1 = y, 2 = z;
+            #         du[k,n,:,0] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.u[th,k+1,0]-self.u[th,k-1,0])*np.cos(np.pi*theta/180) - ...
+            #             (self.v[th+1,k,n,:]-self.v[th-1,k,n,:])/(2*np.pi/self.ang)*self.u[th,k,0]*np.sin(np.pi*theta/180)
+            #         du[k,n,:,1] = (self.v[th,k+1,n,:]-self.v[th,k-1,n,:])/(self.u[th,k+1,0]-self.u[th,k-1,0])*np.sin(np.pi*theta/180) + ...
+            #             (self.v[th+1,k,n,:]-self.v[th-1,k,n,:])/(2*np.pi/self.ang)*self.u[th,k,0]*np.cos(np.pi*theta/180)
+            #         du[k,n,:,2] = (self.v[th,k+1,n,:])
             
             for k in range(0,self.st-1,1):
                 for n in range(0,4,1):
@@ -6743,11 +6786,14 @@ class Berry(object):
         Calculates the Berry Values at various theta to create a radial mesh.
         """
         angInc = np.int(360/self.ang)
+        # First create a full mesh of Luttinger Params
         for theta in range(0,360, angInc):
             self.LuttingerUbasis(theta, BZf)
+        
+        # Use the Luttinger Values to create Berry Values
+        for theta in range(0,360,angInc):
             self.NABerryConnection(theta)
             self.NABerryCurvature(theta)
-        
         return self.A, self.O
 
     def NABerryPhase(self,bands):
@@ -6755,13 +6801,13 @@ class Berry(object):
         Calculate the Berry Phase from the Berry Mesh Calculation
         """
 
-        Phase = np.zeros((self.st,bands))
+        Phase = np.zeros((self.st,bands + 1))
         for k in range(0,self.st,1):
             dk = k*self.BZf/self.st*2*np.pi/(5.6325)
             for n in range(0,bands,1):
                 for m in range(0,bands,1):
                     for t in range(0,self.ang,1):
                         theta = t*self.ang*np.pi/180
-                        Phase[k,n] = Phase[k,n] + self.A[t,k,n,m,1]*dk*self.ang*np.pi/180*np.cos(theta) - self.A[t,k,n,m,0]*dk*self.ang*np.pi/180*np.sin(theta)
-        
+                        Phase[k,n+1] = Phase[k,n+1] + self.A[t,k,n,m,1]*dk*self.ang*np.pi/180*np.cos(theta) - self.A[t,k,n,m,0]*dk*self.ang*np.pi/180*np.sin(theta)
+            Phase[k,0] = self.w[0,k,0]
         return Phase
