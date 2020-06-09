@@ -4019,10 +4019,10 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             S2 = -2*f4.imag/(np.pi)
             S3 = f2.imag/(np.pi)
             # For the Error Propagation, I say phi = 0 and dPhi = 2*phi (value set above)
-            d0 = np.sqrt(((-2*f4.real)/(np.pi)*2*phi)**2 + (df0/(2*np.pi))**2 + (-df4.imag/np.pi)**2)
-            d1 = np.sqrt((-4*f4.real*phi/np.pi)**2 + (2*df4.real/np.pi)**2)
-            d2 = np.sqrt((4*f4.imag*phi/np.pi)**2 + (-2*df4.imag/np.pi)**2)
-            d3 = -df2.imag/np.pi
+            d0 = np.sqrt(df0**2+4*(4*f4.real**2*phi**2+df4.real**2*(1+phi)**2*(1-1*phi)**2)/(1+phi)**4)/(2*np.pi)
+            d1 = 2*np.sqrt((f4.real**2*phi**2+df4.real**2*phi**2)/(1+phi)**4)/(np.pi)
+            d2 = 2*np.sqrt((f4.imag**2*phi**2+df4.imag**2*phi**2)/(1+phi)**4)/(np.pi)
+            d3 = df2.imag/np.pi
 
 
             # Calculate the alpha, gamma, DOP and errors from Stokes parameters
