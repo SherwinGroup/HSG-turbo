@@ -4009,13 +4009,13 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             df0 = 0
             df2 = 0
             df4 = 0
-            for k in range(0,16,1):
-                f0 = f0 + allSbData[k+1,sbIdx]
-                f2 = f2 + allSbData[k+1,sbIdx]*np.exp(-1j*4*np.pi*k/16)
-                f4 = f4 + allSbData[k+1,sbIdx]*np.exp(-1j*8*np.pi*k/16)
-                df0 = df0 + allSbData[k+1, sbIdx+1]
-                df2 = df2 + allSbData[k+1,sbIdx+1]*np.exp(-1j*4*np.pi*k/16)
-                df4 = df4 + allSbData[k+1,sbIdx+1]*np.exp(-1j*8*np.pi*k/16)
+            for k in range(0,8,1):
+                f0 = f0 + allSbData[2*k+1,sbIdx]
+                f2 = f2 + allSbData[2*k+1,sbIdx]*np.exp(-1j*np.pi*k/2)
+                f4 = f4 + allSbData[2*k+1,sbIdx]*np.exp(-1j*np.pi*k)
+                df0 = df0 + allSbData[2*k+1, sbIdx+1]
+                df2 = df2 + allSbData[2*k+1,sbIdx+1]*np.exp(-1j*np.pi*k/2)
+                df4 = df4 + allSbData[2*k+1,sbIdx+1]*np.exp(-1j*np.pi*k)
 
             phi = 5*2*np.pi/180
             # Generate the Stokes parameters from the Fourier Components
