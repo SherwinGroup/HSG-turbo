@@ -27,6 +27,8 @@ import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 import itertools as itt
 import multiprocessing as mp
+import sys
+sys.path.append('/Users/marketing/Desktop/HSG-turbo/')
 import hsganalysis.QWPProcessing as qwp
 from hsganalysis.QWPProcessing.extractMatrices import makeT,saveT
 np.set_printoptions(linewidth=500)
