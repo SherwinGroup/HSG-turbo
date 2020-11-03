@@ -3390,7 +3390,98 @@ class TheoryMatrix(object):
 
         return gamma_cost_array
 
+def gamma_th_sweep(self,gamma1_array,gamma2_array,n_ref,n_test,phi,
+        Jexp,gc_fname,eta_folder,save_results = True):
+        '''
+        This function calculates the integrals and cost function for an array of
+        gamma1 and gamma2. You can pass any array of gamma1 and gamma2 values and
+        this will return the costs for all those values. Let's you avoid the
+        weirdness of fitting algorithims.
 
+        Parameters:
+        :dephase: dephasing rate. Should be a few meV, ~the width of the exciton
+            absorption peak (according to Qile). Should be float
+        :lambda_nir: wavelength of NIR in nm
+        :w_thz: frequency of fel
+        :F: THz field strength
+        :gamma1: Gamma1 parameter in the luttinger hamiltonian.
+            Textbook value of 6.85
+        :gamma2: Gamma2 parameter in the luttinger hamiltonian.
+            Textbook value of 2.1
+        :n: Order of sideband for this integral
+        :n_ref: Order of the reference integral which everything will be divided by
+        :observedSidebands: List or array of observed sidebands. The code will
+            loop over sidebands in this array.
+        :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
+            to the theoretical values. Pass in the not flattened way.
+        :gc_fname: File name for the gammas and cost functions, include .txt
+        :eta_folder: Folder name for the eta lists to go in
+
+        Returns: gamma_cost_array of form
+        gamma1 | gamma2 | cost |
+        .           .       .
+        .           .       .
+        .           .       .
+
+        This is just running cost_func over and over again essentially.
+        '''
+        #Hard Coding the experimental g3/g2 factor
+        beta = 1.42
+        dephase = self.dephase
+        lambda_nir = self.nir_wl
+        w_thz = self.Thz_w
+        F = self.F
+
+        self.max_iter = len(gamma1_array)*len(gamma2_array)
+
+        gamma_cost_array = np.array([0,0,0])
+        # Initialize the gamma cost array
+
+        gammas_costs = np.array([])
+        # This is just for initializing the gamma costs file
+
+        gammacosts_header = "#\n"*95
+        gammacosts_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
+        gammacosts_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
+        gammacosts_header += f'# Field Strength: {self.F/(10**5)} kV/cm \n'
+        gammacosts_header += f'# THz Frequency: {self.Thz_w/(10**9 * 2*np.pi)} GHz \n'
+        gammacosts_header += f'# NIR Wavelength: {self.nir_wl/(10**(-9))} nm \n'
+        gammacosts_header += 'Iteration, Gamma1, Gamma2, Cost Function \n'
+        gammacosts_header += 'unitless, unitless, unitless, unitless \n'
+        # Creates origin frienldy header for gamma costs
+
+        np.savetxt(gc_fname, gammas_costs, delimiter = ',',
+            header = gammacosts_header, comments = '')
+        # create the gamma cost file
+
+        data = [gamma1_array,gamma2_array]
+
+        for gamma1 in gamma1_array:
+            for gamma2 in gamma2_array:
+                cost = self.cost_func(gamma1,gamma2,n_test,
+                    n_ref,Jexp,phi,beta,gc_fname,eta_folder)
+                this_costngamma = np.array([gamma1,gamma2,cost])
+                gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
+                # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
+                #   and cost to the overall array.
+
+        gamma_cost_array = gamma_cost_final[1:,:]
+
+        # if save_results:
+        #     sweepcosts_header = "#\n"*100
+        #     sweepcosts_header += 'Gamma1, Gamma2, Cost Function \n'
+        #     sweepcosts_header += 'unitless, unitless, unitless \n'
+        #
+        #     sweep_name = 'sweep_costs_' + gc_fname
+        #     np.savetxt(sweep_name,gamma_cost_array,delimiter = ',',
+        #         header = sweepcosts_header, comments = '')
+        # Ok so right now I think I am going to get rid of saving this file
+        #   since it has the same information as the file that is saved in
+        #   cost_func but that file is updated every interation where this
+        #   one only works at the end. So if the program gets interrupted
+        #   the other one will still give you some information.
+
+        return gamma_cost_array
 ####################
 # Fitting functions
 ####################
