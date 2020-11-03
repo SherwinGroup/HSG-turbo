@@ -549,14 +549,14 @@ def J_T_proc(file,observedSidebands,crystalAngle,saveFileName,save_results=False
             dopn45 = dop[1:,:]
 
     # Put into appropriate form for saving
-    totdop = [dop00,dop45[:,1:],dop90[:,1:],dopn45[:,1:]]
-    totdop = np.hstack(totdop)
+    #totdop = [dop00,dop45[:,1:],dop90[:,1:],dopn45[:,1:]]
+    #totdop = np.hstack(totdop)
 
     # Saves as txt file with columns, SB Order, 00 DOP and error, 45 DOP and error,
     # 90 DOP and error, -45 DOP and error
-    if save_results:
-        np.savetxt(saveFileName + "_DOP.txt", totdop, delimiter=',', header=
-            'SB Order, 00 DOP, 00 DOP Error, 45 DOP, 45 DOP Error, 90 DOP, 90 DOP Error, -45 DOP, -45 DOP Error')
+    # if save_results:
+    #     np.savetxt(saveFileName + "_DOP.txt", totdop, delimiter=',', header=
+    #         'SB Order, 00 DOP, 00 DOP Error, 45 DOP, 45 DOP Error, 90 DOP, 90 DOP Error, -45 DOP, -45 DOP Error')
 
 
     # Building the fan compiler causes it to make  2D np arrays with the alpha and
@@ -614,4 +614,4 @@ def J_T_proc(file,observedSidebands,crystalAngle,saveFileName,save_results=False
         np.savetxt(saveFileName + "_{}.txt".format("TmatrixMag"), tmag, delimiter=',', header='SB Order, |T++/T--|, |T+-/T-+|')
         np.savetxt(saveFileName + "_{}.txt".format("TmatrixAng"), tang, delimiter=',', header='SB Order, Angle(T++/T--), Angle(T+-/T-+)')
 
-    return totdop,alphaData,gammaData,J,T,tmag,tang
+    return alphaData,gammaData,J,T,tmag,tang
