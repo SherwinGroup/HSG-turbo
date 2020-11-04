@@ -6,6 +6,7 @@
 #      by: PyQt4 UI code generator 4.10.4
 #
 # WARNING! All changes made in this file will be lost!
+import sys
 
 from PyQt5 import QtCore, QtWidgets
 
@@ -78,5 +79,6 @@ class Ui_MainWindow(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabSpectrum), _translate("MainWindow", "Spectrum", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabFits), _translate("MainWindow", "Fits", None))
 
+sys.path.append('/Users/marketing/Desktop/HSG-turbo/hsganalysis/UI')
 from draggablePlotWidget import DraggablePlotWidget
 from pyqtgraph.parametertree import ParameterTree

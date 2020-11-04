@@ -27,6 +27,8 @@ import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 import itertools as itt
 import multiprocessing as mp
+import sys
+sys.path.append('/Users/marketing/Desktop/HSG-turbo/')
 import hsganalysis.QWPProcessing as qwp
 from hsganalysis.QWPProcessing.extractMatrices import makeT,saveT
 np.set_printoptions(linewidth=500)
@@ -2184,7 +2186,7 @@ class HighSidebandPMT(PMT):
             self.parameters["fieldStrength"]["mean"])
         spec_header = '#' + parameter_str + origin_import_spec
 
-        origin_import_fits = '\nCenter energy,error,Amplitude,error,Linewidth,error\neV,,arb. u.,,eV,,\n,,'  # + marker
+        origin_import_fits = '\nIndex,Center energy,error,Amplitude,error,Linewidth,error\nInt,eV,,arb. u.,,eV,,\n,,'  # + marker
         fits_header = '#' + parameter_str + origin_import_fits
 
         for sideband in sorted(self.sb_dict.keys()):
@@ -2843,7 +2845,7 @@ class TheoryMatrix(object):
         self.kb = 8.617*10**(-5) # Boltzmann constant in eV/K
         self.temp_ev = self.temp*self.kb
 
-    def mu_generator(self,gamma1,gamma2):
+    def mu_generator(self,gamma1,gamma2,phi,beta):
         '''
         Given gamma1 and gamma2 produces mu+- according to
 
@@ -2857,15 +2859,17 @@ class TheoryMatrix(object):
             Textbook value of 6.85
         :gamma2: Gamma2 parameter in the luttinger hamiltonian.
             Textbook value of 2.1
+        :phi: [100] to THz orientation, passed from the data array
+        :beta: experimentally measured g3/g2 ratio
 
         Returns: mu_p, mu_m effective mass of of mu plus/minus
         '''
-
+        theta = phi - 45
         emass = 9.109*10**(-31) # bare electron mass in kg
         m_cond = 0.0665 # Effective mass of conduction band
 
-        mu_p = emass/( 1/m_cond + gamma1 - 2*gamma2 ) # Calculates mu_plus
-        mu_m = emass/( 1/m_cond + gamma1 + 2*gamma2 ) # Calculates mu_minus
+        mu_p = emass/( 1/m_cond + gamma1 - gamma2*np.sqrt(3*np.sin(2*theta)**2+1+3*np.cos(2*theta)**2*beta**2) ) # Calculates mu_plus
+        mu_m = emass/( 1/m_cond + gamma1 + gamma2*np.sqrt(3*np.sin(2*theta)**2+1+3*np.cos(2*theta)**2*beta**2) ) # Calculates mu_minus
 
         return mu_p,mu_m
 
@@ -3070,7 +3074,7 @@ class TheoryMatrix(object):
 
         return scaledJ, scaledT
 
-    def normalized_integrals(self,gamma1,gamma2,n,n_ref):
+    def normalized_integrals(self,gamma1,gamma2,n,n_ref,phi,beta):
         '''
         Returns the plus and minus eta for a given sideband order, normalized
         to order n_ref (should probably be 10?). This whole calculation relies
@@ -3099,12 +3103,14 @@ class TheoryMatrix(object):
             Textbook value of 2.1
         :n: Order of sideband for this integral
         :n_ref: Order of the reference integral which everything will be divided by
-
+        :phi: [100] to THz orientation, passed from the data array
+        :beta: experimentally measured g3/g2 ratio
+        
         Returns: eta_p, eta_m the values of the eta parameter normalized to the
             appropriate sideband order for plus and minus values of mu.
         '''
 
-        mu_p,mu_m = self.mu_generator(gamma1,gamma2)
+        mu_p,mu_m = self.mu_generator(gamma1,gamma2,phi,beta)
         # gets the plus/minus effective mass
         omega_thz = self.Thz_w # FEL frequency
 
@@ -3162,7 +3168,7 @@ class TheoryMatrix(object):
 
         return eta_p,eta_m
 
-    def cost_func(self,gamma1,gamma2,observedSidebands,n_ref,Jexp,gc_fname,eta_folder):
+    def cost_func(self,gamma1,gamma2,n,n_ref,Jexp,phi,beta,gc_fname,eta_folder):
         '''
         This will sum up a cost function that takes the difference between
         the theory generated eta's and experimental scaled matrices
@@ -3194,10 +3200,12 @@ class TheoryMatrix(object):
             Textbook value of 2.1
         :n: Order of sideband for this integral
         :n_ref: Order of the reference integral which everything will be divided by
-        :observedSidebands: List or array of observed sidebands. The code will
+        :n_test: List or array of observed sidebands. The code will
             loop over sidebands in this array.
         :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
             to the theoretical values. Pass in the not flattened way.
+        :phi: [100] to THz orientation, passed from the data array
+        :beta: experimentally measured g3/g2 ratio
         :gc_fname: File name for the gammas and cost results
         :eta_folder: Folder name for the eta lists to go in
         :i: itteration, for parallel processing output purposes
@@ -3224,26 +3232,24 @@ class TheoryMatrix(object):
         w_thz = self.Thz_w
         F = self.F
 
-        for idx in np.arange(len(observedSidebands)):
-            n = observedSidebands[idx]
-            # loops over observed sidebands and gets the n for that sideband
-            eta_p,eta_m = self.normalized_integrals(gamma1,gamma2,n,n_ref)
-            # calculates eta from the normalized_integrals function
+        eta_p,eta_m = self.normalized_integrals(gamma1,gamma2,n,n_ref,phi,beta)
+        # calculates eta from the normalized_integrals function
+        PHI = 20/(3*(beta-1)*np.sin(4*phi))
+        THETA = 4/((beta-1)*np.sin(4*phi))
+        prefactor = ((omega_nir +2*n*w_thz)**2)/((omega_nir +2*n_ref*w_thz)**2)
+        #Have to hard code the index of the 16th order sideband (8,10,12,14,16)
+        exp_p = prefactor*np.abs(Jexp[0,0,4]+Jexp[1,1,4]+PHI*Jexp[0,1,4])**2
+        exp_m = prefactor*np.abs(Jexp[0,0,4]+Jexp[1,1,4]+THETA*Jexp[0,1,4])**2
+        # calculates the experimental plus and minus values
+        # 1/9/20 added prefactor to these bad boys
 
-            prefactor = ((omega_nir +2*n*w_thz)**2)/((omega_nir +2*n_ref*w_thz)**2)
+        costs += np.sqrt(np.abs((exp_p-eta_p)/(exp_p))**2 + np.abs((exp_m-eta_m)/(exp_m))**2)
+        # Adds the cost function for this sideband to the overall cost function
+        # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
+        # 01/30/20 Changed cost function to be relative difference of eta_pm
 
-            exp_p = prefactor*np.abs(Jexp[0,0,idx])**2
-            exp_m = prefactor*np.abs(Jexp[1,1,idx]-(1/4)*Jexp[0,0,idx])**2/(9/16)
-            # calculates the experimental plus and minus values
-            # 1/9/20 added prefactor to these bad boys
-
-            costs += np.sqrt(np.abs((exp_p-eta_p)/(exp_p))**2 + np.abs((exp_m-eta_m)/(exp_m))**2)
-            # Adds the cost function for this sideband to the overall cost function
-            # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
-            # 01/30/20 Changed cost function to be relative difference of eta_pm
-
-            this_etas = np.array([n,eta_p,exp_p,eta_m,exp_m])
-            eta_list = np.vstack((eta_list,this_etas))
+        this_etas = np.array([n,eta_p,exp_p,eta_m,exp_m])
+        eta_list = np.vstack((eta_list,this_etas))
 
         self.iterations += 1
         # Ups the iterations counter
@@ -3390,7 +3396,98 @@ class TheoryMatrix(object):
 
         return gamma_cost_array
 
+def gamma_th_sweep(self,gamma1_array,gamma2_array,n_ref,n_test,phi,
+        Jexp,gc_fname,eta_folder,save_results = True):
+        '''
+        This function calculates the integrals and cost function for an array of
+        gamma1 and gamma2. You can pass any array of gamma1 and gamma2 values and
+        this will return the costs for all those values. Let's you avoid the
+        weirdness of fitting algorithims.
 
+        Parameters:
+        :dephase: dephasing rate. Should be a few meV, ~the width of the exciton
+            absorption peak (according to Qile). Should be float
+        :lambda_nir: wavelength of NIR in nm
+        :w_thz: frequency of fel
+        :F: THz field strength
+        :gamma1: Gamma1 parameter in the luttinger hamiltonian.
+            Textbook value of 6.85
+        :gamma2: Gamma2 parameter in the luttinger hamiltonian.
+            Textbook value of 2.1
+        :n: Order of sideband for this integral
+        :n_ref: Order of the reference integral which everything will be divided by
+        :observedSidebands: List or array of observed sidebands. The code will
+            loop over sidebands in this array.
+        :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
+            to the theoretical values. Pass in the not flattened way.
+        :gc_fname: File name for the gammas and cost functions, include .txt
+        :eta_folder: Folder name for the eta lists to go in
+
+        Returns: gamma_cost_array of form
+        gamma1 | gamma2 | cost |
+        .           .       .
+        .           .       .
+        .           .       .
+
+        This is just running cost_func over and over again essentially.
+        '''
+        #Hard Coding the experimental g3/g2 factor
+        beta = 1.42
+        dephase = self.dephase
+        lambda_nir = self.nir_wl
+        w_thz = self.Thz_w
+        F = self.F
+
+        self.max_iter = len(gamma1_array)*len(gamma2_array)
+
+        gamma_cost_array = np.array([0,0,0])
+        # Initialize the gamma cost array
+
+        gammas_costs = np.array([])
+        # This is just for initializing the gamma costs file
+
+        gammacosts_header = "#\n"*95
+        gammacosts_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
+        gammacosts_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
+        gammacosts_header += f'# Field Strength: {self.F/(10**5)} kV/cm \n'
+        gammacosts_header += f'# THz Frequency: {self.Thz_w/(10**9 * 2*np.pi)} GHz \n'
+        gammacosts_header += f'# NIR Wavelength: {self.nir_wl/(10**(-9))} nm \n'
+        gammacosts_header += 'Iteration, Gamma1, Gamma2, Cost Function \n'
+        gammacosts_header += 'unitless, unitless, unitless, unitless \n'
+        # Creates origin frienldy header for gamma costs
+
+        np.savetxt(gc_fname, gammas_costs, delimiter = ',',
+            header = gammacosts_header, comments = '')
+        # create the gamma cost file
+
+        data = [gamma1_array,gamma2_array]
+
+        for gamma1 in gamma1_array:
+            for gamma2 in gamma2_array:
+                cost = self.cost_func(gamma1,gamma2,n_test,
+                    n_ref,Jexp,phi,beta,gc_fname,eta_folder)
+                this_costngamma = np.array([gamma1,gamma2,cost])
+                gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
+                # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
+                #   and cost to the overall array.
+
+        gamma_cost_array = gamma_cost_final[1:,:]
+
+        # if save_results:
+        #     sweepcosts_header = "#\n"*100
+        #     sweepcosts_header += 'Gamma1, Gamma2, Cost Function \n'
+        #     sweepcosts_header += 'unitless, unitless, unitless \n'
+        #
+        #     sweep_name = 'sweep_costs_' + gc_fname
+        #     np.savetxt(sweep_name,gamma_cost_array,delimiter = ',',
+        #         header = sweepcosts_header, comments = '')
+        # Ok so right now I think I am going to get rid of saving this file
+        #   since it has the same information as the file that is saved in
+        #   cost_func but that file is updated every interation where this
+        #   one only works at the end. So if the program gets interrupted
+        #   the other one will still give you some information.
+
+        return gamma_cost_array
 ####################
 # Fitting functions
 ####################
@@ -4009,25 +4106,25 @@ def proc_n_fit_qwp_data(data, laserParams = dict(), wantedSBs = None, vertAnaDir
             df0 = 0
             df2 = 0
             df4 = 0
-            for k in range(0,8,1):
-                f0 = f0 + allSbData[2*k+1,sbIdx]
-                f2 = f2 + allSbData[2*k+1,sbIdx]*np.exp(-1j*np.pi*k/2)
-                f4 = f4 + allSbData[2*k+1,sbIdx]*np.exp(-1j*np.pi*k)
-                df0 = df0 + allSbData[2*k+1, sbIdx+1]
-                df2 = df2 + allSbData[2*k+1,sbIdx+1]*np.exp(-1j*np.pi*k/2)
-                df4 = df4 + allSbData[2*k+1,sbIdx+1]*np.exp(-1j*np.pi*k)
+            for k in range(0,16,1):
+                f0 = f0 + allSbData[k+1,sbIdx]
+                f2 = f2 + allSbData[k+1,sbIdx]*np.exp(-1j*np.pi*k/4)
+                f4 = f4 + allSbData[k+1,sbIdx]*np.exp(-1j*np.pi*k/2)
+                df0 = df0 + allSbData[k+1, sbIdx+1]
+                df2 = df2 + allSbData[k+1,sbIdx+1]*np.exp(-1j*np.pi*k/4)
+                df4 = df4 + allSbData[k+1,sbIdx+1]*np.exp(-1j*np.pi*k/2)
 
             phi = 5*2*np.pi/180
             # Generate the Stokes parameters from the Fourier Components
             S0 = (f0 - 2*f4.real)/(np.pi)
             S1 = 4*f4.real/(np.pi)
             S2 = -4*f4.imag/(np.pi)
-            S3 = -2*f2.imag/(np.pi)
+            S3 = 2*f2.imag/(np.pi)
             # For the Error Propagation, I say phi = 0 and dPhi = 2*phi (value set above)
-            d0 = np.sqrt(df0**2+4*(4*f4.real**2*phi**2+df4.real**2*(1+phi)**2*(1-1*phi)**2)/(1+phi)**4)/(2*np.pi)
-            d1 = 2*np.sqrt((f4.real**2*phi**2+df4.real**2*phi**2)/(1+phi)**4)/(np.pi)
-            d2 = 2*np.sqrt((f4.imag**2*phi**2+df4.imag**2*phi**2)/(1+phi)**4)/(np.pi)
-            d3 = df2.imag/np.pi
+            d0 = np.sqrt(df0**2+2*(4*f4.real**2*phi**2+df4.real**2*(1+phi)**2*(1-1*phi)**2)/(1+phi)**4)/(2*np.pi)
+            d1 = np.sqrt((f4.real**2*phi**2+df4.real**2*phi**2)/(1+phi)**4)/(np.pi)
+            d2 = np.sqrt((f4.imag**2*phi**2+df4.imag**2*phi**2)/(1+phi)**4)/(np.pi)
+            d3 = 2*df2.imag/np.pi
 
 
             # Calculate the alpha, gamma, DOP and errors from Stokes parameters
@@ -6284,10 +6381,10 @@ def band_pass_filter(x_vals, y_vals, cutoff, inspectPlots=True):
 # Complete functions
 ####################
 
-def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbose=False, **kwargs):
+def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbose=False, laserline = True, **kwargs):
     """
     This function will take a pmt object, process it completely.
-
+    laserline - normallizes to the laser line so it's amplitude is 1
     :rtype: list of HighSidebandPMT
     """
     pmt_data = pmt_sorter(folder_path, plot_individual=plot)
@@ -6295,7 +6392,8 @@ def proc_n_plotPMT(folder_path, plot=False, confirm_fits=False, save=None, verbo
     index = 0
     for spectrum in pmt_data:
         spectrum.integrate_sidebands(verbose=verbose, **kwargs)
-        #spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
+        if laserline:
+            spectrum.laser_line(verbose=verbose, **kwargs)  # This function is broken
         # because process sidebands can't handle the laser line
 
         #Not sure what the comment above is talking about. After looking carefully at how the program finds the laser line and
