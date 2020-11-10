@@ -3396,7 +3396,7 @@ class TheoryMatrix(object):
 
         return gamma_cost_array
 
-def gamma_th_sweep(self,gamma1_array,gamma2_array,n_ref,n_test,phi,
+    def gamma_th_sweep(self,gamma1_array,gamma2_array,n_ref,n_test,phi,
         Jexp,gc_fname,eta_folder,save_results = True):
         '''
         This function calculates the integrals and cost function for an array of
@@ -3471,7 +3471,7 @@ def gamma_th_sweep(self,gamma1_array,gamma2_array,n_ref,n_test,phi,
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
                 #   and cost to the overall array.
 
-        gamma_cost_array = gamma_cost_final[1:,:]
+        # gamma_cost_array = gamma_cost_final[1:,:]
 
         # if save_results:
         #     sweepcosts_header = "#\n"*100
