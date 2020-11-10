@@ -2968,9 +2968,6 @@ class TheoryMatrix(object):
 
             return fullW
 
-
-
-
     def integrand(self,x,mu,n):
         '''
         Calculate the integrand to integrate A_n+- in two_band_model pdf eqn 13.
@@ -3009,6 +3006,38 @@ class TheoryMatrix(object):
         # This is the integrand for a given x
 
         return result
+
+    def Qintegrand(self,x,mu,n):
+        '''
+        Calculate the integrand in the expression for Q, with the simplification 
+        that the canonical momentum is zero upon exciton pair creation.
+
+        Parameters:
+        :x: integration variable of dimensionless units. Equal to omega*tau
+        :dephase: dephasing rate of the electron hole pair as it is accelerated by 
+        the THz field
+        :w: Frequency of THz is radiams
+        :F: THz field in V/m
+        :mu: the effective reduced mass of the electron-hole pair
+        :n: Order of the sideband
+        '''
+        hbar = self.hbar
+        F = self.F
+        w = self.Thz_w
+        dephase = self.dephase
+        detune = self.detune
+        pn_detune = self.phonon_dephase(n)
+
+        exp_arg = (-dephase*x - pn_detune*x/w + 1j*x(self.Up(mu)/(hbar*w)+n))
+
+        bessel_arg = self.Up(mu)*np.sin(x)/w
+
+        bessel = spl.jv(n/2,bessel_arg)
+
+        result = np.exp(exp_arg)*bessel/x
+
+        return result
+
 
     def scale_J_n_T(self,Jraw,Jxx,observedSidebands,crystalAngle,saveFileName,
         index, save_results=True, scale_to_i=True):
@@ -3073,6 +3102,54 @@ class TheoryMatrix(object):
             # Saves the matrices
 
         return scaledJ, scaledT
+
+    def Q_normalized_integrals(self,gamma1,gamma2,n,phi,beta):
+        '''
+        Returns Q_n^{HH}/Q_n^{LH} == Integrand_n^{HH}/Integrand_n^{LH}
+        Unlike the normallized integrals used in early 2020 analysis, these integrals are of a
+        given Fourier component's intensity from either the HH or LH band, and thus there is no
+        prefactor related to the energy of the given sideband photon
+
+        Parameters:
+        :dephase: dephasing rate passed to intiallized TMAtrix object
+        :w: the frequency of the THz field, in GHz
+        :F: THz field strength in V/m
+        :gamma1: Gamma1 parameter from Luttinger Hamiltonian
+        :gamma2: Gamma2 parameter from Luttinger Hamiltonian
+        :n: Order of the sideband for this integral
+        :phi: [100] to THz orientation, passed from the data array
+        :beta: experimentally measured g3/g2 ratio
+        
+        Returns: QRatio, the ratio of Q_n^{HH}/Q_n^{LH}
+        '''
+
+        mu_p,mu_m = self.mu_generator(gamma1,gamma2,phi,beta)
+        w = self.Thz_w
+        Feild = self.F
+        hbar = self.hbar
+        dephase = self.dephase
+        int_cutoff = hbar*w/dephase*10
+
+        # Because the integral is complex, the real and imaginary parts have to be
+        # counted seperatly.
+
+        re_Q_HH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_p,n)),
+            0,int_cutoff,limit = 1000000)[0]
+        re_Q_LH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_m,n)),
+            0,int_cutoff,limit = 1000000)[0]
+        im_Q_HH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_p,n)),
+            0,int_cutoff,limit = 1000000)[0]
+        im_Q_LH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_m,n)),
+            0,int_cutoff,limit = 1000000)[0]
+        
+        # Combine the real and imaginary to have the full integral
+
+        int_HH = re_Q_HH + 1j*im_Q_HH
+        int_LH = re_Q_LH + 1j*im_Q_LH
+
+        QRatio = int_HH/int_LH
+
+        return QRatio
 
     def normalized_integrals(self,gamma1,gamma2,n,n_ref,phi,beta):
         '''
@@ -3168,7 +3245,7 @@ class TheoryMatrix(object):
 
         return eta_p,eta_m
 
-    def cost_func(self,gamma1,gamma2,n,n_ref,Jexp,phi,beta,gc_fname,eta_folder):
+    def cost_func(self,gamma1,gamma2,observedSidebands,n_ref,Jexp,phi,beta,gc_fname,eta_folder):
         '''
         This will sum up a cost function that takes the difference between
         the theory generated eta's and experimental scaled matrices
@@ -3198,10 +3275,7 @@ class TheoryMatrix(object):
             Textbook value of 6.85
         :gamma2: Gamma2 parameter in the luttinger hamiltonian.
             Textbook value of 2.1
-        :n: Order of sideband for this integral
         :n_ref: Order of the reference integral which everything will be divided by
-        :n_test: List or array of observed sidebands. The code will
-            loop over sidebands in this array.
         :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
             to the theoretical values. Pass in the not flattened way.
         :phi: [100] to THz orientation, passed from the data array
@@ -3232,24 +3306,24 @@ class TheoryMatrix(object):
         w_thz = self.Thz_w
         F = self.F
 
-        eta_p,eta_m = self.normalized_integrals(gamma1,gamma2,n,n_ref,phi,beta)
-        # calculates eta from the normalized_integrals function
-        PHI = 20/(3*(beta-1)*np.sin(4*phi))
-        THETA = 4/((beta-1)*np.sin(4*phi))
-        prefactor = ((omega_nir +2*n*w_thz)**2)/((omega_nir +2*n_ref*w_thz)**2)
-        #Have to hard code the index of the 16th order sideband (8,10,12,14,16)
-        exp_p = prefactor*np.abs(Jexp[0,0,4]+Jexp[1,1,4]+PHI*Jexp[0,1,4])**2
-        exp_m = prefactor*np.abs(Jexp[0,0,4]+Jexp[1,1,4]+THETA*Jexp[0,1,4])**2
-        # calculates the experimental plus and minus values
-        # 1/9/20 added prefactor to these bad boys
+        for idx np.arrange(len(observedSidebands)):
+            n = observedSidebands[idx]
+            eta_p,eta_m = self.normalized_integrals(gamma1,gamma2,n,n_ref,phi,beta)
+            # calculates eta from the normalized_integrals function
+            prefactor = ((omega_nir +2*n*w_thz)**2)/((omega_nir +2*n_ref*w_thz)**2)
+            #Have to hard code the index of the 16th order sideband (8,10,12,14,16)
+            exp_p = prefactor*np.abs(Jexp[0,0,idx])**2
+            exp_m = prefactor*np.abs(Jexp[1,1,idx]-(1/4)*Jexp[0,0,idx])**2*(9/16)
+            # calculates the experimental plus and minus values
+            # 1/9/20 added prefactor to these bad boys
 
-        costs += np.sqrt(np.abs((exp_p-eta_p)/(exp_p))**2 + np.abs((exp_m-eta_m)/(exp_m))**2)
-        # Adds the cost function for this sideband to the overall cost function
-        # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
-        # 01/30/20 Changed cost function to be relative difference of eta_pm
+            costs += np.sqrt(np.abs((exp_p-eta_p)/(exp_p))**2 + np.abs((exp_m-eta_m)/(exp_m))**2)
+            # Adds the cost function for this sideband to the overall cost function
+            # 1/8/20 Changed cost function to be the diiference of the ratio of the two etas
+            # 01/30/20 Changed cost function to be relative difference of eta_pm
 
-        this_etas = np.array([n,eta_p,exp_p,eta_m,exp_m])
-        eta_list = np.vstack((eta_list,this_etas))
+            this_etas = np.array([n,eta_p,exp_p,eta_m,exp_m])
+            eta_list = np.vstack((eta_list,this_etas))
 
         self.iterations += 1
         # Ups the iterations counter
@@ -3301,6 +3375,80 @@ class TheoryMatrix(object):
         # These print statements help you keep track of what's going on as this
         #   goes on and on and on.
 
+
+        return costs
+
+    def Q_cost_func(self,gamma1,gamma2,sidebands,Texp,phi,beta,gc_fname,Q_folder):
+        '''
+        This compairs the T Matrix components measured by experiment to the 
+
+        '''
+        costs = 0 # Initialize the costs
+        t_start = time.time() 
+        Q_list = np.array([0,0,0])
+
+        dephase = self.dephase
+        w = self.Thz_w
+        F = self.F
+
+        phi_rad = phi*np.pi/180
+        theta = phi_rad + np.pi/4
+
+        for idx in np.arrange(len(sidebands)):
+            n = sidebands[idx]
+            #Calculate the Theoretical Q Ratio
+            QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi,beta)
+            #Prefactor for experimental T Matirx algebra
+            PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
+            THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
+            ExpQ = (Texp[0,0,n]+PHI*Texp[0,1,:])/(Texp[0,0,:]-THETA*T[0,1,:])
+
+            costs += np.abs((ExpQ - Qratio)/QRatio)
+
+            this_Qs = np.array([n,ExpQ,QRatio])
+            Q_list = np.vstack(Q_list,this_Qs)
+
+        self.iterations += 1
+
+        g1rnd = round(gamma1,3)
+        g2rnd = round(gamma2,3)
+        costs_rnd = round(costs,5)
+
+        g_n_c = str(self.iterations) + ',' + str(g1rnd) + ',' + str(g2rnd) + ',' str(costs) +'\n'
+        gc_file = open(gc_fname,'a')
+        gc_file.write(g_n_c)
+        gc_file.close()
+
+        # Origin Header
+        Q_header = "#\n"*95
+        Q_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
+        Q_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
+        Q_header += f'# Feild Strength: {self.F/(10**5)} kV/cm \n'
+        Q_header += f'# THz Frequncy {self.Thz_w/(10**9 *2*np.pi)} GHz \n'
+        Q_header += f'# NIR Wavelength {self.nir_wl/(10**(-9))} nm \n'
+        Q_header += 'sb order, QRatio Experiment, QRatio Theory \n'
+        Q_header += 'unitless, unitless, unitless \n'
+
+        #Eta File Name
+        Q_fname = f'eta_g1_{g1rnd}_g2_{g2rnd}.txt'
+        Q_path = os.path.join(Q_folder,Q_fname)
+
+        Q_list = Q_list[1:,:]
+        np.savetxt(Q_path,Q_list, delimiter = ',',
+            header = Q_header, comments = '')
+
+        t_taken = round(time.time() - t_start,5)
+
+        print("  ")
+        print("---------------------------------------------------------------------")
+        print("  ")
+        print(f'Iteration number {self.iterations} / {self.max_iter} done')
+        print('for gamma1, gamma2 = ',g1rnd,g2rnd)
+        print('Cost function is = ',costs_rnd)
+        print('This calculation took ',t_taken,' seconds')
+        print("  ")
+        print("---------------------------------------------------------------------")
+        print("  ")
 
         return costs
 
@@ -3378,7 +3526,7 @@ class TheoryMatrix(object):
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
                 #   and cost to the overall array.
 
-        gamma_cost_array = gamma_cost_final[1:,:]
+        # gamma_cost_array = gamma_cost_final[1:,:]
 
         # if save_results:
         #     sweepcosts_header = "#\n"*100
@@ -3396,8 +3544,8 @@ class TheoryMatrix(object):
 
         return gamma_cost_array
 
-def gamma_th_sweep(self,gamma1_array,gamma2_array,n_ref,n_test,phi,
-        Jexp,gc_fname,eta_folder,save_results = True):
+    def gamma_th_sweep(self,gamma1_array,gamma2_array,sidebands,phi,
+        Texp,gc_fname,Q_folder,save_results = True):
         '''
         This function calculates the integrals and cost function for an array of
         gamma1 and gamma2. You can pass any array of gamma1 and gamma2 values and
@@ -3464,14 +3612,14 @@ def gamma_th_sweep(self,gamma1_array,gamma2_array,n_ref,n_test,phi,
 
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
-                cost = self.cost_func(gamma1,gamma2,n_test,
-                    n_ref,Jexp,phi,beta,gc_fname,eta_folder)
+                cost = self.Q_cost_func(gamma1,gamma2,sidebands,
+                    Texp,phi,beta,gc_fname,Q_folder)
                 this_costngamma = np.array([gamma1,gamma2,cost])
                 gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
                 #   and cost to the overall array.
 
-        gamma_cost_array = gamma_cost_final[1:,:]
+        # gamma_cost_array = gamma_cost_final[1:,:]
 
         # if save_results:
         #     sweepcosts_header = "#\n"*100
