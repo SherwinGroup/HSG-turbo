@@ -3028,7 +3028,7 @@ class TheoryMatrix(object):
         detune = self.detune
         pn_detune = self.phonon_dephase(n)
 
-        exp_arg = (-dephase*x - pn_detune*x/w + 1j*x(self.Up(mu)/(hbar*w)+n))
+        exp_arg = (-dephase*x - pn_detune*x/w + 1j*x*(self.Up(mu)/(hbar*w)+n))
 
         bessel_arg = self.Up(mu)*np.sin(x)/w
 
@@ -3392,8 +3392,8 @@ class TheoryMatrix(object):
         F = self.F
 
 
-        for idx in np.arrange(len(crystalAngles)):
-            phi = crystalAngles[idx]
+        for idx in np.arange(len(crystalAngles)):
+            phi = float(crystalAngles[idx])
             phi_rad = phi*np.pi/180
             theta = phi_rad + np.pi/4
             #Calculate the Theoretical Q Ratio
@@ -3401,12 +3401,12 @@ class TheoryMatrix(object):
             #Prefactor for experimental T Matirx algebra
             PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
             THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
-            ExpQ = (Texp[idx,0,0,n]+PHI*Texp[idx,0,1,:])/(Texp[idx,0,0,:]-THETA*Texp[idx,0,1,:])
+            ExpQ = (Texp[idx,0,0]+PHI*Texp[idx,0,1])/(Texp[idx,0,0]-THETA*Texp[idx,0,1])
 
             costs += np.abs((ExpQ - QRatio)/QRatio)
 
             this_Qs = np.array([n,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
-            Q_list = np.vstack(Q_list,this_Qs)
+            Q_list = np.vstack((Q_list,this_Qs))
 
         self.iterations += 1
 
@@ -3585,6 +3585,7 @@ class TheoryMatrix(object):
         w_thz = self.Thz_w
         F = self.F
 
+        self.iterations = 0
         self.max_iter = len(gamma1_array)*len(gamma2_array)
 
         gamma_cost_array = np.array([0,0,0])
