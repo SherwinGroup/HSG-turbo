@@ -2864,7 +2864,7 @@ class TheoryMatrix(object):
 
         Returns: mu_p, mu_m effective mass of of mu plus/minus
         '''
-        theta = phi - 45
+        theta = phi + np.pi/4
         emass = 9.109*10**(-31) # bare electron mass in kg
         m_cond = 0.0665 # Effective mass of conduction band
 
@@ -3117,7 +3117,7 @@ class TheoryMatrix(object):
         :gamma1: Gamma1 parameter from Luttinger Hamiltonian
         :gamma2: Gamma2 parameter from Luttinger Hamiltonian
         :n: Order of the sideband for this integral
-        :phi: [100] to THz orientation, passed from the data array
+        :phi: [100] to THz orientation, passed from cost function function (in radians)
         :beta: experimentally measured g3/g2 ratio
         
         Returns: QRatio, the ratio of Q_n^{HH}/Q_n^{LH}
@@ -3391,13 +3391,13 @@ class TheoryMatrix(object):
         w = self.Thz_w
         F = self.F
 
-        phi_rad = phi*np.pi/180
-        theta = phi_rad + np.pi/4
 
         for idx in np.arrange(len(crystalAngles)):
             phi = crystalAngles[idx]
+            phi_rad = phi*np.pi/180
+            theta = phi_rad + np.pi/4
             #Calculate the Theoretical Q Ratio
-            QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi,beta)
+            QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
             #Prefactor for experimental T Matirx algebra
             PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
             THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
@@ -3430,7 +3430,7 @@ class TheoryMatrix(object):
         Q_header += 'unitless, unitless, unitless, unitless, unitless \n'
 
         #Eta File Name
-        Q_fname = f'eta_g1_{g1rnd}_g2_{g2rnd}.txt'
+        Q_fname = f'Q_g1_{g1rnd}_g2_{g2rnd}.txt'
         Q_path = os.path.join(Q_folder,Q_fname)
 
         Q_list = Q_list[1:,:]
