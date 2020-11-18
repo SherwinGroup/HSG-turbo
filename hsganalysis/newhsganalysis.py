@@ -3134,13 +3134,13 @@ class TheoryMatrix(object):
         # counted seperatly.
 
         re_Q_HH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_p,n)),
-            0,int_cutoff,limit = 1000000)[0]
+            0,int_cutoff,limit = 10000)[0]
         re_Q_LH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_m,n)),
-            0,int_cutoff,limit = 1000000)[0]
+            0,int_cutoff,limit = 10000)[0]
         im_Q_HH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_p,n)),
-            0,int_cutoff,limit = 1000000)[0]
+            0,int_cutoff,limit = 10000)[0]
         im_Q_LH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_m,n)),
-            0,int_cutoff,limit = 1000000)[0]
+            0,int_cutoff,limit = 10000)[0]
         
         # Combine the real and imaginary to have the full integral
 
