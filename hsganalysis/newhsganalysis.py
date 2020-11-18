@@ -3117,7 +3117,7 @@ class TheoryMatrix(object):
         :gamma1: Gamma1 parameter from Luttinger Hamiltonian
         :gamma2: Gamma2 parameter from Luttinger Hamiltonian
         :n: Order of the sideband for this integral
-        :phi: [100] to THz orientation, passed from cost function function (in radians)
+        :phi: [100] to THz orientation, passed from the cost function funciton (in radians)
         :beta: experimentally measured g3/g2 ratio
         
         Returns: QRatio, the ratio of Q_n^{HH}/Q_n^{LH}
@@ -3378,7 +3378,7 @@ class TheoryMatrix(object):
 
         return costs
 
-    def Q_cost_func(self,gamma1,gamma2,n,Texp,crystalAngles,beta,gc_fname,Q_folder):
+    def Q_cost_func(self,gamma1,gamma2,sidebands,Texp,crystalAngles,beta,gc_fname,Q_folder):
         '''
         This compairs the T Matrix components measured by experiment to the 
 
@@ -3391,7 +3391,6 @@ class TheoryMatrix(object):
         w = self.Thz_w
         F = self.F
 
-
         for idx in np.arrange(len(crystalAngles)):
             phi = crystalAngles[idx]
             phi_rad = phi*np.pi/180
@@ -3401,9 +3400,9 @@ class TheoryMatrix(object):
             #Prefactor for experimental T Matirx algebra
             PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
             THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
-            ExpQ = (Texp[idx,0,0,n]+PHI*Texp[idx,0,1,:])/(Texp[idx,0,0,:]-THETA*Texp[idx,0,1,:])
+            ExpQ = (Texp[idx,0,0,n]+PHI*Texp[idx,0,1,:])/(Texp[idx,0,0,:]-THETA*T[idx,0,1,:])
 
-            costs += np.abs((ExpQ - QRatio)/QRatio)
+            costs += np.abs((ExpQ - Qratio)/QRatio)
 
             this_Qs = np.array([n,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
             Q_list = np.vstack(Q_list,this_Qs)
@@ -3426,8 +3425,8 @@ class TheoryMatrix(object):
         Q_header += f'# Feild Strength: {self.F/(10**5)} kV/cm \n'
         Q_header += f'# THz Frequncy {self.Thz_w/(10**9 *2*np.pi)} GHz \n'
         Q_header += f'# NIR Wavelength {self.nir_wl/(10**(-9))} nm \n'
-        Q_header += 'sb order, QRatio Experiment Real, Imaginary, QRatio Theory Real, Imaginary \n'
-        Q_header += 'unitless, unitless, unitless, unitless, unitless \n'
+        Q_header += 'sb order, QRatio Experiment, QRatio Theory \n'
+        Q_header += 'unitless, unitless, unitless \n'
 
         #Eta File Name
         Q_fname = f'Q_g1_{g1rnd}_g2_{g2rnd}.txt'
@@ -3453,7 +3452,7 @@ class TheoryMatrix(object):
         return costs
 
     def gamma_sweep(self,gamma1_array,gamma2_array,observedSidebands,n_ref,
-        Jexp,gc_fname,eta_folder,save_results = True):
+        Jexp,crystalAngle,gc_fname,eta_folder,save_results = True):
         '''
         This function calculates the integrals and cost function for an array of
         gamma1 and gamma2. You can pass any array of gamma1 and gamma2 values and
@@ -3492,7 +3491,7 @@ class TheoryMatrix(object):
         lambda_nir = self.nir_wl
         w_thz = self.Thz_w
         F = self.F
-
+        phi = crystalAngle
         self.max_iter = len(gamma1_array)*len(gamma2_array)
 
         gamma_cost_array = np.array([0,0,0])
@@ -3520,7 +3519,7 @@ class TheoryMatrix(object):
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
                 cost = self.cost_func(gamma1,gamma2,observedSidebands,
-                    n_ref,Jexp,gc_fname,eta_folder)
+                    n_ref,Jexp, phi, 1.42, gc_fname,eta_folder)
                 this_costngamma = np.array([gamma1,gamma2,cost])
                 gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
@@ -3563,12 +3562,13 @@ class TheoryMatrix(object):
         :gamma2: Gamma2 parameter in the luttinger hamiltonian.
             Textbook value of 2.1
         :n: Order of sideband for this integral
-        :crystalAngles: List or array of crystal Angles. The code will
+        :n_ref: Order of the reference integral which everything will be divided by
+        :observedSidebands: List or array of observed sidebands. The code will
             loop over sidebands in this array.
-        :TExp: Scaled experimental Jones matrices in xy basis that will be compared
+        :Jexp: Scaled experimental Jones matrices in xy basis that will be compared
             to the theoretical values. Pass in the not flattened way.
         :gc_fname: File name for the gammas and cost functions, include .txt
-        :Q_folder: Folder name for the eta lists to go in
+        :eta_folder: Folder name for the eta lists to go in
 
         Returns: gamma_cost_array of form
         gamma1 | gamma2 | cost |
