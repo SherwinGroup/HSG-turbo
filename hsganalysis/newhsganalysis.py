@@ -3028,13 +3028,8 @@ class TheoryMatrix(object):
         detune = self.detune
         pn_detune = self.phonon_dephase(n)
 
-        exp_arg = (-dephase*x - pn_detune*x/w + 1j*x(self.Up(mu)/(hbar*w)+n))
-
-        bessel_arg = self.Up(mu)*np.sin(x)/w
-
-        bessel = spl.jv(n/2,bessel_arg)
-
-        result = np.exp(exp_arg)*bessel/x
+        exp_arg = (-dephase*x - pn_detune*x/w + 1j*2*(self.Up(mu)/(hbar*w)*(np.cos(w*x/2)**2-1)-1j*detune/hbar*x))
+        result = np.exp(exp_arg)
 
         return result
 
@@ -3378,7 +3373,7 @@ class TheoryMatrix(object):
 
         return costs
 
-    def Q_cost_func(self,gamma1,gamma2,sidebands,Texp,crystalAngles,beta,gc_fname,Q_folder):
+    def Q_cost_func(self,gamma1,gamma2,n,Texp,crystalAngles,beta,gc_fname,Q_folder):
         '''
         This compairs the T Matrix components measured by experiment to the 
 
@@ -3400,9 +3395,9 @@ class TheoryMatrix(object):
             #Prefactor for experimental T Matirx algebra
             PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
             THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
-            ExpQ = (Texp[idx,0,0,n]+PHI*Texp[idx,0,1,:])/(Texp[idx,0,0,:]-THETA*T[idx,0,1,:])
+            ExpQ = (Texp[idx,0,0,n]+PHI*Texp[idx,0,1,:])/(Texp[idx,0,0,:]-THETA*Texp[idx,0,1,:])
 
-            costs += np.abs((ExpQ - Qratio)/QRatio)
+            costs += np.abs((ExpQ - QRatio)/QRatio)
 
             this_Qs = np.array([n,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
             Q_list = np.vstack(Q_list,this_Qs)
