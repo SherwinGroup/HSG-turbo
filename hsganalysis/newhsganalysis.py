@@ -3028,8 +3028,15 @@ class TheoryMatrix(object):
         detune = self.detune
         pn_detune = self.phonon_dephase(n)
 
-        exp_arg = (-dephase*x - pn_detune*x/w + 1j*2*(self.Up(mu)/(hbar*w)*(np.cos(w*x/2)**2-1)-1j*detune/hbar*x))
-        result = np.exp(exp_arg)
+        c0 = 2(w*x-np.sin(w*x))
+        a = 3*np.sin(2*w*x)-4*np.sin(w*x)-2*w*x*np.cos(2*w*x)
+        b = -3*np.cos(2*w*x)-4*np.cos(w*x)+2*w*x*np.sin(2*w*x)+1
+        c1 = np.sign(a)*np.sqrt(a**2+b**2)
+        phi = np.arctan2(a,b)
+        exp_arg = -dephase*x - pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w)*c0 -1j*n*phi
+        bessel_arg = self.Up(mu)/(hbar*w)*c1*x
+        bessel = spl.jv(n,bessel_arg)
+        result = np.exp(exp_arg)*(-1)**(n/2)*bessel
 
         return result
 
