@@ -2813,7 +2813,7 @@ class FullHighSideband(FullSpectrum):
             print("Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname)))
 
 class TheoryMatrix(object):
-    def __init__(self,ThzField,Thzomega,nir_wl,dephase,detune,temp=60):
+    def __init__(self,ThzField,Thzomega,nir_wl,dephase,detune,peakSplit,temp=60):
         '''
         This class is designed to handle everything for creating theory
         matrices and comparing them to experiement.
@@ -2837,6 +2837,7 @@ class TheoryMatrix(object):
         self.nir_wl = nir_wl * 10**(-9)
         self.dephase = dephase* 1.602*10**(-22)
         self.detune = detune*1.602*10**(-22)
+        self.peakSplit = peakSplit*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
         self.max_iter = 0
@@ -3007,7 +3008,7 @@ class TheoryMatrix(object):
 
         return result
 
-    def Qintegrand(self,x,mu,n):
+    def Qintegrand(self,x,mu,n,scale):
         '''
         Calculate the integrand in the expression for Q, with the simplification 
         that the canonical momentum is zero upon exciton pair creation.
@@ -3033,7 +3034,7 @@ class TheoryMatrix(object):
         b = -3*np.cos(2*w*x)-4*np.cos(w*x)+2*w*x*np.sin(2*w*x)+1
         c1 = np.sign(a)*np.sqrt(a**2+b**2)
         phi = np.arctan2(a,b)
-        exp_arg = -dephase*x - pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w)*c0 -1j*n*phi
+        exp_arg = -(dephase+1j*(self.detune+scale*self.peakSplit))*x - pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w)*c0 -1j*n*phi
         bessel_arg = self.Up(mu)/(hbar*w)*c1*x
         bessel = spl.jv(n,bessel_arg)
         result = np.exp(exp_arg)*(-1)**(n/2)*bessel
@@ -3135,13 +3136,13 @@ class TheoryMatrix(object):
         # Because the integral is complex, the real and imaginary parts have to be
         # counted seperatly.
 
-        re_Q_HH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_p,n)),
+        re_Q_HH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_p,n,0.1096)),
             0,int_cutoff,limit = 10000)[0]
-        re_Q_LH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_m,n)),
+        re_Q_LH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_m,n,1.1096)),
             0,int_cutoff,limit = 10000)[0]
-        im_Q_HH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_p,n)),
+        im_Q_HH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_p,n,0.1096)),
             0,int_cutoff,limit = 10000)[0]
-        im_Q_LH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_m,n)),
+        im_Q_LH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_m,n,1.1096)),
             0,int_cutoff,limit = 10000)[0]
         
         # Combine the real and imaginary to have the full integral
@@ -3503,7 +3504,7 @@ class TheoryMatrix(object):
         F = self.F
         phi = crystalAngle
         self.max_iter = len(gamma1_array)*len(gamma2_array)
-
+        self.iterations = 0
         gamma_cost_array = np.array([0,0,0])
         # Initialize the gamma cost array
 
