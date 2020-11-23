@@ -3028,7 +3028,7 @@ class TheoryMatrix(object):
         detune = self.detune
         pn_detune = self.phonon_dephase(n)
 
-        c0 = 2(w*x-np.sin(w*x))
+        c0 = 2*(w*x-np.sin(w*x))
         a = 3*np.sin(2*w*x)-4*np.sin(w*x)-2*w*x*np.cos(2*w*x)
         b = -3*np.cos(2*w*x)-4*np.cos(w*x)+2*w*x*np.sin(2*w*x)+1
         c1 = np.sign(a)*np.sqrt(a**2+b**2)
@@ -3386,6 +3386,8 @@ class TheoryMatrix(object):
 
         '''
         costs = 0 # Initialize the costs
+        imcost = 0
+        recost = 0
         t_start = time.time() 
         Q_list = np.array([0,0,0,0,0])
 
@@ -3406,8 +3408,9 @@ class TheoryMatrix(object):
             ExpQ = (Texp[idx,0,0]+PHI*Texp[idx,0,1])/(Texp[idx,0,0]-THETA*Texp[idx,0,1])
 
             costs += np.abs((ExpQ - QRatio)/QRatio)
-
-            this_Qs = np.array([n,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
+            imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
+            recost += np.abs((np.real(ExpQ)-np.real(QRatio))/np.real(QRatio))
+            this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
             Q_list = np.vstack((Q_list,this_Qs))
 
         self.iterations += 1
@@ -3415,8 +3418,10 @@ class TheoryMatrix(object):
         g1rnd = round(gamma1,3)
         g2rnd = round(gamma2,3)
         costs_rnd = round(costs,5)
+        imcost_rnd = round(imcost,5)
+        recost_rnd = round(recost,5)
 
-        g_n_c = str(self.iterations) + ',' + str(g1rnd) + ',' + str(g2rnd) + ',' + str(costs) +'\n'
+        g_n_c = str(self.iterations) + ',' + str(g1rnd) + ',' + str(g2rnd) + ',' + str(costs) + ',' + str(imcost) + ',' + str(recost) + '\n'
         gc_file = open(gc_fname,'a')
         gc_file.write(g_n_c)
         gc_file.close()
@@ -3428,8 +3433,8 @@ class TheoryMatrix(object):
         Q_header += f'# Feild Strength: {self.F/(10**5)} kV/cm \n'
         Q_header += f'# THz Frequncy {self.Thz_w/(10**9 *2*np.pi)} GHz \n'
         Q_header += f'# NIR Wavelength {self.nir_wl/(10**(-9))} nm \n'
-        Q_header += 'sb order, QRatio Experiment, QRatio Theory \n'
-        Q_header += 'unitless, unitless, unitless \n'
+        Q_header += 'Crystal Angles, QRatio Experiment Real, Imaginary, QRatio Theory Real, Imaginary\n'
+        Q_header += 'Degrees, unitless, unitless \n'
 
         #Eta File Name
         Q_fname = f'Q_g1_{g1rnd}_g2_{g2rnd}.txt'
@@ -3447,12 +3452,14 @@ class TheoryMatrix(object):
         print(f'Iteration number {self.iterations} / {self.max_iter} done')
         print('for gamma1, gamma2 = ',g1rnd,g2rnd)
         print('Cost function is = ',costs_rnd)
+        print('Imaginary Cost function is =',imcost_rnd)
+        print('Real Cost function is =',recost_rnd)
         print('This calculation took ',t_taken,' seconds')
         print("  ")
         print("---------------------------------------------------------------------")
         print("  ")
 
-        return costs
+        return costs,imcost,recost
 
     def gamma_sweep(self,gamma1_array,gamma2_array,observedSidebands,n_ref,
         Jexp,crystalAngle,gc_fname,eta_folder,save_results = True):
@@ -3591,7 +3598,7 @@ class TheoryMatrix(object):
         self.iterations = 0
         self.max_iter = len(gamma1_array)*len(gamma2_array)
 
-        gamma_cost_array = np.array([0,0,0])
+        gamma_cost_array = np.array([0,0,0,0,0])
         # Initialize the gamma cost array
 
         gammas_costs = np.array([])
@@ -3603,8 +3610,8 @@ class TheoryMatrix(object):
         gammacosts_header += f'# Field Strength: {self.F/(10**5)} kV/cm \n'
         gammacosts_header += f'# THz Frequency: {self.Thz_w/(10**9 * 2*np.pi)} GHz \n'
         gammacosts_header += f'# NIR Wavelength: {self.nir_wl/(10**(-9))} nm \n'
-        gammacosts_header += 'Iteration, Gamma1, Gamma2, Cost Function \n'
-        gammacosts_header += 'unitless, unitless, unitless, unitless \n'
+        gammacosts_header += 'Iteration, Gamma1, Gamma2, Cost Function, Imaginary, Real \n'
+        gammacosts_header += 'unitless, unitless, unitless, unitless, unitless \n'
         # Creates origin frienldy header for gamma costs
 
         np.savetxt(gc_fname, gammas_costs, delimiter = ',',
@@ -3615,9 +3622,9 @@ class TheoryMatrix(object):
 
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
-                cost = self.Q_cost_func(gamma1,gamma2,n,
+                cost,imcost,recost = self.Q_cost_func(gamma1,gamma2,n,
                     Texp,crystalAngles,beta,gc_fname,Q_folder)
-                this_costngamma = np.array([gamma1,gamma2,cost])
+                this_costngamma = np.array([gamma1,gamma2,cost,imcost,recost])
                 gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
                 #   and cost to the overall array.
