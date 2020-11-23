@@ -3381,7 +3381,8 @@ class TheoryMatrix(object):
 
         return costs
 
-    def Q_cost_func(self,gamma1,gamma2,n,Texp,crystalAngles,beta,gc_fname,Q_folder):
+    def Q_cost_func(self,gamma1,gamma2,Gamma_Sidebands,Texp,crystalAngles,
+        beta,gc_fname,Q_folder,ThetaSweep = True):
         '''
         This compairs the T Matrix components measured by experiment to the 
 
@@ -3392,27 +3393,42 @@ class TheoryMatrix(object):
         t_start = time.time() 
         Q_list = np.array([0,0,0,0,0])
 
-        dephase = self.dephase
-        w = self.Thz_w
-        F = self.F
+        if ThetaSweep:
+            for idx in np.arange(len(crystalAngles)):
+                n = Gamma_Sidebands
+                phi = float(crystalAngles[idx])
+                phi_rad = phi*np.pi/180
+                theta = phi_rad + np.pi/4
+                #Calculate the Theoretical Q Ratio
+                QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
+                #Prefactor for experimental T Matirx algebra
+                PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
+                THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
+                ExpQ = (Texp[idx,0,0]+PHI*Texp[idx,0,1])/(Texp[idx,0,0]-THETA*Texp[idx,0,1])
 
+                costs += np.abs((ExpQ - QRatio)/QRatio)
+                imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
+                recost += np.abs((np.real(ExpQ)-np.real(QRatio))/np.real(QRatio))
+                this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
+                Q_list = np.vstack((Q_list,this_Qs))
+        else:
+                for idx in np.arange(len(Gamma_Sidebands)):
+                n = Gamma_Sidebands[idx]
+                phi = crystalAngles
+                phi_rad = phi*np.pi/180
+                theta = phi_rad + np.pi/4
+                #Calculate the Theoretical Q Ratio
+                QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
+                #Prefactor for experimental T Matirx algebra
+                PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
+                THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
+                ExpQ = (Texp[idx,0,0]+PHI*Texp[idx,0,1])/(Texp[idx,0,0]-THETA*Texp[idx,0,1])
 
-        for idx in np.arange(len(crystalAngles)):
-            phi = float(crystalAngles[idx])
-            phi_rad = phi*np.pi/180
-            theta = phi_rad + np.pi/4
-            #Calculate the Theoretical Q Ratio
-            QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
-            #Prefactor for experimental T Matirx algebra
-            PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
-            THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
-            ExpQ = (Texp[idx,0,0]+PHI*Texp[idx,0,1])/(Texp[idx,0,0]-THETA*Texp[idx,0,1])
-
-            costs += np.abs((ExpQ - QRatio)/QRatio)
-            imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
-            recost += np.abs((np.real(ExpQ)-np.real(QRatio))/np.real(QRatio))
-            this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
-            Q_list = np.vstack((Q_list,this_Qs))
+                costs += np.abs((ExpQ - QRatio)/QRatio)
+                imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
+                recost += np.abs((np.real(ExpQ)-np.real(QRatio))/np.real(QRatio))
+                this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
+                Q_list = np.vstack((Q_list,this_Qs))            
 
         self.iterations += 1
 
@@ -3555,7 +3571,7 @@ class TheoryMatrix(object):
         return gamma_cost_array
 
     def gamma_th_sweep(self,gamma1_array,gamma2_array,n,crystalAngles,
-        Texp,gc_fname,Q_folder,save_results = True):
+        Texp,gc_fname,Q_folder,ThetaSweep = True, save_results = True):
         '''
         This function calculates the integrals and cost function for an array of
         gamma1 and gamma2. You can pass any array of gamma1 and gamma2 values and
@@ -3591,10 +3607,6 @@ class TheoryMatrix(object):
         '''
         #Hard Coding the experimental g3/g2 factor
         beta = 1.42
-        dephase = self.dephase
-        lambda_nir = self.nir_wl
-        w_thz = self.Thz_w
-        F = self.F
 
         self.iterations = 0
         self.max_iter = len(gamma1_array)*len(gamma2_array)
@@ -3619,32 +3631,14 @@ class TheoryMatrix(object):
             header = gammacosts_header, comments = '')
         # create the gamma cost file
 
-        data = [gamma1_array,gamma2_array]
-
         for gamma1 in gamma1_array:
             for gamma2 in gamma2_array:
                 cost,imcost,recost = self.Q_cost_func(gamma1,gamma2,n,
-                    Texp,crystalAngles,beta,gc_fname,Q_folder)
+                    Texp,crystalAngles,beta,gc_fname,Q_folder,ThetaSweep)
                 this_costngamma = np.array([gamma1,gamma2,cost,imcost,recost])
                 gamma_cost_array = np.vstack((gamma_cost_array,this_costngamma))
                 # calculates the cost for each gamma1/2 and adds the gamma1, gamma2,
                 #   and cost to the overall array.
-
-        # gamma_cost_array = gamma_cost_final[1:,:]
-
-        # if save_results:
-        #     sweepcosts_header = "#\n"*100
-        #     sweepcosts_header += 'Gamma1, Gamma2, Cost Function \n'
-        #     sweepcosts_header += 'unitless, unitless, unitless \n'
-        #
-        #     sweep_name = 'sweep_costs_' + gc_fname
-        #     np.savetxt(sweep_name,gamma_cost_array,delimiter = ',',
-        #         header = sweepcosts_header, comments = '')
-        # Ok so right now I think I am going to get rid of saving this file
-        #   since it has the same information as the file that is saved in
-        #   cost_func but that file is updated every interation where this
-        #   one only works at the end. So if the program gets interrupted
-        #   the other one will still give you some information.
 
         return gamma_cost_array
 ####################
