@@ -3412,9 +3412,9 @@ class TheoryMatrix(object):
                 this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
                 Q_list = np.vstack((Q_list,this_Qs))
         else:
-                for idx in np.arange(len(Gamma_Sidebands)):
+            for idx in np.arange(len(Gamma_Sidebands)):
                 n = Gamma_Sidebands[idx]
-                phi = crystalAngles
+                phi = float(crystalAngles)
                 phi_rad = phi*np.pi/180
                 theta = phi_rad + np.pi/4
                 #Calculate the Theoretical Q Ratio
@@ -3422,7 +3422,7 @@ class TheoryMatrix(object):
                 #Prefactor for experimental T Matirx algebra
                 PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
                 THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
-                ExpQ = (Texp[idx,0,0]+PHI*Texp[idx,0,1])/(Texp[idx,0,0]-THETA*Texp[idx,0,1])
+                ExpQ = (Texp[0,0,idx]+PHI*Texp[0,1,idx])/(Texp[0,0,idx]-THETA*Texp[0,1,idx])
 
                 costs += np.abs((ExpQ - QRatio)/QRatio)
                 imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
