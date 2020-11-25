@@ -3035,9 +3035,9 @@ class TheoryMatrix(object):
         c1 = np.sign(a)*np.sqrt(a**2+b**2)
         phi = np.arctan2(a,b)
         exp_arg = -(dephase+1j*(self.detune+scale*self.peakSplit))*x - pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w)*c0 -1j*n*phi
-        bessel_arg = self.Up(mu)/(hbar*w)*c1*x
+        bessel_arg = self.Up(mu)/(hbar*w)*c1
         bessel = spl.jv(n,bessel_arg)
-        result = np.exp(exp_arg)*(-1)**(n/2)*bessel
+        result = np.exp(exp_arg)*bessel*(-1)**(n/2)
 
         return result
 
