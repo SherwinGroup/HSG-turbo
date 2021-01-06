@@ -3008,7 +3008,7 @@ class TheoryMatrix(object):
 
         return result
 
-    def Qintegrand(self,x,mu,n,scale):
+    def Qintegrand(self,x,mu,n):
         '''
         Calculate the integrand in the expression for Q, with the simplification 
         that the canonical momentum is zero upon exciton pair creation.
@@ -3026,7 +3026,6 @@ class TheoryMatrix(object):
         F = self.F
         w = self.Thz_w
         dephase = self.dephase
-        detune = self.detune
         pn_detune = self.phonon_dephase(n)
 
         c0 = 2*(w*x-np.sin(w*x))
@@ -3034,7 +3033,7 @@ class TheoryMatrix(object):
         b = -3*np.cos(2*w*x)-4*np.cos(w*x)+2*w*x*np.sin(2*w*x)+1
         c1 = np.sign(a)*np.sqrt(a**2+b**2)
         phi = np.arctan2(a,b)
-        exp_arg = -(dephase+1j*(self.detune+scale*self.peakSplit))*x - pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w)*c0 -1j*n*phi
+        exp_arg = -(dephase+1j*(pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w)*c0 -1j*n*phi))
         bessel_arg = self.Up(mu)/(hbar*w)*c1
         bessel = spl.jv(n,bessel_arg)
         result = np.exp(exp_arg)*bessel*(-1)**(n/2)
@@ -3131,26 +3130,34 @@ class TheoryMatrix(object):
         Feild = self.F
         hbar = self.hbar
         dephase = self.dephase
-        int_cutoff = hbar*w/dephase*10
+        E_g = 1.52 * 1.602*10**(-22)
+        omega_nir = 2.998*10**8/(self.nir_wl) *2*np.pi
+        int_cutoff_HH = np.arcsin(np.sqrt(hbar*(omega_nir+n*w)/(E_g + 2*self.Up(mu_p))))/w
+        int_cutoff_LH = np.arcsin(np.sqrt(hbar*(omega_nir+n*w)/(E_g + 2*self.Up(mu_m))))/w
+        re_Q_HH = np.array(np.zeros(len(phi)))
+        re_Q_LH = np.array(np.zeros(len(phi)))
+        im_Q_HH = np.array(np.zeros(len(phi)))
+        im_Q_LH = np.array(np.zeros(len(phi)))
+        QRatio = np.array(np.zeros(len(phi)))
 
         # Because the integral is complex, the real and imaginary parts have to be
         # counted seperatly.
+        for angle in range(0,len(phi),1):
+            re_Q_HH[angle] = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_p[angle],n)),
+                0,int_cutoff_HH,limit = 100000)[0]
+            re_Q_LH[angle] = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_m[angle],n)),
+                0,int_cutoff_LH,limit = 100000)[0]
+            im_Q_HH[angle] = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_p[angle],n)),
+                0,int_cutoff_HH,limit = 100000)[0]
+            im_Q_LH[angle] = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_m[angle],n)),
+                0,int_cutoff_LH,limit = 100000)[0]
+            
+            # Combine the real and imaginary to have the full integral
 
-        re_Q_HH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_p,n,0.1096)),
-            0,int_cutoff,limit = 10000)[0]
-        re_Q_LH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_m,n,1.1096)),
-            0,int_cutoff,limit = 10000)[0]
-        im_Q_HH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_p,n,0.1096)),
-            0,int_cutoff,limit = 10000)[0]
-        im_Q_LH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_m,n,1.1096)),
-            0,int_cutoff,limit = 10000)[0]
-        
-        # Combine the real and imaginary to have the full integral
+            int_HH = re_Q_HH[angle] + 1j*im_Q_HH[angle]
+            int_LH = re_Q_LH[angle] + 1j*im_Q_LH[angle]
 
-        int_HH = re_Q_HH + 1j*im_Q_HH
-        int_LH = re_Q_LH + 1j*im_Q_LH
-
-        QRatio = int_HH/int_LH
+            QRatio[angle] = int_HH/int_LH
 
         return QRatio
 
