@@ -3130,8 +3130,11 @@ class TheoryMatrix(object):
         hbar = self.hbar
         E_g = 1.52 * 1.602*10**(-22)
         omega_nir = 2.998*10**8/(self.nir_wl) *2*np.pi
-        int_cutoff_HH = np.sqrt(hbar*(omega_nir+n*w-E_g)/2*self.Up(mu_p))/w
-        int_cutoff_LH = np.sqrt(hbar*(omega_nir+n*w-E_g)/2*self.Up(mu_p))/w
+        U_pp = self.Up(mu_p)
+        U_pm = self.Up(mu_m)
+        E_sb = hbar*(omega_nir+n*w)
+        int_cutoff_HH = np.sqrt((E_sb-E_g)/(2*U_pp))/w
+        int_cutoff_LH = np.sqrt((E_sb-E_g)/(2*U_pm))/w
 
         # Because the integral is complex, the real and imaginary parts have to be
         # counted seperatly.
