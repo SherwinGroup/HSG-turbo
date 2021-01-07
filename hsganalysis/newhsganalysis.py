@@ -3127,13 +3127,11 @@ class TheoryMatrix(object):
 
         mu_p,mu_m = self.mu_generator(gamma1,gamma2,phi,beta)
         w = self.Thz_w
-        Feild = self.F
         hbar = self.hbar
-        dephase = self.dephase
         E_g = 1.52 * 1.602*10**(-22)
         omega_nir = 2.998*10**8/(self.nir_wl) *2*np.pi
-        int_cutoff_HH = np.arcsin(np.sqrt(hbar*(omega_nir+n*w)/(E_g + 2*self.Up(mu_p))))/w
-        int_cutoff_LH = np.arcsin(np.sqrt(hbar*(omega_nir+n*w)/(E_g + 2*self.Up(mu_m))))/w
+        int_cutoff_HH = np.sqrt(hbar*(omega_nir+n*w-E_g)/2*self.Up(mu_p))/w
+        int_cutoff_LH = np.sqrt(hbar*(omega_nir+n*w-E_g)/2*self.Up(mu_p))/w
         re_Q_HH = np.array(np.zeros(len(phi)))
         re_Q_LH = np.array(np.zeros(len(phi)))
         im_Q_HH = np.array(np.zeros(len(phi)))
