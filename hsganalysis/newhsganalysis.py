@@ -3429,7 +3429,7 @@ class TheoryMatrix(object):
                 costs += np.abs((ExpQ - QRatio)/QRatio)
                 imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
                 recost += np.abs((np.real(ExpQ)-np.real(QRatio))/np.real(QRatio))
-                this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
+                this_Qs = np.array([n,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
                 Q_list = np.vstack((Q_list,this_Qs))            
 
         self.iterations += 1
@@ -3446,7 +3446,8 @@ class TheoryMatrix(object):
         gc_file.close()
 
         # Origin Header
-        Q_header = "#\n"*95
+        Q_header = "#\n"*94
+        Q_header += f'# Crystal Angle: {phi} Deg \n'
         Q_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
         Q_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
         Q_header += f'# Feild Strength: {self.F/(10**5)} kV/cm \n'
