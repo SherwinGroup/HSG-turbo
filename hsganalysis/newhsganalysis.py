@@ -2835,8 +2835,9 @@ class TheoryMatrix(object):
         self.F = ThzField * 10**5
         self.Thz_w = Thzomega * 10**9 *2*np.pi
         self.nir_wl = nir_wl * 10**(-9)
+        self.nir_ph = .0012398/self.nir_wl #NIR PHOTON ENERGY
         self.dephase = dephase* 1.602*10**(-22)
-        self.detune = detune*1.602*10**(-22)
+        self.detune = 1.52 - self.nir_ph
         self.peakSplit = peakSplit*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
@@ -3128,13 +3129,11 @@ class TheoryMatrix(object):
         mu_p,mu_m = self.mu_generator(gamma1,gamma2,phi,beta)
         w = self.Thz_w
         hbar = self.hbar
-        E_g = 1.52 * 1.602*10**(-22)
-        omega_nir = 2.998*10**8/(self.nir_wl) *2*np.pi
+        detune = self.detune
         U_pp = self.Up(mu_p)
         U_pm = self.Up(mu_m)
-        E_sb = hbar*(omega_nir+n*w)
-        int_cutoff_HH = np.sqrt((E_sb-E_g)/(2*U_pp))/w
-        int_cutoff_LH = np.sqrt((E_sb-E_g)/(2*U_pm))/w
+        int_cutoff_HH = 1/w*((n*hbar*w-detune)/(8*U_pp))^(1/4)
+        int_cutoff_LH = 1/w*((n*hbar*W-detune)/(8*U_pm))^(1/4)
 
         # Because the integral is complex, the real and imaginary parts have to be
         # counted seperatly.
