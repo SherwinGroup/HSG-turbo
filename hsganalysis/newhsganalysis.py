@@ -2813,7 +2813,7 @@ class FullHighSideband(FullSpectrum):
             print("Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname)))
 
 class TheoryMatrix(object):
-    def __init__(self,ThzField,Thzomega,nir_wl,dephase,detune,peakSplit,temp=60):
+    def __init__(self,ThzField,Thzomega,nir_wl,dephase,peakSplit,temp=60):
         '''
         This class is designed to handle everything for creating theory
         matrices and comparing them to experiement.
@@ -2836,9 +2836,9 @@ class TheoryMatrix(object):
         self.Thz_w = Thzomega * 10**9 *2*np.pi
         self.nir_wl = nir_wl * 10**(-9)
         self.nir_ph = .0012398/self.nir_wl #NIR PHOTON ENERGY
-        self.dephase = dephase* 1.602*10**(-22)
         self.detune = 1.52 - self.nir_ph
         self.peakSplit = peakSplit*1.602*10**(-22)
+        self.dephase = dephase*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
         self.max_iter = 0
@@ -3132,8 +3132,8 @@ class TheoryMatrix(object):
         detune = self.detune
         U_pp = self.Up(mu_p)
         U_pm = self.Up(mu_m)
-        int_cutoff_HH = 1/w*((n*hbar*w-detune)/(8*U_pp))^(1/4)
-        int_cutoff_LH = 1/w*((n*hbar*W-detune)/(8*U_pm))^(1/4)
+        int_cutoff_HH = 1/w*((n*hbar*w-detune)/(8*U_pp))**(1/4)
+        int_cutoff_LH = 1/w*((n*hbar*w-detune)/(8*U_pm))**(1/4)
 
         # Because the integral is complex, the real and imaginary parts have to be
         # counted seperatly.
@@ -3620,7 +3620,6 @@ class TheoryMatrix(object):
         # This is just for initializing the gamma costs file
 
         gammacosts_header = "#\n"*95
-        gammacosts_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
         gammacosts_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
         gammacosts_header += f'# Field Strength: {self.F/(10**5)} kV/cm \n'
         gammacosts_header += f'# THz Frequency: {self.Thz_w/(10**9 * 2*np.pi)} GHz \n'
