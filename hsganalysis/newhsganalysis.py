@@ -2835,10 +2835,10 @@ class TheoryMatrix(object):
         self.F = ThzField * 10**5
         self.Thz_w = Thzomega * 10**9 *2*np.pi
         self.nir_wl = nir_wl * 10**(-9)
-        self.nir_ph = .0000012398/self.nir_wl #NIR PHOTON ENERGY
-        self.dephase = dephase* 1.602*10**(-22)
-        self.detune = (self.nir_ph - 1.52)/(6.24*10**(18))
+        self.nir_ph = .0012398/self.nir_wl #NIR PHOTON ENERGY
+        self.detune = 1.52 - self.nir_ph
         self.peakSplit = peakSplit*1.602*10**(-22)
+        self.dephase = dephase*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
         self.max_iter = 0
@@ -3620,7 +3620,6 @@ class TheoryMatrix(object):
         # This is just for initializing the gamma costs file
 
         gammacosts_header = "#\n"*95
-        gammacosts_header += f'# Dephasing: {self.dephase/(1.602*10**(-22))} eV \n'
         gammacosts_header += f'# Detuning: {self.detune/(1.602*10**(-22))} eV \n'
         gammacosts_header += f'# Field Strength: {self.F/(10**5)} kV/cm \n'
         gammacosts_header += f'# THz Frequency: {self.Thz_w/(10**9 * 2*np.pi)} GHz \n'
