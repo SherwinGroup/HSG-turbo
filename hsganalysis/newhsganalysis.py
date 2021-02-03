@@ -2813,7 +2813,7 @@ class FullHighSideband(FullSpectrum):
             print("Save image.\nDirectory: {}".format(os.path.join(folder_str, fit_fname)))
 
 class TheoryMatrix(object):
-    def __init__(self,ThzField,Thzomega,nir_wl,dephase,detune,peakSplit,temp=60):
+    def __init__(self,ThzField,Thzomega,nir_wl,dephase,peakSplit,temp=60):
         '''
         This class is designed to handle everything for creating theory
         matrices and comparing them to experiement.
@@ -2835,9 +2835,9 @@ class TheoryMatrix(object):
         self.F = ThzField * 10**5
         self.Thz_w = Thzomega * 10**9 *2*np.pi
         self.nir_wl = nir_wl * 10**(-9)
-        self.nir_ph = .0012398/self.nir_wl #NIR PHOTON ENERGY
+        self.nir_ph = .0000012398/self.nir_wl #NIR PHOTON ENERGY
         self.dephase = dephase* 1.602*10**(-22)
-        self.detune = 1.52 - self.nir_ph
+        self.detune = (self.nir_ph - 1.52)/(6.24*10**(18))
         self.peakSplit = peakSplit*1.602*10**(-22)
         self.n_ref = 0
         self.iterations = 0
@@ -3029,12 +3029,12 @@ class TheoryMatrix(object):
         dephase = self.dephase
         pn_detune = self.phonon_dephase(n)
 
-        c0 = 2*(w*x-np.sin(w*x))
-        a = 3*np.sin(2*w*x)-4*np.sin(w*x)-2*w*x*np.cos(2*w*x)
-        b = -3*np.cos(2*w*x)-4*np.cos(w*x)+2*w*x*np.sin(2*w*x)+1
+        c0 = 2*(x-np.sin(x))
+        a = 3*np.sin(2*x)-4*np.sin(w*x)-2*w*x*np.cos(2*x)
+        b = -3*np.cos(2*w*x)-4*np.cos(x)+2*w*x*np.sin(2*x)+1
         c1 = np.sign(a)*np.sqrt(a**2+b**2)
         phi = np.arctan2(a,b)
-        exp_arg = -dephase*x+1j*pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w)*c0 -1j*n*phi
+        exp_arg = -dephase*x/w-1j*pn_detune*x/w + 1j*(self.Up(mu)*x)/(hbar*w**2)*c0 -1j*n*phi
         bessel_arg = self.Up(mu)/(hbar*w)*c1
         bessel = spl.jv(n,bessel_arg)
         result = np.exp(exp_arg)*bessel*(-1)**(n/2)
@@ -3132,28 +3132,26 @@ class TheoryMatrix(object):
         detune = self.detune
         U_pp = self.Up(mu_p)
         U_pm = self.Up(mu_m)
-        int_cutoff_HH = 1/w*((n*hbar*w-detune)/(8*U_pp))^(1/4)
-        int_cutoff_LH = 1/w*((n*hbar*W-detune)/(8*U_pm))^(1/4)
+        int_cutoff_HH = ((n*hbar*w-detune)/(8*U_pp))**(1/4)
+        int_cutoff_LH = ((n*hbar*w-detune)/(8*U_pm))**(1/4)
 
         # Because the integral is complex, the real and imaginary parts have to be
         # counted seperatly.
-        re_Q_HH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_p,n)),
-            0,int_cutoff_HH,limit = 100000)[0]
-        re_Q_LH = intgt.quad(lambda x: np.real(self.Qintegrand(x,mu_m,n)),
-            0,int_cutoff_LH,limit = 100000)[0]
-        im_Q_HH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_p,n)),
-            0,int_cutoff_HH,limit = 100000)[0]
-        im_Q_LH = intgt.quad(lambda x: np.imag(self.Qintegrand(x,mu_m,n)),
-            0,int_cutoff_LH,limit = 100000)[0]
+        re_Q_HH = intgt.quad(lambda x: self.Qintegrand(x,mu_p,n),
+            0,int_cutoff_HH)[0]
+        re_Q_LH = intgt.quad(lambda x: self.Qintegrand(x,mu_m,n),
+            0,int_cutoff_LH)[0]
+        im_Q_HH = intgt.quad(lambda x: self.Qintegrand(x,mu_p,n),
+            0,int_cutoff_HH)[1]
+        im_Q_LH = intgt.quad(lambda x: self.Qintegrand(x,mu_m,n),
+            0,int_cutoff_LH)[1]
             
             # Combine the real and imaginary to have the full integral
 
-        int_HH = re_Q_HH + 1j*im_Q_HH
-        int_LH = re_Q_LH + 1j*im_Q_LH
+        QRatioRe = re_Q_HH/re_Q_LH
+        QRatioIm = im_Q_HH/im_Q_LH
 
-        QRatio = int_HH/int_LH
-
-        return QRatio
+        return QRatioRe, QRatioIm
 
     def normalized_integrals(self,gamma1,gamma2,n,n_ref,phi,beta):
         '''
@@ -3401,16 +3399,17 @@ class TheoryMatrix(object):
                 phi_rad = phi*np.pi/180
                 theta = phi_rad + np.pi/4
                 #Calculate the Theoretical Q Ratio
-                QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
+                QRatioRe, QRatioIm = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
+                QRatio = QRatioRe + 1j*QRatioIm
                 #Prefactor for experimental T Matirx algebra
                 PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
                 THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
                 ExpQ = (Texp[idx,0,0]+PHI*Texp[idx,0,1])/(Texp[idx,0,0]-THETA*Texp[idx,0,1])
 
                 costs += np.abs((ExpQ - QRatio)/QRatio)
-                imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
-                recost += np.abs((np.real(ExpQ)-np.real(QRatio))/np.real(QRatio))
-                this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
+                imcost += np.abs((np.imag(ExpQ)-QRatioIm)/QRatioIm)
+                recost += np.abs((np.real(ExpQ)-QRatioRe)/QRatioRe)
+                this_Qs = np.array([phi,np.real(ExpQ),np.imag(ExpQ),QRatioRe,QRatioIm])
                 Q_list = np.vstack((Q_list,this_Qs))
         else:
             for idx in np.arange(len(Gamma_Sidebands)):
@@ -3419,16 +3418,17 @@ class TheoryMatrix(object):
                 phi_rad = phi*np.pi/180
                 theta = phi_rad + np.pi/4
                 #Calculate the Theoretical Q Ratio
-                QRatio = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
+                QRatioRe, QRatioIm = self.Q_normalized_integrals(gamma1,gamma2,n,phi_rad,beta)
+                QRatio = QRatioRe + 1j*QRatioIm
                 #Prefactor for experimental T Matirx algebra
                 PHI = 5/(3*(np.sin(2*theta) - 1j*beta*np.cos(2*theta)))
                 THETA = 1/(np.sin(2*theta)-1j*beta*np.cos(2*theta))
                 ExpQ = (Texp[0,0,idx]+PHI*Texp[0,1,idx])/(Texp[0,0,idx]-THETA*Texp[0,1,idx])
 
                 costs += np.abs((ExpQ - QRatio)/QRatio)
-                imcost += np.abs((np.imag(ExpQ)-np.imag(QRatio))/np.imag(QRatio))
-                recost += np.abs((np.real(ExpQ)-np.real(QRatio))/np.real(QRatio))
-                this_Qs = np.array([n,np.real(ExpQ),np.imag(ExpQ),np.real(QRatio),np.imag(QRatio)])
+                imcost += np.abs((np.imag(ExpQ)-QRatioIm)/QRatioIm)
+                recost += np.abs((np.real(ExpQ)-QRatioRe)/QRatioRe)
+                this_Qs = np.array([n,np.real(ExpQ),np.imag(ExpQ),QRatioRe,QRatioIm])
                 Q_list = np.vstack((Q_list,this_Qs))            
 
         self.iterations += 1
