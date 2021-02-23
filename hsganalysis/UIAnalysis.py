@@ -5,7 +5,10 @@ Created on Mon Jun 01 16:01:43 2015
 @author: dvalovcin
 """
 import os, glob
-
+import sys
+print(sys.executable)
+import numpy as np
+sys.path.append('/Users/marketing/Documents/GitHub/HSG-turbo/')
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.parametertree.parameterTypes as pTypes

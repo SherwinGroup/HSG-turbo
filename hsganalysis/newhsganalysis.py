@@ -2704,7 +2704,7 @@ class FullHighSideband(FullSpectrum):
                 ccd_object.parameters["series"], ccd_object.parameters["spec_step"]
             ))
 
-    def add_PMT(self, pmt_object, verbose=False):
+    def add_PMT(self, pmt_object, verbose=True):
         """
         This method will be called by the stitch_hsg_results function to add the PMT
         data to the spectrum.
@@ -4715,11 +4715,11 @@ def stitch_hsg_dicts(full_obj, new_obj, need_ratio=False, verbose=False, ratios=
             scaleTo = "full"
 
     if verbose:
-        print("\tI'm adding these sidebands", sorted(new_dict.keys()))
+        print("\tI'm adding these sidebands", new_obj.sb_results[:,0])
         print("\t  With these:", sorted(full.keys()))
     overlap = [] # The list that hold which orders are in both dictionaries
     missing = [] # How to deal with sidebands that are missing from full but in new.
-    for new_sb in sorted(new_dict.keys()):
+    for new_sb in new_obj.sb_results[:,0]:
         full_sbs = sorted(full.keys())
         if new_sb in full_sbs:
             overlap.append(new_sb)
